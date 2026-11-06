@@ -57,12 +57,12 @@ export async function api<T>(
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!response.ok) {
-    let message = `请求失败（HTTP ${response.status}），请检查 API 后重试`;
+    let message = `请求失败（状态码 ${response.status}），请检查后端服务后重试`;
     try {
       const result = await response.json();
       if (typeof result.detail === "string") message = result.detail;
       else if (response.status === 422)
-        message = "配置格式无效，请检查日期或时间";
+        message = "输入格式无效，请检查日期、数值范围或必填项";
     } catch {
       /* 非 JSON 错误保留 HTTP 摘要。 */
     }

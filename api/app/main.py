@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
+from app.backtest_routes import router as backtest_router
 from app.collection import now
 from app.db import Session
 from app.jobs import launch, next_run, recover_interrupted, scheduler
@@ -33,6 +34,7 @@ async def lifespan(app):
 
 
 app = FastAPI(title="ETF Sentinel API", version="0.3.0", lifespan=lifespan)
+app.include_router(backtest_router)
 app.include_router(sentiment_router)
 app.include_router(national_team_router)
 
@@ -91,7 +93,7 @@ def update_instrument(code: str, body: InstrumentUpdate):
     with Session() as db:
         item = db.get(Instrument, code)
         if not item:
-            raise HTTPException(404, "标的不在首期范围内")
+            raise HTTPException(404, "标的尚未配置")
         item.enabled, item.start_date = body.enabled, body.start_date
         db.commit()
     return {"saved": True}
@@ -154,7 +156,7 @@ def candles(code: str, start: date, end: date):
         raise HTTPException(422, "代码或日期范围无效")
     with Session() as db:
         if not db.get(Instrument, code):
-            raise HTTPException(404, "标的不在首期范围内")
+            raise HTTPException(404, "标的尚未配置")
         rows = db.scalars(
             select(Candle)
             .where(Candle.code == code, Candle.date >= start, Candle.date <= end)

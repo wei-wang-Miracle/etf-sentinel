@@ -113,8 +113,7 @@ export default function Instruments() {
         <button onClick={load}>刷新状态</button>
       </header>
       <div className="notice">
-        首期固定 5 只
-        ETF。停用只停止后续采集，已有行情保留；调整起始日期后，在定时任务页运行采集。
+        国家队 18 只基金 已纳入统一研究范围。停用只停止后续采集，已有行情保留；调整起始日期后，在定时任务页运行采集。
       </div>
       {error && (
         <div className="alert" role="alert">
@@ -127,7 +126,7 @@ export default function Instruments() {
           <h2>
             研究标的 <span className="muted">/ {rows.length}</span>
           </h2>
-          <span className="muted">数据源 ChatBI · 历史日行情</span>
+          <span className="muted">数据源：财通证券 · 历史日行情</span>
         </div>
         <div className="table-scroll">
           <table>

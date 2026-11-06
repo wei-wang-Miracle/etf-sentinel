@@ -11,7 +11,7 @@ export default function Jobs({
     <>
       <div className="range-buttons" aria-label="采集任务">
         {[
-          ["etf", "ETF 日行情"],
+          ["etf", "基金日行情"],
           ["sentiment", "行业恐贪"],
           ["national-team", "国家队持仓"],
         ].map(([key, label]) => (
@@ -104,8 +104,7 @@ function TaskPanel({ task }: { task: string }) {
       )}
       {job && !job.source_configured && (
         <div className="notice warning">
-          数据源尚未配置。请在后端环境变量中设置 CHATBI_TOKEN 和
-          CHATBI_ACCESS_CODE 后重启 API。
+          数据源尚未配置。请在后端环境变量中设置行情访问令牌与访问码，然后重启后端服务。
         </div>
       )}
       {message && (
@@ -115,7 +114,7 @@ function TaskPanel({ task }: { task: string }) {
       )}
       <section className="panel">
         <div className="panel-header">
-          <h2>{task === "national-team" ? "国家队持仓比例采集" : task === "sentiment" ? "行业恐贪采集" : "ETF 日行情采集"}</h2>
+          <h2>{task === "national-team" ? "国家队持仓比例采集" : task === "sentiment" ? "行业恐贪采集" : "基金日行情采集"}</h2>
           <span
             className={`badge ${running ? "info" : job?.enabled ? "success" : "neutral"}`}
           >
@@ -134,7 +133,7 @@ function TaskPanel({ task }: { task: string }) {
                 value={time}
                 onChange={(e) => setTime(e.target.value)}
               />
-              <span className="subtext">Asia/Shanghai · 北京时间</span>
+              <span className="subtext">北京时间（东八区）</span>
             </label>
             <label className="switch">
               <input
@@ -160,7 +159,7 @@ function TaskPanel({ task }: { task: string }) {
         )}
         <div className="panel-footer">
           {task === "national-team"
-            ? "采集源页面18只ETF的估算持仓比例，固定2026-01-01基准，全历史核验，仅新增或修订的数据写入本地库；不重复采集源价格。"
+            ? "采集源页面18只基金的估算持仓比例，固定2026-01-01基准，全历史核验，仅新增或修订的数据写入本地库；不重复采集源价格。"
             : task === "sentiment"
             ? "首次回填五年，后续增量入库并重查最近七日修订。源最小下载窗口为一年，停采较久时扩大窗口。"
             : "采集截至昨日的日行情。首次按月回补，后续重查最近七日并补齐失败区间。"}{" "}

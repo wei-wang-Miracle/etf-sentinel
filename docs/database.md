@@ -72,3 +72,27 @@ alembic check
   `collected_at` 为带时区首次入库或比例修订时间，未变不重写。
 
 不保存外站价格或总份额；同代码日K读取已有 `candles`。
+
+## 统一行情标的迁移
+
+迁移 `0005` 将国家队18只ETF插入统一 `instruments`，冲突时不修改已有配置。
+与原五只去重为20只。新增默认启用，历史起点2020-01-01，名称先来自国家队
+目录，后由行情源返回更新；同步更新代码与名称字段COMMENT。
+降级保留新增配置与行情，避免删除已经采集的数据。
+
+## 策略回测数据表
+
+迁移 `0006` 新增两表，全部字段有中文COMMENT，保留此前行情及采集记录。
+详细输入、账户和复算口径见[策略与回测](backtesting.md)。
+
+- `backtest_sources`：`instrument_code`主键并关联统一标的；`source_url`、
+  `checked_through_date`（北京时间读取日，非完整性保证）、`collected_at`、
+  `source_sha256`、`source_html`保留来源证据；`corporate_actions`存分红登记日、
+  除息日、发放日、每份人民币元金额字符串及历史折算日期/比例。
+- `backtest_runs`：`backtest_run_id`自增主键，`instrument_code`关联统一标的，
+  `strategy_key`、`created_at`、`input_sha256`用于定位实验；`input_snapshot`
+  包含参数、预热行情、权益、原始来源、日历和版本；`result_snapshot`存策略/
+  基准逐日账户、决策、模拟成交、分红账本与绩效。金额保存十进制字符串。
+
+权益更新按代码覆盖最新来源，但原实验保留完整来源快照，不随行情或权益修订
+更新。实验只插入和读取，无覆盖接口；版本变化时复算明确拒绝不兼容实验。

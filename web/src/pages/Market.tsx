@@ -73,33 +73,19 @@ export default function Market({
       <header className="page-header">
         <div>
           <h1>行情展示</h1>
-          <p>观察历史走势，从同一份本地数据开始研究</p>
+          <p>日 K 与成交量 · 本地历史行情</p>
         </div>
-        <span className="badge info">历史日行情 · 非实时</span>
+        <button onClick={goJobs}>采集与调度</button>
       </header>
-      <div className="instrument-chips">
-        {(instruments.length
-          ? instruments
-          : ["510500", "512100", "159531", "159205", "588080"].map((code) => ({
-              code,
-              name: "名称待采集",
-            }))
-        ).map((i) => (
-          <button
-            className={`instrument-chip ${i.code === code ? "active" : ""}`}
-            key={i.code}
-            onClick={() => setCode(i.code)}
-          >
-            <strong className="mono">{i.code}</strong>
-            <span>{i.name}</span>
-          </button>
-        ))}
-      </div>
-      <section className="panel">
+      <section className="panel research-chart-panel">
         <div className="panel-header chart-heading">
-          <div>
+          <div className="research-context">
             <h2>{item?.name ?? code}</h2>
-            <span className="muted mono">{code} · 日K · 原始价格</span>
+            <label className="compact-selector">研究标的
+              <select aria-label="行情标的" value={code} onChange={(e) => setCode(e.target.value)}>
+                {instruments.map((i) => <option key={i.code} value={i.code}>{i.code} · {i.name}</option>)}
+              </select>
+            </label>
           </div>
           <div className="date-controls">
             <label>
@@ -126,10 +112,10 @@ export default function Market({
         <div className="chart-toolbar">
           <div className="range-buttons">
             {[
-              ["1M", 30],
-              ["3M", 90],
-              ["6M", 180],
-              ["1Y", 365],
+              ["近一月", 30],
+              ["近三月", 90],
+              ["近半年", 180],
+              ["近一年", 365],
               ["全部", 0],
             ].map(([name, days]) => (
               <button
@@ -200,61 +186,11 @@ export default function Market({
           </>
         )}
         <div className="panel-footer">
-          来源：ChatBI / daily_ohlcv_etf　·　最新入库行情日：
+          来源：财通证券历史日行情　·　最新入库行情日：
           <span className="mono">{item?.last_date ?? "—"}</span>
           　·　成交量额保留源数值，单位待数据源确认；未推断复权口径。
         </div>
       </section>
-      {!loading && !error && rows.length > 0 && (
-        <section className="panel">
-          <div className="panel-header">
-            <h2>日行情明细</h2>
-            <span className="muted">
-              最近 20 个交易日 / 区间共 {rows.length} 条
-            </span>
-          </div>
-          <div className="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>日期</th>
-                  <th className="number">开盘</th>
-                  <th className="number">最高</th>
-                  <th className="number">最低</th>
-                  <th className="number">收盘</th>
-                  <th className="number">涨跌幅</th>
-                  <th className="number">成交量（源单位）</th>
-                  <th>源更新时间</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows
-                  .slice(-20)
-                  .reverse()
-                  .map((r) => (
-                    <tr key={r.date}>
-                      <td className="mono">{r.date}</td>
-                      {[r.open, r.high, r.low, r.close].map((v, i) => (
-                        <td key={i} className="number">
-                          {number(v)}
-                        </td>
-                      ))}
-                      <td
-                        className={`number ${r.change_pct == null ? "" : r.change_pct >= 0 ? "market-up" : "market-down"}`}
-                      >
-                        {r.change_pct == null
-                          ? "—"
-                          : `${r.change_pct >= 0 ? "+" : ""}${number(r.change_pct, 2)}%`}
-                      </td>
-                      <td className="number">{number(r.volume, 0)}</td>
-                      <td className="mono">{r.source_updated_at ?? "—"}</td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      )}
     </>
   );
 }

@@ -14,7 +14,7 @@ class Base(DeclarativeBase):
 
 
 class Instrument(Base):
-    """首期固定标的及历史回补边界。"""
+    """统一研究标的及历史回补边界。"""
 
     __tablename__ = "instruments"
     __table_args__: ClassVar[dict] = {
@@ -24,12 +24,12 @@ class Instrument(Base):
         "instrument_code",
         String(6),
         primary_key=True,
-        comment="ETF证券代码，六位字符串，保留前导零；首期固定五只",
+        comment="ETF证券代码，六位字符串，保留前导零；统一行情研究标的",
     )
     name: Mapped[str] = mapped_column(
         "instrument_name",
         default="名称待采集",
-        comment="ETF名称，来自行情源的STOCK_NAME；采集前为名称待采集",
+        comment="ETF名称，行情源返回后更新；国家队新增标的初始名称来自国家队目录",
     )
     enabled: Mapped[bool] = mapped_column(
         "collection_enabled",
@@ -296,3 +296,34 @@ class NationalTeamDaily(Base):
     collected_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), comment="本条首次入库或源比例实际修订的采集时间，带时区；未变化不重写"
     )
+
+
+class BacktestSource(Base):
+    """回测权益来源快照，包含完整分红与折算事件及原始页面证据。"""
+
+    __tablename__ = "backtest_sources"
+    __table_args__: ClassVar[dict] = {"comment": "回测现金分红与折算来源；仅支持已核实的两只境内股票ETF，不作为行情价格"}
+    instrument_code: Mapped[str] = mapped_column(
+        ForeignKey("instruments.instrument_code"), primary_key=True,
+        comment="证券代码，关联instruments.instrument_code；当前510500或512100",
+    )
+    source_url: Mapped[str] = mapped_column(comment="东方财富基金分红送配页面URL，不包含凭据")
+    checked_through_date: Mapped[Date] = mapped_column(comment="本次读取权益页面的北京时间日期；表示读取时点，不保证来源绝对完整")
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), comment="本系统读取并校验权益页面时间，带时区")
+    source_sha256: Mapped[str] = mapped_column(String(64), comment="源页面字节的SHA256摘要，用于核对原始证据")
+    source_html: Mapped[str] = mapped_column(comment="已获取权益源页面原始HTML，仅作证据，不在前端渲染")
+    corporate_actions: Mapped[dict] = mapped_column(JSON, comment="权益JSON：dividends数组含record_date登记日、ex_date除息日、pay_date到账日、cash_per_share每份人民币元字符串；splits数组含effective_date折算日及ratio源比例")
+
+
+class BacktestRun(Base):
+    """不可变回测实验，保存输入与完整结果以脱离后续行情修订复现。"""
+
+    __tablename__ = "backtest_runs"
+    __table_args__: ClassVar[dict] = {"comment": "已成功完成的策略回测实验；仅研究模拟，非交易记录；输入与结果不可变"}
+    backtest_run_id: Mapped[int] = mapped_column(primary_key=True, comment="回测实验唯一自增编号，与采集运行编号无关")
+    instrument_code: Mapped[str] = mapped_column(ForeignKey("instruments.instrument_code"), comment="回测证券代码，关联instruments.instrument_code")
+    strategy_key: Mapped[str] = mapped_column(comment="策略注册标识，ma_trend为均线趋势；规则版本位于输入快照")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), comment="回测完成并写入本地时间，带时区")
+    input_sha256: Mapped[str] = mapped_column(String(64), comment="含参数、预热行情、权益、来源和版本的规范JSON SHA256摘要")
+    input_snapshot: Mapped[dict] = mapped_column(JSON, comment="不可变输入JSON：settings参数、rows原始行情与采集时间、actions权益、来源快照、交易日历及策略/引擎/数据版本；金额使用十进制字符串")
+    result_snapshot: Mapped[dict] = mapped_column(JSON, comment="结果JSON：strategy与benchmark含daily逐日现金/份额/分红应收/净值/回撤/决策、trades成交及费用原因、dividends权益账本、metrics绩效；金额十进制字符串，收益率小数")

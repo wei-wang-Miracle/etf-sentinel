@@ -4,11 +4,13 @@ import Jobs from "./pages/Jobs";
 import Sentiment from "./pages/Sentiment";
 import Market from "./pages/Market";
 import NationalTeam from "./pages/NationalTeam";
+import Backtests from "./pages/Backtests";
 
 const pages = [
   { key: "market", label: "行情展示", icon: "▥" },
   { key: "sentiment", label: "行业恐贪", icon: "∿" },
   { key: "national-team", label: "国家队持仓", icon: "▤" },
+  { key: "backtests", label: "策略回测", icon: "⌁" },
   { key: "instruments", label: "标的配置", icon: "≡" },
   { key: "jobs", label: "定时任务", icon: "◷" },
 ];
@@ -30,11 +32,11 @@ export default function App() {
     <div className={`app-shell ${collapsed ? "collapsed" : ""}`}>
       <aside className="sidebar">
         <div className="brand">
-          <span className="brand-mark">L</span>
+          <span className="brand-mark">研</span>
           {!collapsed && (
             <div>
-              <strong>Ledger Terminal</strong>
-              <span>ETF Sentinel</span>
+              <strong>投研工作台</strong>
+              <span>基金哨兵</span>
             </div>
           )}
         </div>
@@ -63,11 +65,11 @@ export default function App() {
         <div className="sidebar-footer">
           {!collapsed && (
             <>
-              <strong>个人 ETF 投研</strong>
+              <strong>个人基金投研</strong>
               <span>历史数据 · 日频研究</span>
             </>
           )}
-          <span className="mono">v0.3</span>
+          <span className="mono">版本 0.3</span>
         </div>
       </aside>
       <div className="workspace">
@@ -110,6 +112,8 @@ export default function App() {
               setJobTask("national-team");
               setPage("jobs");
             }} />
+          ) : page === "backtests" ? (
+            <Backtests theme={theme} />
           ) : page === "instruments" ? (
             <Instruments />
           ) : (
@@ -117,7 +121,7 @@ export default function App() {
           )}
         </main>
         <div className="workspace-footer">
-          <span>Ledger Terminal</span>
+          <span>投研工作台</span>
           <span>数据有来源，研究可追溯</span>
         </div>
       </div>

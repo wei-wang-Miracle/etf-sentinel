@@ -227,15 +227,12 @@ export default function Sentiment({
       <header className="page-header">
         <div>
           <h1>行业恐贪</h1>
-          <p>观察市场情绪的历史变化 · 日频研究数据</p>
+          <p>恐贪分数 × 指数点位 · 日频观察</p>
         </div>
-        <button className="primary" onClick={goJobs}>
+        <button onClick={goJobs}>
           采集与调度
         </button>
       </header>
-      <div className="notice">
-        首次回填五年，后续增量更新并覆盖最近七日修订。恐贪分数不是买卖信号。
-      </div>
       {(categoryError || error) && (
         <div className="alert" role="alert">
           {categoryError || error}
@@ -273,7 +270,7 @@ export default function Sentiment({
         </section>
       )}
       {selected && (
-        <section className="panel">
+        <section className="panel research-chart-panel">
           <div className="panel-header">
             <div>
               <h2>{selected.category_name}</h2>
@@ -296,7 +293,7 @@ export default function Sentiment({
               ))}
             </div>
           </div>
-          <div className="job-settings">
+          <div className="date-controls research-dates">
             <label>
               起始日期{" "}
               <input
@@ -326,8 +323,7 @@ export default function Sentiment({
             <div className="empty">所选范围暂无数据</div>
           ) : (
             <>
-              <div className="panel-header sentiment-chart-header">
-                <h2>恐贪与指数走势</h2>
+              <div className="chart-toolbar sentiment-chart-header">
                 <div className="sentiment-legend">
                   <span>
                     <i className="score-swatch" aria-hidden="true" />
@@ -348,42 +344,13 @@ export default function Sentiment({
               <div className="panel-footer">
                 两条曲线使用独立刻度；悬停对照同日数据，滚轮或底部滑块缩放。分数连续着色，不代表源情绪阈值；指数缺失不补零。
               </div>
-              <div className="table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>数据日期</th>
-                      <th>恐贪分数</th>
-                      <th>指数点位</th>
-                      <th>采集时间</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows
-                      .slice(-20)
-                      .reverse()
-                      .map((row) => (
-                        <tr key={row.trade_date}>
-                          <td className="mono">{row.trade_date}</td>
-                          <td className="mono">
-                            {row.fear_greed_score.toFixed(2)}
-                          </td>
-                          <td className="mono">
-                            {row.close_price?.toFixed(2) ?? "—"}
-                          </td>
-                          <td className="mono">{stamp(row.collected_at)}</td>
-                        </tr>
-                      ))}
-                  </tbody>
-                </table>
-              </div>
             </>
           )}
           <div className="panel-footer">
-            来源：{selected.source} · 本地覆盖 {selected.first_date ?? "—"} ～{" "}
+            来源：韭圈 · 行业恐贪 · 本地覆盖 {selected.first_date ?? "—"} ～{" "}
             {selected.last_date ?? "—"} · 最近采集{" "}
             {stamp(selected.collected_at)}
-            。数据日期保留源口径；表格展示所选区间最近二十条。
+            。恐贪不是买卖信号；数据日期保留源口径。
           </div>
         </section>
       )}

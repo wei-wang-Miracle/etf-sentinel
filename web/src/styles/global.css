@@ -10,7 +10,8 @@ body {
   line-height: 22px;
 }
 button,
-input {
+input,
+select {
   font: inherit;
 }
 button {
@@ -757,3 +758,125 @@ td button {
     border-bottom: 0;
   }
 }
+
+/* 图表优先：紧凑筛选、主要数值与共享时间轴构成研究页的阅读顺序。 */
+.research-context {
+  display: flex;
+  align-items: center;
+  gap: 12px 20px;
+  flex-wrap: wrap;
+}
+.research-context h2 { margin: 0; }
+.compact-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-ink-muted);
+  font-size: 12px;
+}
+.compact-selector select {
+  max-width: 320px;
+  min-height: 32px;
+  padding: 4px 8px;
+  font-size: 13px;
+  font-family: var(--font-ui);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+}
+.research-chart-panel {
+  display: flex;
+  flex-direction: column;
+}
+.research-chart-panel > .panel-header { order: 0; }
+.research-chart-panel > .quote-strip { order: 1; }
+.research-chart-panel > .chart-toolbar,
+.research-chart-panel > .research-dates { order: 2; }
+.research-chart-panel > .kline,
+.research-chart-panel > .sentiment-chart,
+.research-chart-panel > .sentiment-scale,
+.research-chart-panel > .empty,
+.research-chart-panel > .notice { order: 3; }
+.research-chart-panel > .panel-footer { order: 4; }
+.research-chart-panel .quote-strip {
+  padding: 16px 20px;
+  gap: 16px 32px;
+}
+.research-chart-panel .quote-strip > div:first-child strong { font-size: 28px; }
+.research-chart-panel .chart-toolbar {
+  padding: 8px 20px;
+  border-top: 1px solid var(--color-border);
+}
+.research-chart-panel .panel-footer { padding: 12px 20px; font-size: 12px; }
+.research-chart-panel .kline { height: 520px; }
+.research-chart-panel .holdings-comparison-chart { height: 580px; }
+.research-chart-panel .sentiment-chart { height: 520px; }
+.research-dates { padding: 8px 20px; }
+.sentiment-cards {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0 0 16px;
+  border-color: var(--color-border);
+  border-radius: 4px;
+}
+.sentiment-cards .sentiment-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  padding: 8px 12px;
+  gap: 4px 12px;
+  min-height: 64px;
+  background: transparent;
+}
+.sentiment-cards .sentiment-card > span:first-child { font-size: 13px; }
+.sentiment-cards .sentiment-card strong { font-size: 20px; font-weight: 500; }
+.sentiment-cards .sentiment-card .sentiment-label,
+.sentiment-cards .sentiment-card .muted { font-size: 12px; }
+.sentiment-cards .sentiment-card.selected { background: var(--color-surface-elevated); }
+.sentiment-cards .sentiment-card.selected::after { height: 2px; }
+@media (max-width: 800px) {
+  .sentiment-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .research-context { align-items: flex-start; gap: 8px; }
+  .compact-selector { flex-wrap: wrap; }
+  .compact-selector select { max-width: 100%; width: 100%; }
+  .research-chart-panel .date-controls { flex-wrap: wrap; gap: 8px; }
+  .research-chart-panel .kline,
+  .research-chart-panel .sentiment-chart { height: 440px; }
+  .research-chart-panel .holdings-comparison-chart { height: 520px; }
+}
+
+.research-chart-panel .range-buttons { gap: 4px; }
+.research-chart-panel .range-buttons button { border-radius: 4px; }
+.research-chart-panel .sentiment-scale { padding: 4px 20px; }
+.research-chart-panel .chart-heading { flex-wrap: wrap; }
+.research-chart-panel .panel-header { background: transparent; }
+.research-chart-panel .panel-header h2 { border: 0; padding-left: 0; }
+
+.research-chart-panel .date-controls input { min-height: 32px; padding: 4px 8px; }
+
+/* 回测沿用分析页层级：紧凑参数、连续指标条和联动主图。 */
+.backtest-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 14px; }
+.backtest-controls label { display: grid; gap: 6px; color: var(--color-ink-muted); font-size: 12px; }
+.backtest-controls input[type="number"] { width: 118px; }
+.backtest-controls button { margin-left: auto; }
+.backtest-assumptions { padding: 14px 20px; border-bottom: 1px solid var(--color-border); color: var(--color-ink-muted); font-size: 12px; line-height: 1.8; }
+.backtest-assumptions summary { cursor: pointer; }
+.backtest-assumptions .backtest-controls { margin-top: 12px; }
+.backtest-assumptions p { max-width: 110ch; }
+.backtest-assumptions a { color: var(--color-chart-1); }
+.backtest-hash { overflow-wrap: anywhere; font-family: var(--font-mono); }
+.backtest-chart { width: 100%; height: 650px; }
+.backtest-trade-note { padding: 16px 20px; border-top: 1px solid var(--color-border); font-size: 13px; line-height: 1.8; }
+.backtest-trade-note label { display: flex; align-items: center; gap: 12px; color: var(--color-ink-muted); }
+.backtest-trade-note p { margin-bottom: 0; }
+@media (max-width: 720px) {
+  .backtest-controls { gap: 10px; }
+  .backtest-controls label { flex: 1 1 130px; }
+  .backtest-controls input, .backtest-controls select { width: 100%; min-width: 0; }
+  .backtest-chart { height: 560px; }
+}
+.backtest-panel .quote-strip { padding: 16px 20px; gap: 16px 32px; }
+.backtest-panel .quote-strip > div:first-child strong { font-size: 28px; }
+.backtest-panel .chart-toolbar { padding: 8px 20px; }
+.backtest-panel .panel-header { flex-wrap: wrap; }
+.backtest-panel .alert, .backtest-panel .notice { margin: 12px 20px; }

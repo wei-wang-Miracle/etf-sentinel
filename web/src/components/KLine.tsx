@@ -50,8 +50,8 @@ export default function KLine({
         enabled: true,
         description:
           comparison
-            ? "本地日K与国家队估算持仓比例上下对照，共享日期与缩放；缺失数据不补零。"
-            : "ETF 原始日K和成交量。上涨红色，下跌绿色；下方数据表提供对应数字。",
+            ? "本地日K与国家队估算持仓比例同图双轴对照，左轴价格、右轴比例，共享日期与缩放；缺失数据不补零。"
+            : "基金原始日K和成交量。上涨红色，下跌绿色；悬停查看同日数值。",
       },
       tooltip: {
         trigger: "axis",
@@ -61,16 +61,18 @@ export default function KLine({
         textStyle: { color: color("ink") },
       },
       axisPointer: { link: [{ xAxisIndex: "all" }] },
-      grid: [
-        { left: 60, right: 30, top: 30, height: comparison ? "48%" : "58%" },
-        { left: 60, right: 30, top: comparison ? "65%" : "73%", height: comparison ? "23%" : "15%" },
-      ],
-      xAxis: [0, 1].map((index) => ({
+      grid: comparison
+        ? [{ left: 60, right: 68, top: 40, bottom: 64 }]
+        : [
+            { left: 60, right: 30, top: 30, height: "58%" },
+            { left: 60, right: 30, top: "73%", height: "15%" },
+          ],
+      xAxis: (comparison ? [0] : [0, 1]).map((index) => ({
         type: "category",
         gridIndex: index,
         data: dates,
         axisLine: { lineStyle: { color: color("border") } },
-        axisLabel: { color: color("ink-muted"), show: index === 1 },
+        axisLabel: { color: color("ink-muted"), show: comparison || index === 1 },
         boundaryGap: true,
       })),
       yAxis: [
@@ -81,18 +83,19 @@ export default function KLine({
         },
         {
           scale: true,
-          gridIndex: 1,
+          gridIndex: comparison ? 0 : 1,
+          position: comparison ? "right" : "left",
           name: comparison ? "估算持仓比例（%）" : "成交量（源单位）",
-          ...(comparison ? { min: 0, max: 100 } : {}),
+          ...(comparison ? { min: 0, max: 100, axisLabel: { formatter: "{value}%" }, nameTextStyle: { color: color("chart-2") } } : {}),
           splitNumber: 2,
           splitLine: { show: false },
         },
       ],
       dataZoom: [
-        { type: "inside", xAxisIndex: [0, 1] },
+        { type: "inside", xAxisIndex: comparison ? [0] : [0, 1] },
         {
           type: "slider",
-          xAxisIndex: [0, 1],
+          xAxisIndex: comparison ? [0] : [0, 1],
           bottom: 4,
           height: 16,
           borderColor: color("border"),
@@ -118,7 +121,8 @@ export default function KLine({
         comparison ? {
           type: "line",
           name: "国家队估算持仓比例（%）",
-          xAxisIndex: 1,
+          xAxisIndex: 0,
+          z: 5,
           yAxisIndex: 1,
           data: dates.map((day) => holdingByDate.get(day) ?? null),
           showSymbol: false,
@@ -152,7 +156,7 @@ export default function KLine({
       className={`kline ${holdings ? "holdings-comparison-chart" : ""}`}
       ref={element}
       role="img"
-      aria-label={holdings ? "ETF日K与国家队估算持仓比例对照，共享日期与缩放，缺失不补零" : "ETF 日K与成交量，可滚轮缩放，数据详见下方行情表"}
+      aria-label={holdings ? "基金日K与国家队估算持仓比例同图双轴对照，共享日期与缩放，缺失不补零" : "基金日K与成交量，可滚轮缩放，悬停查看同日数值"}
     />
   );
 }
