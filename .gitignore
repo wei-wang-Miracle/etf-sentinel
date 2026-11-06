@@ -9,3 +9,6 @@ dist/
 .DS_Store
 *.egg-info/
 *.tsbuildinfo
+
+# 本地启动器的进程锁与运行状态
+.local/

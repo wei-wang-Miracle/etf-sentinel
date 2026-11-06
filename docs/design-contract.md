@@ -3,10 +3,10 @@ version: alpha
 name: "Ledger Terminal"
 description: "个人宽基 ETF 量化研究平台的设计契约：暗色优先、数据密集、低装饰、可审计；分离行情方向、情绪与系统状态三套颜色语义。"
 colors:
-  primary: "#5B8CFF"
-  on-primary: "#0B0E14"
-  primary-hover: "#7AA2FF"
-  primary-soft: "#1A2740"
+  primary: "#FF8A72"
+  on-primary: "#211713"
+  primary-hover: "#FFA28F"
+  primary-soft: "#30221F"
   canvas: "#0B0E14"
   surface: "#11151D"
   surface-elevated: "#161B24"
@@ -30,7 +30,7 @@ colors:
   chart-4: "#F59E0B"
   chart-5: "#F472B6"
   chart-6: "#94A3B8"
-  focus-ring: "#8AB4FF"
+  focus-ring: "#FFAA94"
 typography:
   display-lg:
     fontFamily: "Inter, PingFang SC, Source Han Sans SC, Microsoft YaHei, sans-serif"
@@ -280,11 +280,12 @@ components:
 | 系统状态 | `status-success/warning/danger/info` | 任务状态、校验结果、告警 | 必须同时有图标或文字，不能只靠颜色 |
 | 图表序列 | `chart-1`…`chart-6` | 多序列折线、基准、因子 | 不超过 6 条；不用于行情涨跌 |
 
-### 为什么是蓝色主色、琥珀贪婪
+### 操作强调与行情、情绪分离
 
 A 股习惯红涨绿跌。如果再拿红色表示“贪婪”、绿色表示“恐惧”，同一屏会出现两套红绿语义。因此：
 
-- **主色用蓝**，只承担操作和选中，不和行情抢语义。
+- **操作主色用朱红/珊瑚色**，只承担按钮、导航和选中；不能据此判断涨跌。
+  数值涨跌仍只使用 `market-up/down`，情绪仍只使用 `sentiment-*`。
 - **恐惧用蓝、贪婪用琥珀**，靠“冷暖”表达情绪，靠文字表达区间。
 - **中性/持平用 `ink-muted`**，不额外造一个灰色 token。
 - **数据新鲜度复用系统状态色**：fresh → `status-success`，stale → `status-warning`，missing → `status-danger`。
@@ -318,6 +319,7 @@ background: color-mix(in srgb, var(--color-<semantic>) 14%, transparent);
 ### 字体栈
 
 ```text
+标题:  Songti SC, Noto Serif CJK SC, STSong, SimSun, Georgia, serif
 UI:    Inter, PingFang SC, Source Han Sans SC, Microsoft YaHei, sans-serif
 数字:  JetBrains Mono, SF Mono, Roboto Mono, monospace
 ```
@@ -788,3 +790,19 @@ easing: cubic-bezier(0.2, 0.8, 0.2, 1)
 - **needs-design-decision**：移动端只做只读是否足够；如果要在手机上下单或改策略，需要单独设计交互。
 - **needs-design-decision**：图表库最终选 ECharts 还是 lightweight-charts；本契约默认按 ECharts 的 theme 能力编写。
 - **needs-design-decision**：默认密度用 compact 还是 comfort；本契约默认 compact，并提供切换。
+
+## 投研简报风格融合（2026-11-06）
+
+用户指定参考“全球聪明钱持仓雷达”的可见设计语言，融合到现有研究终端。
+保留默认暗色、侧栏、等宽数据、细边框、语义色和可追溯信息。
+
+- 亮色主题：暖纸底 `#F3F0E9`、纸面 `#FAF8F3`、墨色 `#262521`、
+  次要文字 `#6C6860`、细线 `#DCD7CD`、朱红操作色 `#B63D28`。
+- 暗色主题：保留原深色表面，操作强调改珊瑚色 `#FF8A72`，图表序列色独立。
+- 页面和分组标题使用宋体栈，正文保持无衬线，价格、日期与分数保持等宽。
+- 页面标题区增加细分隔线；分组标题用短朱红线标记层级，筛选按钮采用紧凑圆角。
+- 行业恐贪八类概览改为连续指标条，桌面四列、移动两列；分隔线组织信息，
+  选中项用浅操作色背景与情绪色底线标识，仍保留源情绪标签文字。
+
+本节覆盖上文原蓝色操作色与纯白亮色的历史示例；主题实际值以
+`web/src/styles/tokens.css` 为准。参考内容和持仓功能不属于本系统需求。

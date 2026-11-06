@@ -1,0 +1,253 @@
+import { useEffect, useState } from "react";
+import { api, stamp, statusNames, type Job, type Run } from "../lib/api";
+
+export default function Jobs({
+  initialTask = "etf",
+}: {
+  initialTask?: string;
+}) {
+  const [task, setTask] = useState(initialTask);
+  return (
+    <>
+      <div className="range-buttons" aria-label="采集任务">
+        {[
+          ["etf", "ETF 日行情"],
+          ["sentiment", "行业恐贪"],
+          ["national-team", "国家队持仓"],
+        ].map(([key, label]) => (
+          <button
+            key={key}
+            className={task === key ? "active" : ""}
+            onClick={() => setTask(key)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <TaskPanel key={task} task={task} />
+    </>
+  );
+}
+function TaskPanel({ task }: { task: string }) {
+  const path = task === "national-team" ? "/national-team/job" : task === "sentiment" ? "/sentiment/job" : "/job";
+  const [job, setJob] = useState<Job | null>(null);
+  const [time, setTime] = useState("01:00");
+  const [enabled, setEnabled] = useState(true);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [selected, setSelected] = useState<number | null>(null);
+  async function load(initial = false, signal?: AbortSignal) {
+    try {
+      const data = await api<Job>(path, "GET", undefined, signal);
+      if (signal?.aborted) return;
+      setJob(data);
+      setError("");
+      if (initial) {
+        setTime(data.time);
+        setEnabled(data.enabled);
+      }
+    } catch (e) {
+      if (!signal?.aborted) setError((e as Error).message);
+    }
+  }
+  useEffect(() => {
+    const controller = new AbortController();
+    void load(true, controller.signal);
+    const timer = setInterval(() => void load(false, controller.signal), 3000);
+    return () => {
+      controller.abort();
+      clearInterval(timer);
+    };
+  }, []);
+  const running = job?.runs.some((r) => r.status === "running");
+  const detail: Run | undefined = job?.runs.find((r) => r.id === selected);
+  async function action(kind: "save" | "run") {
+    setBusy(true);
+    setMessage("");
+    try {
+      await api(
+        kind === "save" ? path : `${path}/run`,
+        kind === "save" ? "PUT" : "POST",
+        kind === "save" ? { enabled, time } : undefined,
+      );
+      setMessage(
+        kind === "save" ? "任务配置已保存" : "已启动，运行记录会自动更新",
+      );
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <>
+      <header className="page-header">
+        <div>
+          <h1>定时任务</h1>
+          <p>历史回补与每日增量，采集进度按区间保存</p>
+        </div>
+        <button
+          className="primary"
+          disabled={busy || running || !job?.source_configured}
+          onClick={() => action("run")}
+        >
+          {running ? "采集中…" : "立即采集"}
+        </button>
+      </header>
+      {error && (
+        <div className="alert" role="alert">
+          {error}
+          <button onClick={() => load(!job)}>重试</button>
+        </div>
+      )}
+      {job && !job.source_configured && (
+        <div className="notice warning">
+          数据源尚未配置。请在后端环境变量中设置 CHATBI_TOKEN 和
+          CHATBI_ACCESS_CODE 后重启 API。
+        </div>
+      )}
+      {message && (
+        <div className="notice" role="status">
+          {message}
+        </div>
+      )}
+      <section className="panel">
+        <div className="panel-header">
+          <h2>{task === "national-team" ? "国家队持仓比例采集" : task === "sentiment" ? "行业恐贪采集" : "ETF 日行情采集"}</h2>
+          <span
+            className={`badge ${running ? "info" : job?.enabled ? "success" : "neutral"}`}
+          >
+            {running ? "运行中" : job?.enabled ? "定时已启用" : "定时已暂停"}
+          </span>
+        </div>
+        {!job ? (
+          <div className="empty">正在读取任务配置…</div>
+        ) : (
+          <div className="job-settings">
+            <label>
+              每日执行时间{" "}
+              <input
+                aria-label="每日执行时间"
+                type="time"
+                value={time}
+                onChange={(e) => setTime(e.target.value)}
+              />
+              <span className="subtext">Asia/Shanghai · 北京时间</span>
+            </label>
+            <label className="switch">
+              <input
+                type="checkbox"
+                checked={enabled}
+                onChange={(e) => setEnabled(e.target.checked)}
+              />
+              启用每日调度
+            </label>
+            <div>
+              <span className="muted">下次执行</span>
+              <div className="mono">{stamp(job.next_run)}</div>
+            </div>
+            <button
+              disabled={
+                busy || !time || (time === job.time && enabled === job.enabled)
+              }
+              onClick={() => action("save")}
+            >
+              保存配置
+            </button>
+          </div>
+        )}
+        <div className="panel-footer">
+          {task === "national-team"
+            ? "采集源页面18只ETF的估算持仓比例，固定2026-01-01基准，全历史核验，仅新增或修订的数据写入本地库；不重复采集源价格。"
+            : task === "sentiment"
+            ? "首次回填五年，后续增量入库并重查最近七日修订。源最小下载窗口为一年，停采较久时扩大窗口。"
+            : "采集截至昨日的日行情。首次按月回补，后续重查最近七日并补齐失败区间。"}{" "}
+          同一任务禁止重复触发。
+        </div>
+      </section>
+      <section className="panel">
+        <div className="panel-header">
+          <h2>运行记录</h2>
+          <span className="muted">最近 20 次 · 自动刷新</span>
+        </div>
+        <div className="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>运行编号</th>
+                <th>触发方式</th>
+                <th>开始时间</th>
+                <th>结束时间</th>
+                <th>处理区间</th>
+                <th>状态</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {job?.runs.map((run) => (
+                <tr key={run.id}>
+                  <td className="mono">#{run.id}</td>
+                  <td>{run.trigger === "manual" ? "手动" : "定时"}</td>
+                  <td className="mono">{stamp(run.started_at)}</td>
+                  <td className="mono">{stamp(run.ended_at)}</td>
+                  <td>
+                    {run.logs.length} 段 /{" "}
+                    {run.logs.filter((l) => l.status === "failed").length} 失败
+                  </td>
+                  <td>
+                    <span className={`badge ${run.status}`}>
+                      {statusNames[run.status]}
+                    </span>
+                  </td>
+                  <td>
+                    <button
+                      onClick={() =>
+                        setSelected(selected === run.id ? null : run.id)
+                      }
+                    >
+                      {selected === run.id ? "收起日志" : "查看日志"}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {job && !job.runs.length && (
+          <div className="empty">
+            还没有运行记录。配置完成后，点击“立即采集”回补历史行情。
+          </div>
+        )}
+      </section>
+      {detail && (
+        <section className="panel">
+          <div className="panel-header">
+            <h2>运行 #{detail.id} · 区间日志</h2>
+            <button onClick={() => setSelected(null)}>关闭日志</button>
+          </div>
+          <div className="logs" aria-live="polite">
+            {!detail.logs.length && <p>等待首个区间完成…</p>}
+            {detail.logs.map((log, i) => (
+              <div className="log-line" key={i}>
+                <span
+                  className={
+                    log.status === "failed" ? "danger-text" : "success-text"
+                  }
+                >
+                  {log.status === "failed" ? "失败" : "成功"}
+                </span>
+                <span>
+                  {log.code ?? "系统"} {log.start} ～ {log.end}
+                </span>
+                <span>{log.count ?? 0} 条</span>
+                <span>{log.message}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+    </>
+  );
+}

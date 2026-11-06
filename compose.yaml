@@ -15,6 +15,9 @@ services:
   api:
     build: ./api
     environment:
+      CHATBI_TOKEN: ${CHATBI_TOKEN:-}
+      CHATBI_ACCESS_CODE: ${CHATBI_ACCESS_CODE:-}
+      CHATBI_URL: ${CHATBI_URL:-https://chatbi.cnht.com.cn/api/sqlapi/api-execute}
       PGHOST: postgres
       PGPORT: "5432"
       PGDATABASE: ${POSTGRES_DB:-etf_sentinel}
