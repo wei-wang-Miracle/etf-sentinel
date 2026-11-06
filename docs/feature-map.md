@@ -44,7 +44,8 @@
 | 统一策略注册与日频回测 | 策略研究 | 已实现 | 510500/512100均线规则；次日开盘、整手费用分红、同成本基准；买卖标记按执行日标注并同日同向合并；历史模拟非实际交易 | [策略与回测](backtesting.md)、[注册表](../api/app/strategies.py)、[引擎](../api/app/backtest.py)、[净值图](../web/src/components/BacktestChart.tsx) |
 | 多因子择时与策略实验室 | 策略研究 | 已确认待实现 | 3趋势+4估值因子、扁平权重、覆盖率与双阈值；20只因子研究，510500/512100完整回测；在真实账户复盘之后实施，按2周–3个月期限评估 | [设计](superpowers/specs/2026-11-06-strategy-lab-design.md) |
 | 回测权益与不可变实验 | 数据基础 | 已实现 | 东方财富公开权益与交易日历校验；完整输入/结果快照入库及复算；权益本版手动更新 | [回测接口](../api/app/backtest_routes.py)、[迁移0006](../api/migrations/versions/0006_backtests.py) |
-| 真实账户复盘与基线对比 | 投资记录与复盘 | 已确认待实现 | 导入真实成交/持仓/出入金/信号日志，TWR/XIRR、我的信号/买入持有/现金/20-60日基线、执行偏差和持有期分桶；分红源覆盖账户实际ETF，本地保存，不接券商 | [设计](superpowers/specs/2026-11-06-real-account-review-design.md) |
+| 配置内 ETF 实盘复盘 | 投资记录与复盘 | 已确认待实现 | 只收集配置内20只，6只有成交；持仓/成交/推导费用/分红，单ETF实际 vs 买入持有/20-60日基线；不含全账户TWR和现金 | [设计](superpowers/specs/2026-11-06-configured-etf-review-design.md) |
+| 全账户复盘与现金基线 | 投资记录与复盘 | 待讨论 | 需要现金余额、配置外持仓、LOF/逆回购；当前不实施 | [设计](superpowers/specs/2026-11-06-real-account-review-design.md) |
 
 | 8个关联指数五类估值及指数日K采集 | 数据基础 | 已实现 | 20ETF映射去重、任务4、增量写入、修订证据、失败恢复 | [指数估值说明](index-valuations.md)、[采集](../api/app/index_collection.py) |
 | 指数估值与走势对照 | 投研分析 | 已实现 | 中文图表优先、来源分位与本地十日历年回看分位分开；当前不接入回测，研究模式接入设计已确认待实现 | [估值页](../web/src/pages/IndexValuations.tsx)、[设计](superpowers/specs/2026-11-06-index-valuation-design.md) |
