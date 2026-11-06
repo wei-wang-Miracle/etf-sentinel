@@ -42,10 +42,13 @@
 | 国家队18只ETF估算比例采集 | 数据基础 | 已实现 | 独立任务3，固定基准全量核验、增量写入；不保存源价格 | [国家队持仓说明](national-team.md) |
 | 国家队持仓与日K对照 | 投研分析 | 已实现 | 18只已纳入行情采集，复用同代码日K，缺失不补零；MA5/10/20/30/60与可追溯图注；不作为真实持仓或信号 | [国家队持仓页](../web/src/pages/NationalTeam.tsx) |
 | 统一策略注册与日频回测 | 策略研究 | 已实现 | 510500/512100均线规则；次日开盘、整手费用分红、同成本基准；买卖标记按执行日标注并同日同向合并；历史模拟非实际交易 | [策略与回测](backtesting.md)、[注册表](../api/app/strategies.py)、[引擎](../api/app/backtest.py)、[净值图](../web/src/components/BacktestChart.tsx) |
+| 多因子择时与策略实验室 | 策略研究 | 已确认待实现 | 3趋势+4估值因子、扁平权重、覆盖率与双阈值；20只因子研究，510500/512100完整回测；第一期设计已确认 | [设计](superpowers/specs/2026-11-06-strategy-lab-design.md) |
 | 回测权益与不可变实验 | 数据基础 | 已实现 | 东方财富公开权益与交易日历校验；完整输入/结果快照入库及复算；权益本版手动更新 | [回测接口](../api/app/backtest_routes.py)、[迁移0006](../api/migrations/versions/0006_backtests.py) |
 
 | 8个关联指数五类估值及指数日K采集 | 数据基础 | 已实现 | 20ETF映射去重、任务4、增量写入、修订证据、失败恢复 | [指数估值说明](index-valuations.md)、[采集](../api/app/index_collection.py) |
-| 指数估值与走势对照 | 投研分析 | 已实现 | 中文图表优先、来源分位与本地十日历年回看分位分开，不接入回测 | [估值页](../web/src/pages/IndexValuations.tsx)、[设计](superpowers/specs/2026-11-06-index-valuation-design.md) |
+| 指数估值与走势对照 | 投研分析 | 已实现 | 中文图表优先、来源分位与本地十日历年回看分位分开；当前不接入回测，研究模式接入设计已确认待实现 | [估值页](../web/src/pages/IndexValuations.tsx)、[设计](superpowers/specs/2026-11-06-index-valuation-design.md) |
+| 研究对象详情合并 | 投研分析 | 已确认待实现 | 以ETF/指数为锚点合并行情、估值、情绪背景、国家队和因子快照；旧页迁移后收敛，不伪造映射 | [设计](superpowers/specs/2026-11-06-research-object-design.md) |
+| 横向同维度对比 | 投研分析 | 已确认待实现 | 估值、情绪、资金、趋势、因子单维度多对象比较；缺失不排名、不生成信号或组合权重 | [设计](superpowers/specs/2026-11-06-cross-comparison-design.md) |
 
 分析页采用紧凑筛选与图表优先布局，移除底部数据明细表；配置与日志保留。
 
