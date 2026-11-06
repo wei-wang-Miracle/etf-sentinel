@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import KLine from "../components/KLine";
+import ChartCaption from "../components/ChartCaption";
 import { api, stamp, type Candle } from "../lib/api";
+import { chartStamp } from "../lib/chart";
 
 type Instrument = {
   instrument_code: string;
@@ -131,7 +133,14 @@ export default function NationalTeam({ theme, goJobs }: { theme: string; goJobs:
           </div>
           {!data.candles.length && <div className="notice warning">该基金在所选区间暂无本地日 K，仅展示比例。持仓采集不使用外站近似价格替代行情。</div>}
           {data.holdings.length || data.candles.length
-            ? <KLine rows={data.candles} holdings={data.holdings} theme={theme} />
+            ? <>
+                <ChartCaption
+                  title={`${selected.instrument_code} · 日线 + 估算持仓比例`}
+                  meta={`${start} ~ ${end} · 左轴价格 / 右轴比例 · 均线 MA5/10/20/30/60（按源收盘计算，复权口径未确认） · 来源：韭圈 · 生成：${chartStamp()}`}
+                  disclaimer="比例不等于真实持仓或买卖信号；仅供研究。"
+                />
+                <KLine rows={data.candles} holdings={data.holdings} theme={theme} />
+              </>
             : <div className="empty chart-empty">所选区间暂无持仓比例或本地日 K，请调整日期或检查采集任务。</div>}
         </>}
       <div className="panel-footer">

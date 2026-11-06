@@ -502,6 +502,26 @@ td button {
   font-size: 18px;
   font-weight: 500;
 }
+.chart-caption {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 4px 16px;
+  padding: 8px 20px 0;
+  color: var(--color-ink-muted);
+  font-size: 11px;
+  line-height: 1.7;
+  font-variant-numeric: tabular-nums;
+}
+.chart-caption strong {
+  color: var(--color-ink);
+  font-family: var(--font-mono);
+  font-weight: 500;
+}
+.chart-caption .chart-disclaimer {
+  color: var(--color-ink-subtle);
+}
 .market-up {
   color: var(--color-market-up);
 }
@@ -796,6 +816,7 @@ td button {
 .research-chart-panel > .kline,
 .research-chart-panel > .sentiment-chart,
 .research-chart-panel > .sentiment-scale,
+.research-chart-panel > .chart-caption,
 .research-chart-panel > .empty,
 .research-chart-panel > .notice { order: 3; }
 .research-chart-panel > .panel-footer { order: 4; }
@@ -843,6 +864,7 @@ td button {
   .research-chart-panel .kline,
   .research-chart-panel .sentiment-chart { height: 440px; }
   .research-chart-panel .holdings-comparison-chart { height: 520px; }
+  .chart-caption { padding: 6px 12px 0; }
 }
 
 .research-chart-panel .range-buttons { gap: 4px; }

@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import KLine from "../components/KLine";
+import ChartCaption from "../components/ChartCaption";
 import { api, type Candle, type Instrument } from "../lib/api";
+import { chartStamp } from "../lib/chart";
 
 const today = () =>
   new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
@@ -182,6 +184,10 @@ export default function Market({
                 <strong>{last?.date}</strong>
               </div>
             </div>
+            <ChartCaption
+              title={`${code} · 日线 · 复权口径未确认`}
+              meta={`${start} ~ ${end} · 均线 MA5/10/20/30/60（按源收盘计算） · 来源：${item?.source === "ChatBI" ? "财通证券历史日行情（ChatBI）" : item?.source ?? "财通证券历史日行情"} · 生成：${chartStamp()}`}
+            />
             <KLine rows={rows} theme={theme} />
           </>
         )}

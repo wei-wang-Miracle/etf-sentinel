@@ -6,6 +6,9 @@
   --font-display:
     "Songti SC", "Noto Serif CJK SC", "STSong", "SimSun", Georgia, serif;
   --font-mono: "JetBrains Mono", "SF Mono", "Roboto Mono", monospace;
+  --font-chart:
+    "JetBrains Mono", "SF Mono", "Roboto Mono", "PingFang SC",
+    "Microsoft YaHei", "Noto Sans CJK SC", monospace;
   --color-canvas: #0b0e14;
   --color-surface: #11151d;
   --color-surface-elevated: #161b24;
@@ -33,6 +36,11 @@
   --color-chart-4: #f59e0b;
   --color-chart-5: #f472b6;
   --color-chart-6: #94a3b8;
+  --color-ma-5: #f2a93b;
+  --color-ma-10: #2f80ed;
+  --color-ma-20: #9b51e0;
+  --color-ma-30: #8d6e63;
+  --color-ma-60: #7b8794;
   --color-focus-ring: #ffaa94;
 }
 
@@ -65,5 +73,10 @@
   --color-chart-4: #dc6803;
   --color-chart-5: #db2777;
   --color-chart-6: #667085;
+  --color-ma-5: #f2a93b;
+  --color-ma-10: #2f80ed;
+  --color-ma-20: #9b51e0;
+  --color-ma-30: #8d6e63;
+  --color-ma-60: #7b8794;
   --color-focus-ring: #b63d28;
 }

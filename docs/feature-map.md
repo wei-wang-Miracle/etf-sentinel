@@ -35,12 +35,13 @@
 | 本地一键启动 | 工程基础 | 已实现 | Docker仅运行PostgreSQL；本机前后端支持start/restart、进程互斥与安全清理 | [启动脚本](../scripts/start-local.sh) |
 | 20只 ETF 统一标的配置 | 数据基础 | 已实现 | 原五只与国家队18只去重，采集开关、起点、覆盖范围 | [配置页](../web/src/pages/Instruments.tsx)、[功能说明](daily-data.md) |
 | 定时历史日行情采集入库 | 数据基础 | 已实现 | PostgreSQL、ChatBI；回补、增量、互斥和区间重试 | [采集](../api/app/collection.py)、[调度](../api/app/jobs.py)、[迁移](../api/migrations/versions/0001_daily_data.py) |
-| 日 K 与成交量展示 | 投研分析 | 已实现 | 依赖本地行情，不提供实时或推断复权 | [行情页](../web/src/pages/Market.tsx)、[图表](../web/src/components/KLine.tsx) |
+| 日 K 与成交量展示 | 投研分析 | 已实现 | 依赖本地行情；MA5/10/20/30/60、同色成交量、可追溯图注；不提供实时或推断复权 | [行情页](../web/src/pages/Market.tsx)、[图表](../web/src/components/KLine.tsx) |
+| A股图表规范与可追溯图注 | 投研分析 | 已实现 | 跨行情、国家队、回测、恐贪；红涨绿跌、均线、执行日买卖标记、图注与免责声明；复权口径未确认时不冒充前复权 | [设计契约](design-contract.md#klinechart)、[图注](../web/src/components/ChartCaption.tsx)、[图表工具](../web/src/lib/chart.ts) |
 | 行业恐贪历史采集 | 数据基础 | 已实现 | 独立数据源与任务；首次五年，后续增量 | [行业恐贪说明](industry-sentiment.md) |
 | 行业恐贪概览与历史展示 | 投研分析 | 已实现 | 依赖行业恐贪入库；情绪着色、双轴合图，不直接生成信号 | [行业恐贪说明](industry-sentiment.md) |
 | 国家队18只ETF估算比例采集 | 数据基础 | 已实现 | 独立任务3，固定基准全量核验、增量写入；不保存源价格 | [国家队持仓说明](national-team.md) |
-| 国家队持仓与日K对照 | 投研分析 | 已实现 | 18只已纳入行情采集，复用同代码日K，缺失不补零，不作为真实持仓或信号 | [国家队持仓页](../web/src/pages/NationalTeam.tsx) |
-| 统一策略注册与日频回测 | 策略研究 | 已实现 | 510500/512100均线规则；次日开盘、整手费用分红、同成本基准；历史模拟非实际交易 | [策略与回测](backtesting.md)、[注册表](../api/app/strategies.py)、[引擎](../api/app/backtest.py) |
+| 国家队持仓与日K对照 | 投研分析 | 已实现 | 18只已纳入行情采集，复用同代码日K，缺失不补零；MA5/10/20/30/60与可追溯图注；不作为真实持仓或信号 | [国家队持仓页](../web/src/pages/NationalTeam.tsx) |
+| 统一策略注册与日频回测 | 策略研究 | 已实现 | 510500/512100均线规则；次日开盘、整手费用分红、同成本基准；买卖标记按执行日标注并同日同向合并；历史模拟非实际交易 | [策略与回测](backtesting.md)、[注册表](../api/app/strategies.py)、[引擎](../api/app/backtest.py)、[净值图](../web/src/components/BacktestChart.tsx) |
 | 回测权益与不可变实验 | 数据基础 | 已实现 | 东方财富公开权益与交易日历校验；完整输入/结果快照入库及复算；权益本版手动更新 | [回测接口](../api/app/backtest_routes.py)、[迁移0006](../api/migrations/versions/0006_backtests.py) |
 
 分析页采用紧凑筛选与图表优先布局，移除底部数据明细表；配置与日志保留。

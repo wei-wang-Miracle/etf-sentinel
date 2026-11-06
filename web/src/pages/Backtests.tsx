@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import BacktestChart from "../components/BacktestChart";
+import ChartCaption from "../components/ChartCaption";
 import { api, stamp } from "../lib/api";
+import { chartStamp } from "../lib/chart";
 import {
   experimentParameters,
   parameterSummary,
@@ -429,6 +431,11 @@ export default function Backtests({ theme }: { theme: string }) {
                 <strong>{number(metrics!.slippage_cost)} 元</strong>
               </div>
             </div>
+            <ChartCaption
+              title={`${run.instrument_code} · 日线净值 · 次日开盘成交`}
+              meta={`${run.actual_start} ~ ${run.actual_end} · 行情：${run.provenance.market_source} · 快照：${stamp(run.created_at)} · 生成：${chartStamp()}`}
+              disclaimer="历史模拟，不构成投资建议；买卖标记为执行日记录。"
+            />
             <BacktestChart run={run} theme={theme} onTrade={selectTrade} />
             <div className="backtest-trade-note">
               {trade ? (

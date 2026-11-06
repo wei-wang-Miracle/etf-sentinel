@@ -10,6 +10,8 @@ import {
 } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
 import { api, stamp } from "../lib/api";
+import ChartCaption from "../components/ChartCaption";
+import { escapeHtml, chartStamp, readChartPalette } from "../lib/chart";
 
 echarts.use([
   LineChart,
@@ -56,21 +58,54 @@ function Trend({ rows, theme }: { rows: Daily[]; theme: string }) {
   useEffect(() => {
     if (!element.current) return;
     const chart = echarts.init(element.current);
-    const color = (name: string) =>
-      getComputedStyle(document.documentElement)
-        .getPropertyValue(`--color-${name}`)
-        .trim();
+    const palette = readChartPalette();
+    const byDate = new Map(rows.map((row) => [row.trade_date, row]));
+    const tooltip = (raw: unknown) => {
+      const list = raw as Array<{ axisValue?: string }>;
+      const day = list[0]?.axisValue ?? "";
+      const row = byDate.get(day);
+      if (!row) return escapeHtml(day);
+      return [
+        `<div style="font-weight:600;margin-bottom:4px">${escapeHtml(day)}</div>`,
+        `<div>恐贪分数 <span style="color:${palette.fear}">${row.fear_greed_score.toFixed(2)}</span></div>`,
+        `<div>指数点位 <span style="color:${palette.chart2}">${row.close_price == null ? "—" : row.close_price.toFixed(2)}</span></div>`,
+      ].join("");
+    };
     chart.setOption({
       animation: false,
-      aria: { enabled: true },
-      textStyle: { color: color("ink-muted"), fontFamily: "monospace" },
+      aria: {
+        enabled: true,
+        description:
+          "恐贪分数与指数点位双轴历史图，左轴分数0至100，右轴指数点位，共享日期和缩放；两端数字为当前值，分数连续着色不代表源阈值。仅供研究，不构成建议。",
+      },
+      textStyle: { color: palette.muted, fontFamily: palette.fontFamily },
       tooltip: {
         trigger: "axis",
-        backgroundColor: color("surface-elevated"),
-        textStyle: { color: color("ink") },
+        axisPointer: {
+          type: "line",
+          label: { backgroundColor: palette.border, color: palette.ink },
+        },
+        backgroundColor: palette.surface,
+        borderColor: palette.border,
+        textStyle: {
+          color: palette.ink,
+          fontFamily: palette.fontFamily,
+          fontSize: 11,
+        },
+        formatter: tooltip,
       },
-      grid: { left: 55, right: 65, top: 45, bottom: 65 },
-      xAxis: { type: "category", data: rows.map((r) => r.trade_date) },
+      grid: { left: 55, right: 112, top: 32, bottom: 65 },
+      xAxis: {
+        type: "category",
+        data: rows.map((r) => r.trade_date),
+        axisLine: { lineStyle: { color: palette.border } },
+        axisTick: { show: false },
+        axisLabel: {
+          color: palette.muted,
+          fontFamily: palette.fontFamily,
+          fontSize: 10,
+        },
+      },
       yAxis: [
         {
           type: "value",
@@ -78,16 +113,33 @@ function Trend({ rows, theme }: { rows: Daily[]; theme: string }) {
           min: 0,
           max: 100,
           interval: 20,
-          nameTextStyle: { color: color("sentiment-fear") },
-          axisLabel: { color: color("ink-muted") },
-          splitLine: { lineStyle: { color: color("border") } },
+          nameTextStyle: {
+            color: palette.fear,
+            fontFamily: palette.fontFamily,
+            fontSize: 10,
+          },
+          axisLabel: {
+            color: palette.muted,
+            fontFamily: palette.fontFamily,
+            fontSize: 10,
+          },
+          splitLine: { lineStyle: { color: palette.border, opacity: 0.45 } },
         },
         {
           type: "value",
           name: "指数点位",
           scale: true,
-          nameTextStyle: { color: color("chart-2") },
-          axisLabel: { color: color("chart-2") },
+          nameTextStyle: {
+            color: palette.chart2,
+            fontFamily: palette.fontFamily,
+            fontSize: 10,
+          },
+          axisLabel: {
+            color: palette.chart2,
+            fontFamily: palette.fontFamily,
+            fontSize: 10,
+            formatter: (value: number) => value.toFixed(0),
+          },
           splitLine: { show: false },
         },
       ],
@@ -97,13 +149,9 @@ function Trend({ rows, theme }: { rows: Daily[]; theme: string }) {
         min: 0,
         max: 100,
         seriesIndex: 0,
-        dimension: 1,
+        dimension: 0,
         inRange: {
-          color: [
-            color("sentiment-fear"),
-            color("chart-6"),
-            color("sentiment-greed"),
-          ],
+          color: [palette.fear, palette.chart6, palette.greed],
         },
       },
       dataZoom: [
@@ -112,9 +160,12 @@ function Trend({ rows, theme }: { rows: Daily[]; theme: string }) {
           type: "slider",
           height: 18,
           bottom: 8,
-          borderColor: color("border"),
-          textStyle: { color: color("ink-muted") },
-          fillerColor: color("primary-soft"),
+          borderColor: palette.border,
+          textStyle: {
+            color: palette.muted,
+            fontFamily: palette.fontFamily,
+          },
+          fillerColor: palette.primarySoft,
         },
       ],
       series: [
@@ -123,21 +174,33 @@ function Trend({ rows, theme }: { rows: Daily[]; theme: string }) {
           name: "恐贪分数",
           yAxisIndex: 0,
           showSymbol: false,
+          symbol: "none",
           connectNulls: false,
           lineStyle: { width: 2.5 },
-          encode: { x: 0, y: 1 },
-          data: rows.map((r) => [r.trade_date, r.fear_greed_score]),
+          data: rows.map((r) => r.fear_greed_score),
         },
         {
           type: "line",
           name: "指数点位",
           yAxisIndex: 1,
           showSymbol: false,
+          symbol: "none",
           connectNulls: false,
-          itemStyle: { color: color("chart-2") },
-          lineStyle: { color: color("chart-2"), width: 1.8, type: "dashed" },
-          encode: { x: 0, y: 1 },
-          data: rows.map((r) => [r.trade_date, r.close_price]),
+          itemStyle: { color: palette.chart2 },
+          lineStyle: { color: palette.chart2, width: 1.8, type: "dashed" },
+          data: rows.map((r) => r.close_price),
+          endLabel: {
+            show: true,
+            color: palette.chart2,
+            fontSize: 9,
+            fontFamily: palette.fontFamily,
+            formatter: (params: { value?: unknown }) => {
+              const value = Number(params.value);
+              return Number.isFinite(value)
+                ? `指数 ${value.toLocaleString("zh-CN", { maximumFractionDigits: 2 })}`
+                : "";
+            },
+          },
         },
       ],
     });
@@ -340,6 +403,11 @@ export default function Sentiment({
                 <span className="score-scale" aria-hidden="true" />
                 <span>100 · 贪婪端</span>
               </div>
+              <ChartCaption
+                title={`${selected.category_name} · 恐贪分数 / 指数点位`}
+                meta={`${start} ~ ${end} · 左轴 0–100 / 右轴指数点位 · 来源：韭圈 · 生成：${chartStamp()}`}
+                disclaimer="恐贪不是买卖信号；分数连续着色不代表源阈值。仅供研究。"
+              />
               <Trend rows={rows} theme={theme} />
               <div className="panel-footer">
                 两条曲线使用独立刻度；悬停对照同日数据，滚轮或底部滑块缩放。分数连续着色，不代表源情绪阈值；指数缺失不补零。
