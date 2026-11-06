@@ -5,11 +5,13 @@ import Sentiment from "./pages/Sentiment";
 import Market from "./pages/Market";
 import NationalTeam from "./pages/NationalTeam";
 import Backtests from "./pages/Backtests";
+import IndexValuations from "./pages/IndexValuations";
 
 const pages = [
   { key: "market", label: "行情展示", icon: "▥" },
   { key: "sentiment", label: "行业恐贪", icon: "∿" },
   { key: "national-team", label: "国家队持仓", icon: "▤" },
+  { key: "index-valuations", label: "指数估值", icon: "∿" },
   { key: "backtests", label: "策略回测", icon: "⌁" },
   { key: "instruments", label: "标的配置", icon: "≡" },
   { key: "jobs", label: "定时任务", icon: "◷" },
@@ -112,6 +114,8 @@ export default function App() {
               setJobTask("national-team");
               setPage("jobs");
             }} />
+          ) : page === "index-valuations" ? (
+            <IndexValuations theme={theme} goJobs={() => { setJobTask("index-valuations"); setPage("jobs"); }} />
           ) : page === "backtests" ? (
             <Backtests theme={theme} />
           ) : page === "instruments" ? (

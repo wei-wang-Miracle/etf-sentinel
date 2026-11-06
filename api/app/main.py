@@ -13,6 +13,7 @@ from sqlalchemy import func, select
 from app.backtest_routes import router as backtest_router
 from app.collection import now
 from app.db import Session
+from app.index_valuation_routes import router as index_valuation_router
 from app.jobs import launch, next_run, recover_interrupted, scheduler
 from app.models import Candle, Instrument, Job, Run
 from app.national_team_routes import router as national_team_router
@@ -25,6 +26,7 @@ async def lifespan(app):
     recover_interrupted()
     recover_interrupted(2)
     recover_interrupted(3)
+    recover_interrupted(4)
     stop = threading.Event()
     thread = threading.Thread(target=scheduler, args=(stop,), daemon=True)
     thread.start()
@@ -37,6 +39,7 @@ app = FastAPI(title="ETF Sentinel API", version="0.3.0", lifespan=lifespan)
 app.include_router(backtest_router)
 app.include_router(sentiment_router)
 app.include_router(national_team_router)
+app.include_router(index_valuation_router)
 
 
 class InstrumentUpdate(BaseModel):

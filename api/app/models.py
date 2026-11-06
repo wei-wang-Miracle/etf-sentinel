@@ -109,7 +109,7 @@ class Job(Base):
     id: Mapped[int] = mapped_column(
         "job_id",
         primary_key=True,
-        comment="采集任务唯一编号；1为ETF日行情，2为行业恐贪，3为国家队持仓比例",
+        comment="采集任务唯一编号；1为ETF日行情，2为行业恐贪，3为国家队持仓比例，4为指数估值与指数日行情",
     )
     enabled: Mapped[bool] = mapped_column(
         "schedule_enabled", default=True, comment="是否启用每日调度；不禁止手动触发"
@@ -138,7 +138,7 @@ class Run(Base):
     job_id: Mapped[int] = mapped_column(
         ForeignKey("jobs.job_id"),
         default=1,
-        comment="所属采集任务编号，关联jobs.job_id；1为ETF，2为行业恐贪，3为国家队持仓比例",
+        comment="所属采集任务编号，关联jobs.job_id；1为ETF，2为行业恐贪，3为国家队持仓比例，4为指数估值与指数日行情",
     )
     status: Mapped[str] = mapped_column(
         "run_status",
@@ -327,3 +327,96 @@ class BacktestRun(Base):
     input_sha256: Mapped[str] = mapped_column(String(64), comment="含参数、预热行情、权益、来源和版本的规范JSON SHA256摘要")
     input_snapshot: Mapped[dict] = mapped_column(JSON, comment="不可变输入JSON：settings参数、rows原始行情与采集时间、actions权益、来源快照、交易日历及策略/引擎/数据版本；金额使用十进制字符串")
     result_snapshot: Mapped[dict] = mapped_column(JSON, comment="结果JSON：strategy与benchmark含daily逐日现金/份额/分红应收/净值/回撤/决策、trades成交及费用原因、dividends权益账本、metrics绩效；金额十进制字符串，收益率小数")
+
+
+class ResearchIndex(Base):
+    """与当前ETF明确关联的独立指数目录。"""
+
+    __tablename__ = "research_indices"
+    __table_args__: ClassVar[dict] = {"comment": "当前ETF关联研究指数，独立于ETF标的，按完整源代码去重"}
+    index_code: Mapped[str] = mapped_column(primary_key=True, comment="完整指数代码含市场后缀，保留前导零，如000905.SH")
+    index_name: Mapped[str] = mapped_column(comment="指数中文名称，不与ETF名称混用")
+    chatbi_code: Mapped[str] = mapped_column(String(6), comment="ChatBI指数行情查询六位代码，保留前导零")
+    collection_enabled: Mapped[bool] = mapped_column(default=True, comment="是否启用指数估值及日K采集；停用不删历史")
+
+
+class InstrumentIndexLink(Base):
+    """ETF与其跟踪指数的核验关联。"""
+
+    __tablename__ = "instrument_index_links"
+    __table_args__: ClassVar[dict] = {"comment": "当前ETF与研究指数关联；同一指数多只ETF共享一次采集"}
+    instrument_code: Mapped[str] = mapped_column(ForeignKey("instruments.instrument_code"), primary_key=True, comment="ETF证券代码，关联instruments.instrument_code")
+    index_code: Mapped[str] = mapped_column(ForeignKey("research_indices.index_code"), primary_key=True, comment="完整指数代码，关联research_indices.index_code")
+    mapping_evidence: Mapped[str] = mapped_column(comment="映射核验依据，基金名称、国家队目录及源关联信息交叉核验，非仅凭相关性")
+    verified_date: Mapped[Date] = mapped_column(comment="本系统映射核验北京时间日期，非指数数据日期")
+
+
+class IndexValuationDaily(Base):
+    """指数日频估值当前版本，源历史无逐日分位。"""
+
+    __tablename__ = "index_valuation_daily"
+    __table_args__: ClassVar[dict] = {"comment": "指数五类日估值；保留源值，历史分位按本地公式另行计算；非原时点发布快照"}
+    index_code: Mapped[str] = mapped_column(ForeignKey("research_indices.index_code"), primary_key=True, comment="完整指数代码，关联research_indices.index_code")
+    metric_key: Mapped[str] = mapped_column(primary_key=True, comment="指标pe市盈率倍、pb市净率倍、xilv股息率百分数、roe净资产收益率百分数、premium_diff风险溢价差值百分点；源算法未确认")
+    trade_date: Mapped[Date] = mapped_column(primary_key=True, comment="源估值日期，非采集或发布日期；缺日不补造")
+    metric_value: Mapped[Decimal | None] = mapped_column(Numeric(36, 18), comment="源原始指标值，保留至18位小数；单位由metric_key定义，源缺失为空，无效值仍保留")
+    value_status: Mapped[str] = mapped_column(comment="有效状态valid有效、missing源缺失、not_applicable非正PE/PB或负股息率；后两类不参与分位")
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), comment="本条首次入库或实际修订的本地时间，带时区；未变不重写")
+
+
+class IndexValuationRevision(Base):
+    """估值值及有效状态的每次观测变更证据。"""
+
+    __tablename__ = "index_valuation_revisions"
+    __table_args__: ClassVar[dict] = {"comment": "估值输入修订证据；首次插入旧值及旧状态为空；与日估值同事务提交"}
+    revision_id: Mapped[int] = mapped_column(primary_key=True, comment="估值修订自增编号")
+    index_code: Mapped[str] = mapped_column(ForeignKey("research_indices.index_code"), comment="完整指数代码，关联research_indices.index_code")
+    metric_key: Mapped[str] = mapped_column(comment="五类估值指标，与index_valuation_daily.metric_key同口径")
+    trade_date: Mapped[Date] = mapped_column(comment="发生新增或修订的源估值日期")
+    old_value: Mapped[Decimal | None] = mapped_column(Numeric(36, 18), comment="修订前指标值，单位由metric_key定义；首次或原缺失为空")
+    new_value: Mapped[Decimal | None] = mapped_column(Numeric(36, 18), comment="本次指标值，单位由metric_key定义；源缺失为空")
+    old_status: Mapped[str | None] = mapped_column(comment="修订前有效状态；首次观察为空")
+    new_status: Mapped[str] = mapped_column(comment="本次有效状态valid、missing或not_applicable")
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), comment="本地实际观察到变更的带时区时间，非源发布时间")
+    run_id: Mapped[int] = mapped_column(ForeignKey("runs.run_id"), comment="发生该观测的采集运行编号，关联runs.run_id")
+
+
+class IndexValuationSnapshot(Base):
+    """概览、详情与历史整段统计按内容变化归档。"""
+
+    __tablename__ = "index_valuation_snapshots"
+    __table_args__: ClassVar[dict] = {"comment": "估值来源摘要观测快照，不包含推荐文案展示；按相邻内容变化归档，非历史发布版本"}
+    snapshot_id: Mapped[int] = mapped_column(primary_key=True, comment="来源快照自增编号")
+    index_code: Mapped[str] = mapped_column(ForeignKey("research_indices.index_code"), comment="完整指数代码，关联research_indices.index_code")
+    content_sha256: Mapped[str] = mapped_column(String(64), comment="规范JSON内容SHA256摘要，用于相邻观测去重")
+    source_payload: Mapped[dict] = mapped_column(JSON, comment="源JSON对象：overview概览含ROE原小数、detail详情、history各指标整段元统计和实际覆盖；无鉴权信息")
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), comment="本地读取该快照时间，带时区；非源发布日期")
+    run_id: Mapped[int] = mapped_column(ForeignKey("runs.run_id"), comment="本次观测采集运行编号，关联runs.run_id")
+
+
+class IndexCandle(Base):
+    """指数OHLC点位，与ETF人民币价格分开保存。"""
+
+    __tablename__ = "index_candles"
+    __table_args__: ClassVar[dict] = {"comment": "ChatBI daily_ohlcv_index指数原始日行情；价格字段为指数点位，非ETF价格"}
+    index_code: Mapped[str] = mapped_column(ForeignKey("research_indices.index_code"), primary_key=True, comment="完整指数代码，关联research_indices.index_code")
+    trade_date: Mapped[Date] = mapped_column(primary_key=True, comment="行情源交易日期，非采集时间")
+    open_price: Mapped[Decimal] = mapped_column(Numeric(24, 8), comment="日开盘指数点位，源口径")
+    high_price: Mapped[Decimal] = mapped_column(Numeric(24, 8), comment="日最高指数点位，源口径")
+    low_price: Mapped[Decimal] = mapped_column(Numeric(24, 8), comment="日最低指数点位，源口径")
+    close_price: Mapped[Decimal] = mapped_column(Numeric(24, 8), comment="日收盘指数点位，源口径")
+    trading_volume: Mapped[Decimal] = mapped_column(Numeric(30, 4), comment="日成交量源数值，单位未确认")
+    trading_amount: Mapped[Decimal] = mapped_column(Numeric(30, 4), comment="日成交额源数值，单位未确认")
+    price_change_pct: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), comment="相对昨收涨跌幅百分数，如1为1%；源缺失为空")
+    source_updated_at: Mapped[str | None] = mapped_column(comment="行情源更新时间原始文本，源时区未确认；可空")
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), comment="本条首次入库或实际源修订的带时区采集时间")
+
+
+class IndexCollectionWindow(Base):
+    """按指数保存成功查询窗口，复查失败撤销以便重试。"""
+
+    __tablename__ = "index_collection_windows"
+    __table_args__: ClassVar[dict] = {"comment": "指数日K成功查询区间水位；空响应也记录，不代表交易日完整性已验证"}
+    index_code: Mapped[str] = mapped_column(ForeignKey("research_indices.index_code"), primary_key=True, comment="完整指数代码，关联research_indices.index_code")
+    collection_start_date: Mapped[Date] = mapped_column(primary_key=True, comment="成功查询窗口起始日期，含当日")
+    collection_end_date: Mapped[Date] = mapped_column(comment="成功查询窗口截止日期，含当日；失败不推进")

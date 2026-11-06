@@ -14,6 +14,7 @@ export default function Jobs({
           ["etf", "基金日行情"],
           ["sentiment", "行业恐贪"],
           ["national-team", "国家队持仓"],
+          ["index-valuations", "指数估值"],
         ].map(([key, label]) => (
           <button
             key={key}
@@ -29,7 +30,7 @@ export default function Jobs({
   );
 }
 function TaskPanel({ task }: { task: string }) {
-  const path = task === "national-team" ? "/national-team/job" : task === "sentiment" ? "/sentiment/job" : "/job";
+  const path = task === "index-valuations" ? "/index-valuations/job" : task === "national-team" ? "/national-team/job" : task === "sentiment" ? "/sentiment/job" : "/job";
   const [job, setJob] = useState<Job | null>(null);
   const [time, setTime] = useState("01:00");
   const [enabled, setEnabled] = useState(true);
@@ -114,7 +115,9 @@ function TaskPanel({ task }: { task: string }) {
       )}
       <section className="panel">
         <div className="panel-header">
-          <h2>{task === "national-team" ? "国家队持仓比例采集" : task === "sentiment" ? "行业恐贪采集" : "基金日行情采集"}</h2>
+          <h2>{task === "index-valuations"
+            ? "指数估值与指数日K采集"
+            : task === "national-team" ? "国家队持仓比例采集" : task === "sentiment" ? "行业恐贪采集" : "基金日行情采集"}</h2>
           <span
             className={`badge ${running ? "info" : job?.enabled ? "success" : "neutral"}`}
           >
@@ -158,7 +161,9 @@ function TaskPanel({ task }: { task: string }) {
           </div>
         )}
         <div className="panel-footer">
-          {task === "national-team"
+          {task === "index-valuations"
+            ? "8个关联指数，5类日频估值全历史核验、增量写入；指数日K首次按月回填，后续七日交叠，失败区间重试。估值无需凭据，日K使用后端行情凭据。"
+            : task === "national-team"
             ? "采集源页面18只基金的估算持仓比例，固定2026-01-01基准，全历史核验，仅新增或修订的数据写入本地库；不重复采集源价格。"
             : task === "sentiment"
             ? "首次回填五年，后续增量入库并重查最近七日修订。源最小下载窗口为一年，停采较久时扩大窗口。"

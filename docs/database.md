@@ -52,8 +52,8 @@ alembic check
 - `sentiment_daily`：`category_key` 与 `trade_date` 联合主键，
   `fear_greed_score` 为 0—100 分数，`close_price` 为指数收盘点位（可空），
   `collected_at` 为该条最近采集时间。零分有效，不将缺失补零。
-- `runs.job_id` 关联 `jobs.job_id`，1 为 ETF、2 为行业恐贪、3 为国家队持仓；旧运行回填为 1。
-  三任务的配置、定时水位、运行记录与互斥锁独立。
+- `runs.job_id` 关联 `jobs.job_id`，1 为 ETF、2 为行业恐贪、3 为国家队持仓、4 为指数估值；旧运行回填为 1。
+  四任务的配置、定时水位、运行记录与互斥锁独立。
 
 日数据的 `trade_date`、`close_price`、`collected_at` 与已有同义字段统一命名；
 具体单位由表字段注释明确，ETF 价格与指数点位不可直接比较。
@@ -96,3 +96,30 @@ alembic check
 
 权益更新按代码覆盖最新来源，但原实验保留完整来源快照，不随行情或权益修订
 更新。实验只插入和读取，无覆盖接口；版本变化时复算明确拒绝不兼容实验。
+
+## 指数估值数据表
+
+迁移`0007`创建七张独立表，登记8指数、20关联和任务4，并更新任务编号注释。
+所有表和字段均带中文COMMENT，不变更ETF行情或回测数据。
+
+- `research_indices`：`index_code`完整源代码主键，`index_name`中文名、
+  `chatbi_code`六位行情查询代码、`collection_enabled`启停。
+- `instrument_index_links`：`instrument_code/index_code`联合主键和外键，
+  `mapping_evidence/verified_date`记录关联依据及本地核验日期。
+- `index_valuation_daily`：`index_code/metric_key/trade_date`联合主键，
+  `metric_value`十进制原值、`value_status`有效状态、`collected_at`新增或修订时间。
+  值单位：PE/PB倍，股息率/ROE百分数，风险溢价差值百分点；缺失可空，无效原值保留。
+- `index_valuation_revisions`：`revision_id`自增主键，指数/指标/源日期、
+  `old_value/new_value`、`old_status/new_status`、`observed_at/run_id`。
+  首次观察旧值和旧状态为空；与日估值同事务提交。
+- `index_valuation_snapshots`：`snapshot_id`自增主键，`index_code`、
+  `content_sha256/source_payload/observed_at/run_id`保存源概览、详情、
+  各指标整段统计及覆盖摘要，按相邻内容去重；观测时刻不是源发布时间。
+- `index_candles`：`index_code/trade_date`联合主键，`open_price/high_price/`
+  `low_price/close_price`均为指数点位，`trading_volume/trading_amount`保留源单位，
+  `price_change_pct`百分数、`source_updated_at`源文本及`collected_at`本地时刻。
+- `index_collection_windows`：`index_code/collection_start_date`联合主键，
+  `collection_end_date`成功窗口截止；失败撤销水位以便恢复，空响应不代表完整。
+
+本地回看分位读取完整历史计算后再过滤显示日期，不存成来源历史分位。
+采集和统计边界见[指数估值说明](index-valuations.md)。

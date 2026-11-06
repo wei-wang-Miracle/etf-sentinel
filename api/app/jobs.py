@@ -9,6 +9,7 @@ from sqlalchemy import select, text
 
 from app.collection import collect, now
 from app.db import Session, engine
+from app.index_collection import collect_indices
 from app.models import Job, Run
 from app.national_team import collect_national_team
 from app.sentiment import collect_sentiment
@@ -19,7 +20,7 @@ LOCK_ID = 510500512100
 
 def launch(trigger="manual", job_id=1):
     """持有独立数据库连接锁直到任务结束，跨进程防止重入。"""
-    collectors = {1: collect, 2: collect_sentiment, 3: collect_national_team}
+    collectors = {1: collect, 2: collect_sentiment, 3: collect_national_team, 4: collect_indices}
     if job_id not in collectors:
         raise ValueError("未知采集任务")
     lock_id = LOCK_ID + job_id - 1
@@ -105,7 +106,7 @@ def recover_interrupted(job_id=1):
 
 
 def scheduler(stop):
-    """独立锁定三类任务配置，每天最多触发一次；仅行情需要凭据。"""
+    """独立锁定四类任务配置，每天最多触发一次；仅行情需要凭据。"""
     while not stop.is_set():
         try:
             with Session() as db:
@@ -113,10 +114,10 @@ def scheduler(stop):
             for job_id in task_ids:
                 with Session() as db:
                     job = db.scalar(
-                        select(Job).where(Job.id == job_id).with_for_update()
+                        select(Job).where(Job.id == job_id).with_for_update(key_share=True)
                     )
                     current = now()
-                    configured = job_id in (2, 3) or (
+                    configured = job_id in (2, 3, 4) or (
                         os.getenv("CHATBI_TOKEN") and os.getenv("CHATBI_ACCESS_CODE")
                     )
                     if not (

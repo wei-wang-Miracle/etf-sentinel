@@ -84,7 +84,7 @@ def validate_row(row, code, start, end):
     return result
 
 
-def fetch_rows(code, start, end):
+def fetch_rows(code, start, end, *, api_path="daily_ohlcv_etf"):
     """只读查询数据源，有限重试且不向调用方暴露鉴权信息。"""
     token, access = os.getenv("CHATBI_TOKEN"), os.getenv("CHATBI_ACCESS_CODE")
     if not token or not access:
@@ -95,7 +95,7 @@ def fetch_rows(code, start, end):
                 os.getenv(
                     "CHATBI_URL", "https://chatbi.cnht.com.cn/api/sqlapi/api-execute"
                 ),
-                params={"api_path": "daily_ohlcv_etf", "access_code": access},
+                params={"api_path": api_path, "access_code": access},
                 headers={"Authorization": f"Bearer {token}"},
                 json={
                     "stockcodelist": [code],

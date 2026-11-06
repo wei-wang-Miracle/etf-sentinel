@@ -33,7 +33,9 @@ export default function KLine({
   rows,
   theme,
   holdings,
+  indexPoints = false,
 }: {
+  indexPoints?: boolean;
   rows: Candle[];
   theme: string;
   holdings?: { trade_date: string; estimated_holding_pct: number | null }[];
@@ -131,7 +133,7 @@ export default function KLine({
         description:
           (comparison
             ? "本地日K与国家队估算持仓比例同图双轴对照，左轴价格、右轴比例，共享日期与缩放；缺失数据不补零。"
-            : "基金原始日K和成交量。上涨红色，下跌绿色；均线按源收盘价计算，复权口径未确认；悬停查看同日数值。") +
+            : (indexPoints ? "指数原始日K和成交量。" : "基金原始日K和成交量。") + "上涨红色，下跌绿色；均线按源收盘价计算，复权口径未确认；悬停查看同日数值。") +
           "仅供研究，不构成投资建议。",
       },
       tooltip: {
@@ -174,7 +176,7 @@ export default function KLine({
       yAxis: [
         {
           scale: true,
-          name: "价格（元）",
+          name: indexPoints ? "指数点位" : "价格（元）",
           nameTextStyle: {
             color: palette.muted,
             fontFamily: palette.fontFamily,
@@ -305,7 +307,7 @@ export default function KLine({
       observer.disconnect();
       chart.dispose();
     };
-  }, [rows, theme, holdings]);
+  }, [rows, theme, holdings, indexPoints]);
   return (
     <div
       className={`kline ${holdings ? "holdings-comparison-chart" : ""}`}
@@ -314,7 +316,7 @@ export default function KLine({
       aria-label={
         holdings
           ? "基金日K与国家队估算持仓比例同图双轴对照，共享日期与缩放，缺失不补零"
-          : "基金日K、MA5至MA60均线与成交量，可滚轮缩放，悬停查看同日数值"
+          : `${indexPoints ? "指数" : "基金"}日K、MA5至MA60均线与成交量，可滚轮缩放，悬停查看同日数值`
       }
     />
   );
