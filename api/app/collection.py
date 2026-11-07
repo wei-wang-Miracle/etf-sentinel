@@ -11,6 +11,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 
+from app.chatbi_config import MARKET_ACCESS_CODE, SOURCE_URL
 from app.db import Session
 from app.models import Candle, Instrument, Run, Window
 
@@ -86,16 +87,14 @@ def validate_row(row, code, start, end):
 
 def fetch_rows(code, start, end, *, api_path="daily_ohlcv_etf"):
     """只读查询数据源，有限重试且不向调用方暴露鉴权信息。"""
-    token, access = os.getenv("CHATBI_TOKEN"), os.getenv("CHATBI_ACCESS_CODE")
-    if not token or not access:
-        raise ValueError("请配置后端 CHATBI_TOKEN 和 CHATBI_ACCESS_CODE")
+    token = os.getenv("CHATBI_TOKEN")
+    if not token:
+        raise ValueError("请配置后端 CHATBI_TOKEN")
     for attempt in range(3):
         try:
             response = httpx.post(
-                os.getenv(
-                    "CHATBI_URL", "https://chatbi.cnht.com.cn/api/sqlapi/api-execute"
-                ),
-                params={"api_path": api_path, "access_code": access},
+                SOURCE_URL,
+                params={"api_path": api_path, "access_code": MARKET_ACCESS_CODE},
                 headers={"Authorization": f"Bearer {token}"},
                 json={
                     "stockcodelist": [code],

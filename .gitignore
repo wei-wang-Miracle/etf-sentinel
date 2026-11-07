@@ -12,3 +12,6 @@ dist/
 
 # 本地启动器的进程锁与运行状态
 .local/
+
+# 本地账户资金号
+api/config/account.json

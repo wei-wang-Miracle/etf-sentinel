@@ -109,7 +109,7 @@ def test_request_boundaries_and_catalog():
     assert catalog["strategies"][0]["key"] == "ma_trend"
     assert catalog["instruments"][0]["count"] == 6
     for patch in (
-        {"instrument_code": "588080"},
+        {"instrument_code": "非代码"},
         {"parameters": {"window": 1}},
         {"parameters": {"window": "60"}},
         {"parameters": {"window": 60.5}},
@@ -138,6 +138,9 @@ def test_source_refresh_failure_keeps_previous_source(monkeypatch):
             "collected_at": now(),
         }
 
+    with Session() as db:
+        db.add(Instrument(code="512100", name="第二只测试ETF"))
+        db.commit()
     monkeypatch.setattr(backtest_routes, "fetch_actions", fail_second)
     assert client.post("/backtests/sources/refresh").status_code == 502
     with Session() as db:

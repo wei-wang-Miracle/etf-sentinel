@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
+from app.account_routes import router as account_router
 from app.backtest_routes import router as backtest_router
 from app.collection import now
 from app.db import Session
@@ -17,7 +18,10 @@ from app.index_valuation_routes import router as index_valuation_router
 from app.jobs import launch, next_run, recover_interrupted, scheduler
 from app.models import Candle, Instrument, Job, Run
 from app.national_team_routes import router as national_team_router
+from app.research_routes import router as research_router
+from app.review_routes import router as review_router
 from app.sentiment_routes import router as sentiment_router
+from app.strategy_lab import router as strategy_lab_router
 
 
 @asynccontextmanager
@@ -27,6 +31,7 @@ async def lifespan(app):
     recover_interrupted(2)
     recover_interrupted(3)
     recover_interrupted(4)
+    recover_interrupted(5)
     stop = threading.Event()
     thread = threading.Thread(target=scheduler, args=(stop,), daemon=True)
     thread.start()
@@ -36,10 +41,14 @@ async def lifespan(app):
 
 
 app = FastAPI(title="ETF Sentinel API", version="0.3.0", lifespan=lifespan)
+app.include_router(account_router)
 app.include_router(backtest_router)
 app.include_router(sentiment_router)
 app.include_router(national_team_router)
 app.include_router(index_valuation_router)
+app.include_router(research_router)
+app.include_router(review_router)
+app.include_router(strategy_lab_router)
 
 
 class InstrumentUpdate(BaseModel):
@@ -115,7 +124,7 @@ def get_job():
             "time": job.time,
             "next_run": next_run(job),
             "source_configured": bool(
-                os.getenv("CHATBI_TOKEN") and os.getenv("CHATBI_ACCESS_CODE")
+                os.getenv("CHATBI_TOKEN")
             ),
             "runs": [
                 {
@@ -144,7 +153,7 @@ def update_job(body: JobUpdate):
 @app.post("/job/run", status_code=202)
 def run_job():
     """手动触发异步采集，重复触发返回冲突。"""
-    if not os.getenv("CHATBI_TOKEN") or not os.getenv("CHATBI_ACCESS_CODE"):
+    if not os.getenv("CHATBI_TOKEN"):
         raise HTTPException(422, "后端数据源凭据尚未配置")
     run_id = launch()
     if run_id is None:

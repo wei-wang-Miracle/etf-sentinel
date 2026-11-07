@@ -5,7 +5,16 @@ from datetime import datetime
 from decimal import Decimal
 from typing import ClassVar
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Numeric, String
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    Numeric,
+    String,
+    text,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -109,7 +118,7 @@ class Job(Base):
     id: Mapped[int] = mapped_column(
         "job_id",
         primary_key=True,
-        comment="采集任务唯一编号；1为ETF日行情，2为行业恐贪，3为国家队持仓比例，4为指数估值与指数日行情",
+        comment="采集任务唯一编号；1为ETF日行情，2为行业恐贪，3为国家队持仓比例，4为指数估值与指数日行情，5为策略日计划",
     )
     enabled: Mapped[bool] = mapped_column(
         "schedule_enabled", default=True, comment="是否启用每日调度；不禁止手动触发"
@@ -138,7 +147,7 @@ class Run(Base):
     job_id: Mapped[int] = mapped_column(
         ForeignKey("jobs.job_id"),
         default=1,
-        comment="所属采集任务编号，关联jobs.job_id；1为ETF，2为行业恐贪，3为国家队持仓比例，4为指数估值与指数日行情",
+        comment="所属采集任务编号，关联jobs.job_id；1为ETF，2为行业恐贪，3为国家队持仓比例，4为指数估值与指数日行情，5为策略日计划",
     )
     status: Mapped[str] = mapped_column(
         "run_status",
@@ -302,10 +311,10 @@ class BacktestSource(Base):
     """回测权益来源快照，包含完整分红与折算事件及原始页面证据。"""
 
     __tablename__ = "backtest_sources"
-    __table_args__: ClassVar[dict] = {"comment": "回测现金分红与折算来源；仅支持已核实的两只境内股票ETF，不作为行情价格"}
+    __table_args__: ClassVar[dict] = {"comment": "配置内ETF回测现金分红与折算来源；按权益、日历和行情动态核验资格，不作为行情价格"}
     instrument_code: Mapped[str] = mapped_column(
         ForeignKey("instruments.instrument_code"), primary_key=True,
-        comment="证券代码，关联instruments.instrument_code；当前510500或512100",
+        comment="证券代码，关联instruments.instrument_code；仅限配置内ETF",
     )
     source_url: Mapped[str] = mapped_column(comment="东方财富基金分红送配页面URL，不包含凭据")
     checked_through_date: Mapped[Date] = mapped_column(comment="本次读取权益页面的北京时间日期；表示读取时点，不保证来源绝对完整")
@@ -420,3 +429,172 @@ class IndexCollectionWindow(Base):
     index_code: Mapped[str] = mapped_column(ForeignKey("research_indices.index_code"), primary_key=True, comment="完整指数代码，关联research_indices.index_code")
     collection_start_date: Mapped[Date] = mapped_column(primary_key=True, comment="成功查询窗口起始日期，含当日")
     collection_end_date: Mapped[Date] = mapped_column(comment="成功查询窗口截止日期，含当日；失败不推进")
+
+
+class Account(Base):
+    """本地真实账户；资金号只从环境变量读取，不落库。"""
+
+    __tablename__ = "accounts"
+    __table_args__: ClassVar[dict] = {"comment": "本地真实账户标识；不保存资金账号、股东账号或券商凭据"}
+    account_id: Mapped[int] = mapped_column(primary_key=True, comment="本系统账户编号，与券商资金号无关")
+    account_name: Mapped[str] = mapped_column(default="默认账户", comment="本地显示名称，例如默认账户")
+    base_currency: Mapped[str] = mapped_column(String(3), default="CNY", comment="账户本位币，ISO三位代码；本期仅人民币CNY")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), comment="账户在本系统建立时间，带时区")
+
+
+class AccountSyncRun(Base):
+    """账户持仓与成交同步批次。"""
+
+    __tablename__ = "account_sync_runs"
+    __table_args__: ClassVar[dict] = {"comment": "配置内账户数据同步批次；记录抓取、入库、跳过和错误数量，不保存敏感明细"}
+    sync_run_id: Mapped[int] = mapped_column(primary_key=True, comment="同步批次自增编号")
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.account_id"), comment="本地账户编号，关联accounts.account_id")
+    status: Mapped[str] = mapped_column(String(12), comment="同步状态running运行中、success成功、partial部分行错误、failed失败")
+    range_start: Mapped[Date | None] = mapped_column(comment="本次抓取的委托起始日期，含当日；首次同步前为空")
+    range_end: Mapped[Date | None] = mapped_column(comment="本次抓取的委托截止日期，含当日；首次同步前为空")
+    holdings_snapshot: Mapped[dict | None] = mapped_column(JSON(none_as_null=True), comment="完整持仓集合JSON：instrument_codes代码数组、source_date源日期或空、collected_at带时区采集时间；空数组表示真实空集合；NULL为旧版本或本次未取得完整快照，不将其当作空仓")
+    fetched_count: Mapped[int] = mapped_column(default=0, comment="本次源返回的持仓与委托总行数")
+    stored_count: Mapped[int] = mapped_column(default=0, comment="本次按配置内过滤后写入或更新的行数")
+    skipped_count: Mapped[int] = mapped_column(default=0, comment="本次因不在配置内而跳过的行数；不保存明细")
+    error_count: Mapped[int] = mapped_column(default=0, comment="配置内字段非法而未入库的行数")
+    error_message: Mapped[str | None] = mapped_column(comment="错误摘要，最多保留前几条；不含资金号或设备信息")
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), comment="同步开始时间，带时区")
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), comment="同步结束时间，带时区；运行中为空")
+
+
+class AccountHoldingSnapshot(Base):
+    """配置内 ETF 当前持仓快照。"""
+
+    __tablename__ = "account_holdings_snapshots"
+    __table_args__: ClassVar[dict] = {"comment": "配置内ETF真实持仓快照；按账户、源数据日期和代码唯一；只存当前源快照"}
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.account_id"), primary_key=True, comment="本地账户编号，关联accounts.account_id")
+    data_date: Mapped[Date] = mapped_column(primary_key=True, comment="源持仓数据日期，非本地采集日期")
+    instrument_code: Mapped[str] = mapped_column(ForeignKey("instruments.instrument_code"), primary_key=True, comment="ETF证券代码，关联instruments.instrument_code；只存配置内标的")
+    current_amount: Mapped[Decimal] = mapped_column(Numeric(20, 4), default=0, comment="当前持仓数量，份")
+    enable_amount: Mapped[Decimal] = mapped_column(Numeric(20, 4), default=0, comment="可用数量，份；T+1下当日买入不可卖")
+    frozen_amount: Mapped[Decimal] = mapped_column(Numeric(20, 4), default=0, comment="冻结数量，份")
+    uncome_buy_amount: Mapped[Decimal] = mapped_column(Numeric(20, 4), default=0, comment="在途买入数量，份")
+    uncome_sell_amount: Mapped[Decimal] = mapped_column(Numeric(20, 4), default=0, comment="在途卖出数量，份")
+    cost_price: Mapped[Decimal | None] = mapped_column(Numeric(24, 8), comment="源成本价，人民币元/份；源口径未披露费用处理，可空")
+    sum_buy_amount: Mapped[Decimal | None] = mapped_column(Numeric(20, 4), comment="源当前持仓周期累计买入数量，份；可空")
+    sum_buy_balance: Mapped[Decimal | None] = mapped_column(Numeric(24, 4), comment="源当前持仓周期累计买入金额，人民币元；可空")
+    sum_sell_amount: Mapped[Decimal | None] = mapped_column(Numeric(20, 4), comment="源当前持仓周期累计卖出数量，份；可空")
+    sum_sell_balance: Mapped[Decimal | None] = mapped_column(Numeric(24, 4), comment="源当前持仓周期累计卖出金额，人民币元；可空")
+    source_etl_time: Mapped[str | None] = mapped_column(comment="源更新时间原始文本，时区未确认；可空")
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), comment="本系统实际采集时间，带时区")
+
+
+class AccountEntrust(Base):
+    """配置内 ETF 委托及成交记录。"""
+
+    __tablename__ = "account_entrusts"
+    __table_args__: ClassVar[dict] = {
+        "comment": "配置内ETF真实委托与成交；按账户、委托日期和委托编号唯一；保留原始状态和推导费用",
+    }
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.account_id"), primary_key=True, comment="本地账户编号，关联accounts.account_id")
+    curr_date: Mapped[Date] = mapped_column(primary_key=True, comment="源委托日期，非本地采集日期")
+    entrust_no: Mapped[str] = mapped_column(String(32), primary_key=True, comment="源委托编号；不保证全局唯一，与委托日期组成唯一键")
+    curr_time: Mapped[str | None] = mapped_column(String(16), comment="源委托时间原始文本，9位HHMMSSmmm；可空")
+    init_date: Mapped[Date | None] = mapped_column(comment="源委托发起日期；可空")
+    order_id: Mapped[str | None] = mapped_column(String(32), comment="源订单编号原始文本；可空")
+    instrument_code: Mapped[str] = mapped_column(ForeignKey("instruments.instrument_code"), comment="ETF证券代码，关联instruments.instrument_code；只存配置内标的")
+    entrust_side: Mapped[str] = mapped_column(String(1), comment="委托方向源值1买入、2卖出；未确认其他值按原值保存")
+    entrust_amount: Mapped[Decimal] = mapped_column(Numeric(20, 4), default=0, comment="委托数量，份")
+    entrust_price: Mapped[Decimal] = mapped_column(Numeric(24, 8), default=0, comment="委托价格，人民币元/份")
+    entrust_type: Mapped[str | None] = mapped_column(String(8), comment="源委托类型原始值；可空")
+    business_amount: Mapped[Decimal] = mapped_column(Numeric(20, 4), default=0, comment="成交数量，份；零表示未成交")
+    business_price: Mapped[Decimal] = mapped_column(Numeric(24, 8), default=0, comment="成交价格，人民币元/份")
+    business_balance: Mapped[Decimal] = mapped_column(Numeric(24, 4), default=0, comment="源成交金额，人民币元；未确认是否含费用")
+    clear_balance: Mapped[Decimal] = mapped_column(Numeric(24, 4), default=0, comment="源清算金额，人民币元；与成交金额差额用于推导费用")
+    withdraw_amount: Mapped[Decimal] = mapped_column(Numeric(20, 4), default=0, comment="撤单数量，份；零表示未撤单")
+    entrust_status: Mapped[str | None] = mapped_column(String(8), comment="源委托状态原始值；含义未确认，不硬编码中文翻译")
+    fare_kind: Mapped[str | None] = mapped_column(String(16), comment="源费用类别原始值；可空")
+    fee_amount: Mapped[Decimal] = mapped_column(Numeric(18, 4), default=0, comment="由成交金额与清算金额差额推导的费用，人民币元；非券商逐笔明细")
+    data_date: Mapped[Date] = mapped_column(comment="源数据日期，非本地采集日期")
+    source_etl_time: Mapped[str | None] = mapped_column(comment="源更新时间原始文本，时区未确认；可空")
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), comment="本系统实际采集时间，带时区")
+
+
+Index(
+    "ix_account_entrusts_account_curr_date",
+    AccountEntrust.account_id,
+    AccountEntrust.curr_date,
+)
+Index(
+    "ix_account_entrusts_instrument_curr_date",
+    AccountEntrust.instrument_code,
+    AccountEntrust.curr_date,
+)
+Index(
+    "ix_account_holdings_account_date",
+    AccountHoldingSnapshot.account_id,
+    AccountHoldingSnapshot.data_date,
+)
+
+
+class StrategyResearchBatch(Base):
+    """冻结当前持仓范围及全部候选尝试，数据不随同步改写。"""
+
+    __tablename__ = "strategy_research_batches"
+    __table_args__: ClassVar[dict] = {"comment": "ETF策略研究批次；冻结持仓范围、开发验证区间、每只五万元假设与全部成功失败结果"}
+    research_batch_id: Mapped[int] = mapped_column(primary_key=True, comment="本地研究批次唯一编号")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), comment="研究创建时间，带时区")
+    input_snapshot: Mapped[dict] = mapped_column(JSON, comment="冻结输入JSON：持仓代码及源日期、候选参数版本、每只50000元、成本、开发验证区间；非真实本金")
+    result_snapshot: Mapped[dict] = mapped_column(JSON, comment="冻结输出JSON：每只ETF及组合的各区间候选净值指标、实验编号、失败原因；缺失不补零")
+    input_sha256: Mapped[str] = mapped_column(String(64), comment="规范输入快照SHA256，核查研究假设未被修改")
+
+
+class StrategyObservation(Base):
+    """用户明确采用的不可变规则版本，暂停仅停止新信号。"""
+
+    __tablename__ = "strategy_observations"
+    __table_args__: ClassVar[tuple] = (
+        Index("uq_strategy_observation_active", "instrument_code", unique=True, postgresql_where=text("active")),
+        {"comment": "ETF策略观察版本；采用规则不代表已下单或实际成交，修改规则需新建版本"},
+    )
+    observation_id: Mapped[int] = mapped_column(primary_key=True, comment="观察版本唯一编号")
+    research_batch_id: Mapped[int] = mapped_column(ForeignKey("strategy_research_batches.research_batch_id"), comment="规则来源研究批次编号")
+    instrument_code: Mapped[str] = mapped_column(ForeignKey("instruments.instrument_code"), comment="可交易ETF六位代码，指数不得作为观察对象")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), comment="用户采用时间，带时区；此前历史不算前向业绩")
+    active: Mapped[bool] = mapped_column(default=True, comment="是否继续生成新计划；暂停不修改历史规则及信号")
+    rule_snapshot: Mapped[dict] = mapped_column(JSON, comment="不可变规则JSON：候选key、策略版本、参数、资金分配百分数、每只五万元及成本；不含真实账户本金")
+
+
+class StrategySignal(Base):
+    """某个观察版本在尚未开盘时生成的唯一执行计划。"""
+
+    __tablename__ = "strategy_signals"
+    __table_args__: ClassVar[tuple] = (
+        Index("uq_strategy_signal_observation_day", "observation_id", "execution_date", unique=True),
+        {"comment": "ETF逐日观察计划与生成时证据；提示、人工确认和真实成交分开，不回填历史信号"},
+    )
+    signal_id: Mapped[int] = mapped_column(primary_key=True, comment="日计划唯一编号")
+    observation_id: Mapped[int] = mapped_column(ForeignKey("strategy_observations.observation_id"), comment="产生计划的不可变观察版本编号")
+    instrument_code: Mapped[str] = mapped_column(ForeignKey("instruments.instrument_code"), comment="计划对应可交易ETF六位代码")
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), comment="首次生成时间，带时区；同版本同执行日重复请求不修改")
+    data_cutoff: Mapped[Date] = mapped_column(comment="决策所用完整行情最后交易日，不晚于生成时已采集数据")
+    execution_date: Mapped[Date] = mapped_column(comment="最早执行的尚未开盘交易日；不表示实际成交日")
+    plan_snapshot: Mapped[dict] = mapped_column(JSON, comment="冻结计划JSON：方向、研究目标比例份额、实际及可用份额、数据源日期、原因、因子、输入摘要和待资金核对提示")
+    evidence_snapshot: Mapped[dict] = mapped_column(JSON, comment="决策证据JSON：当时完整行情、权益、规则版本及采集时刻，可重算；不使用后来修订覆盖")
+    skip_note: Mapped[str | None] = mapped_column(comment="用户明确不执行的原因；空表示未主动跳过，不等于未成交证明")
+    skipped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), comment="人工跳过确认时间，带时区；未跳过为空")
+
+
+class StrategyExecutionLink(Base):
+    """人工关联累计委托，不将委托时间冒充逐笔成交时间。"""
+
+    __tablename__ = "strategy_execution_links"
+    __table_args__: ClassVar[tuple] = (
+        ForeignKeyConstraint(["account_id", "curr_date", "entrust_no"], ["account_entrusts.account_id", "account_entrusts.curr_date", "account_entrusts.entrust_no"]),
+        Index("uq_strategy_execution_entrust", "account_id", "curr_date", "entrust_no", unique=True),
+        {"comment": "真实累计委托与计划的人工确认关联；一条委托最多归属一个计划，源数量修订后重新核对"},
+    )
+    execution_link_id: Mapped[int] = mapped_column(primary_key=True, comment="执行关联唯一编号")
+    signal_id: Mapped[int] = mapped_column(ForeignKey("strategy_signals.signal_id"), comment="人工确认对应的日计划编号")
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.account_id"), comment="本地账户编号，不是资金账号")
+    curr_date: Mapped[Date] = mapped_column(comment="源委托关联日期，与account_id及entrust_no共同定位累计委托")
+    entrust_no: Mapped[str] = mapped_column(String(32), comment="源累计委托号；不代表逐笔成交编号")
+    confirmed_trade_date: Mapped[Date] = mapped_column(comment="用户依据对账资料确认的实际成交日期，必须等于计划执行日")
+    confirmed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), comment="人工关联确认时间，带时区；不当作成交时间")
+    confirmed_amount: Mapped[Decimal] = mapped_column(Numeric(20, 4), comment="确认时源累计成交份额快照，份；源后续变化用于展示修订差异")
+    confirmation_note: Mapped[str] = mapped_column(comment="人工确认依据或偏离说明，不可空白；不包含自动下单含义")

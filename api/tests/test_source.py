@@ -10,7 +10,7 @@ from app import collection
 
 def test_retry_temporary_error(monkeypatch):
     monkeypatch.setenv("CHATBI_TOKEN", "test-secret")
-    monkeypatch.setenv("CHATBI_ACCESS_CODE", "test-code")
+    monkeypatch.delenv("CHATBI_ACCESS_CODE", raising=False)
     monkeypatch.setattr(collection.time, "sleep", lambda _: None)
     calls = []
 
@@ -23,11 +23,15 @@ def test_retry_temporary_error(monkeypatch):
     monkeypatch.setattr(collection.httpx, "post", post)
     assert collection.fetch_rows("510500", date(2026, 6, 1), date(2026, 6, 2)) == []
     assert len(calls) == 3
+    from app.chatbi_config import MARKET_ACCESS_CODE
+
+    assert calls[0]["params"]["access_code"] == MARKET_ACCESS_CODE
+    assert calls[0]["headers"]["Authorization"] == "Bearer test-secret"
 
 
 def test_auth_error_is_redacted(monkeypatch):
     monkeypatch.setenv("CHATBI_TOKEN", "test-secret")
-    monkeypatch.setenv("CHATBI_ACCESS_CODE", "test-code")
+    monkeypatch.delenv("CHATBI_ACCESS_CODE", raising=False)
     monkeypatch.setattr(
         collection.httpx,
         "post",

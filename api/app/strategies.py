@@ -120,3 +120,81 @@ def validate_parameters(key, parameters):
         value = parameters[p["key"]]
         if type(value) is not int or not p["min"] <= value <= p["max"]:
             raise ValueError(f"{p['label']}须为{p['min']}至{p['max']}的整数")
+
+
+def prepare_hold(rows, dividends, parameters):
+    """持有参照与择时策略使用相同成交引擎和费用。"""
+    return [{"decision": Decision(1, "买入持有基准"), "indicators": {}} for row in rows]
+
+
+def prepare_momentum(rows, dividends, parameters):
+    """均线控制退出，正动量只限制新入场；所有比较使用当日及以前数据。"""
+    window = parameters["momentum_window"]
+    values = features(rows, dividends, parameters["window"])
+    result, holding = [], False
+    for i, (value, average) in enumerate(values):
+        momentum = value / values[i - window][0] - 1 if i >= window else None
+        ready = average is not None and momentum is not None
+        if ready:
+            holding = value > average and (holding or momentum > 0)
+        result.append(
+            {
+                "decision": Decision(
+                    int(holding),
+                    "趋势成立且入场已通过正动量确认，继续持有"
+                    if holding
+                    else "趋势不成立或新入场动量未通过，保持空仓",
+                )
+                if ready
+                else None,
+                "indicators": {
+                    "signal_index": str(float(value)),
+                    "moving_average": str(float(average))
+                    if average is not None
+                    else None,
+                    "momentum": str(float(momentum)) if momentum is not None else None,
+                },
+            }
+        )
+    return result
+
+
+REGISTRY.update(
+    {
+        "hold": {
+            "metadata": {
+                "key": "hold",
+                "name": "买入持有",
+                "version": "1.0",
+                "description": "区间首日开盘买入，保持持有，现金分红不自动再投",
+                "parameters": [],
+            },
+            "prepare": prepare_hold,
+        },
+        "ma_momentum": {
+            "metadata": {
+                "key": "ma_momentum",
+                "name": "趋势与动量确认",
+                "version": "1.0",
+                "description": "含息指数高于均线且N日动量为正才入场；跌回均线退出，动量仅约束入场",
+                "parameters": [
+                    {
+                        "key": "window",
+                        "label": "均线交易日数",
+                        "default": 60,
+                        "min": 2,
+                        "max": 250,
+                    },
+                    {
+                        "key": "momentum_window",
+                        "label": "动量交易日数",
+                        "default": 20,
+                        "min": 2,
+                        "max": 250,
+                    },
+                ],
+            },
+            "prepare": prepare_momentum,
+        },
+    }
+)

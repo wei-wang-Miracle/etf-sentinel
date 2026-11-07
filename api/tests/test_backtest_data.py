@@ -6,6 +6,21 @@ import pytest
 
 from app.backtest_data import parse_actions, validate_market
 
+
+def test_explicit_empty_action_tables_are_valid():
+    html = """
+    <table><tr><th>权益登记日</th></tr><tr><td>暂无分红信息!</td></tr></table>
+    <table><tr><th>拆分折算日</th></tr><tr><td>暂无拆分信息!</td></tr></table>
+    """
+    assert parse_actions(html) == {"dividends": [], "splits": []}
+
+
+def test_empty_action_tables_without_source_statement_are_rejected():
+    html = "<table><tr><th>权益登记日</th></tr></table>" \
+        "<table><tr><th>拆分折算日</th></tr></table>"
+    with pytest.raises(ValueError):
+        parse_actions(html)
+
 HTML = """<table><tr><th>年份</th><th>权益登记日</th><th>除息日</th><th>每10份分红</th><th>分红发放日</th></tr>
 <tr><td>2026年</td><td>2026-01-15</td><td>2026-01-16</td><td>每10份派现金0.6200元</td><td>2026-01-21</td></tr></table>
 <table><tr><th>年份</th><th>拆分折算日</th><th>拆分类型</th><th>拆分折算比例</th></tr>

@@ -10,7 +10,6 @@ import httpx
 
 from app.collection import now
 
-SUPPORTED_CODES = ("510500", "512100")
 SOURCE_TEMPLATE = "https://fundf10.eastmoney.com/fhsp_{}.html"
 DATA_VERSION = "1.0"
 
@@ -69,7 +68,11 @@ def parse_actions(html):
             continue
         if "权益登记日" in table[0]:
             found.add("dividends")
+            if len(table) < 2:
+                raise ValueError("权益分红表缺少数据或明确无事件说明")
             for row in table[1:]:
+                if len(row) == 1 and row[0] in ("暂无分红信息!", "暂无分红信息！"):
+                    continue
                 if len(row) != 5:
                     raise ValueError("权益分红表结构不匹配")
                 record, ex, pay = (date.fromisoformat(row[i]) for i in (1, 2, 4))
@@ -89,14 +92,18 @@ def parse_actions(html):
                 )
         elif "拆分折算日" in table[0]:
             found.add("splits")
+            if len(table) < 2:
+                raise ValueError("权益折算表缺少数据或明确无事件说明")
             for row in table[1:]:
+                if len(row) == 1 and row[0] in ("暂无拆分信息!", "暂无拆分信息！"):
+                    continue
                 if len(row) != 4:
                     raise ValueError("权益折算表结构不匹配")
                 splits.append(
                     {"effective_date": str(date.fromisoformat(row[1])), "ratio": row[3]}
                 )
-    if found != {"dividends", "splits"} or not dividends:
-        raise ValueError("权益表缺失或无有效分红，无法核实来源")
+    if found != {"dividends", "splits"}:
+        raise ValueError("权益表缺失，无法核实来源")
     if len({e["ex_date"] for e in dividends}) != len(dividends):
         raise ValueError("权益日期重复，拒绝覆盖")
     return {
@@ -107,8 +114,8 @@ def parse_actions(html):
 
 def fetch_actions(code):
     """只读抓取支持标的权益页面并返回原始文本与已校验事件。"""
-    if code not in SUPPORTED_CODES:
-        raise ValueError("本版仅核实510500和512100权益")
+    if not re.fullmatch(r"\d{6}", code):
+        raise ValueError("ETF代码须为六位数字")
     try:
         response = httpx.get(
             SOURCE_TEMPLATE.format(code),

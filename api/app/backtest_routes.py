@@ -4,7 +4,6 @@ import hashlib
 import json
 from datetime import UTC, date
 from decimal import Decimal
-from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
@@ -14,7 +13,6 @@ from sqlalchemy.dialects.postgresql import insert
 from app.backtest import ENGINE_VERSION, run_backtest
 from app.backtest_data import (
     DATA_VERSION,
-    SUPPORTED_CODES,
     fetch_actions,
     trading_days,
     validate_market,
@@ -31,7 +29,7 @@ class BacktestRequest(BaseModel):
     """回测研究假设，金额为人民币元，费率为小数，滑点为基点。"""
 
     model_config = ConfigDict(allow_inf_nan=False, extra="forbid")
-    instrument_code: Literal["510500", "512100"]
+    instrument_code: str = Field(pattern=r"^\d{6}$")
     strategy_key: str = "ma_trend"
     parameters: dict[str, StrictInt] = Field(
         default_factory=lambda: {"window": 60}, strict=True
@@ -39,13 +37,13 @@ class BacktestRequest(BaseModel):
     start_date: date
     end_date: date
     initial_cash: Decimal = Field(
-        default=Decimal(100000), ge=1000, le=100000000, decimal_places=2
+        default=Decimal(50000), ge=1000, le=100000000, decimal_places=2
     )
     commission_rate: Decimal = Field(
         default=Decimal("0.0001"), ge=0, le=Decimal("0.01")
     )
     minimum_commission: Decimal = Field(
-        default=Decimal(5), ge=0, le=100, decimal_places=2
+        default=Decimal(0), ge=0, le=100, decimal_places=2
     )
     slippage_bps: Decimal = Field(default=Decimal(5), ge=0, le=100)
 
@@ -66,6 +64,7 @@ def describe(run, *, detail=False):
         "id": run.backtest_run_id,
         "instrument_code": run.instrument_code,
         "strategy_key": run.strategy_key,
+        "strategy_name": get_strategy(run.strategy_key)["metadata"]["name"],
         "created_at": run.created_at.astimezone(UTC),
         "input_sha256": run.input_sha256,
         "settings": snapshot["settings"],
@@ -95,7 +94,7 @@ def catalog():
     """注册表与本地数据覆盖，不在页面加载时请求外部来源。"""
     with Session() as db:
         instruments = []
-        for code in SUPPORTED_CODES:
+        for code in db.scalars(select(Instrument.code).order_by(Instrument.code)):
             instrument = db.get(Instrument, code)
             dates = list(
                 db.scalars(
@@ -124,10 +123,16 @@ def catalog():
 
 
 @router.post("/sources/refresh")
-def refresh_sources():
-    """完整核验两只权益源后原子更新；任一失败保留原数据。"""
+def refresh_sources(instrument_code: str | None = None):
+    """核验配置内标的权益源后原子更新，失败保留原数据。"""
+    with Session() as db:
+        codes = list(db.scalars(select(Instrument.code).order_by(Instrument.code)))
+    if instrument_code is not None:
+        if instrument_code not in codes:
+            raise HTTPException(404, "ETF不在配置范围内")
+        codes = [instrument_code]
     try:
-        sources = [(code, fetch_actions(code)) for code in SUPPORTED_CODES]
+        sources = [(code, fetch_actions(code)) for code in codes]
     except ValueError as exc:
         raise HTTPException(502, str(exc)) from None
     with Session() as db:
@@ -146,104 +151,118 @@ def refresh_sources():
                 )
             )
         db.commit()
-    return {"updated": list(SUPPORTED_CODES)}
+    return {"updated": codes}
 
 
 @router.post("")
 def create_backtest(body: BacktestRequest):
     """校验同一读事务中的行情和权益，保存输入与结果，不更改历史实验。"""
+    with Session() as db:
+        db.connection(execution_options={"isolation_level": "REPEATABLE READ"})
+        result = execute_backtest(body, db)
+        db.commit()
+        return result
+
+
+def execute_backtest(body: BacktestRequest, db):
+    """在调用方一致性事务内校验、计算并暂存不可变实验；由调用方提交。"""
     if body.start_date > body.end_date or body.end_date >= now().date():
         raise HTTPException(422, "起止日期无效，截止日须早于今天")
     try:
         validate_parameters(body.strategy_key, body.parameters)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from None
-    with Session() as db:
-        # 防止采集修订恰好发生在行情与权益两次读取之间。
-        db.connection(execution_options={"isolation_level": "REPEATABLE READ"})
-        source = db.get(BacktestSource, body.instrument_code)
-        if not source or source.checked_through_date < body.end_date:
-            raise HTTPException(
-                422, "权益来源缺失或读取时点早于截止日，请先更新分红资料"
-            )
-        candles = db.scalars(
-            select(Candle)
-            .where(Candle.code == body.instrument_code, Candle.date <= body.end_date)
-            .order_by(Candle.date)
-        ).all()
-        if not candles or body.start_date < candles[0].date:
-            raise HTTPException(422, "起始日期早于本地行情覆盖，或暂无行情")
-        rows = [
-            {
-                "trade_date": str(r.date),
-                **{
-                    k: str(getattr(r, k)) if getattr(r, k) is not None else None
-                    for k in (
-                        "open",
-                        "high",
-                        "low",
-                        "close",
-                        "adjusted_close",
-                        "volume",
-                    )
-                },
-                "source_updated_at": r.source_updated_at,
-                "collected_at": r.collected_at.isoformat(),
-            }
-            for r in candles
-        ]
-        settings = body.model_dump(mode="json")
-        try:
-            days, calendar_version = trading_days(
-                rows[0]["trade_date"], settings["end_date"]
-            )
-            if not days or days[-1] != rows[-1]["trade_date"]:
-                raise ValueError("截止日前的交易日行情缺失，请先补采或缩短区间")
-            validate_market(rows, source.corporate_actions)
-            result = run_backtest(rows, source.corporate_actions["dividends"], settings)
-        except ValueError as exc:
-            raise HTTPException(422, str(exc)) from None
-        snapshot = {
-            "settings": settings,
-            "rows": rows,
-            "actions": source.corporate_actions,
-            "source": {
-                "source_url": source.source_url,
-                "source_sha256": source.source_sha256,
-                "source_html": source.source_html,
-                "checked_through_date": str(source.checked_through_date),
-                "collected_at": source.collected_at.isoformat(),
-                "market_source": "财通证券历史日行情",
+    # 防止采集修订恰好发生在行情与权益两次读取之间。
+    if not db.get(Instrument, body.instrument_code):
+        raise HTTPException(404, "ETF不在配置范围内")
+    source = db.get(BacktestSource, body.instrument_code)
+    if not source or source.checked_through_date < body.end_date:
+        raise HTTPException(422, "权益来源缺失或读取时点早于截止日，请先更新分红资料")
+    candles = db.scalars(
+        select(Candle)
+        .where(Candle.code == body.instrument_code, Candle.date <= body.end_date)
+        .order_by(Candle.date)
+    ).all()
+    if not candles or body.start_date < candles[0].date:
+        raise HTTPException(422, "起始日期早于本地行情覆盖，或暂无行情")
+    rows = [
+        {
+            "trade_date": str(r.date),
+            **{
+                k: str(getattr(r, k)) if getattr(r, k) is not None else None
+                for k in (
+                    "open",
+                    "high",
+                    "low",
+                    "close",
+                    "adjusted_close",
+                    "volume",
+                )
             },
-            "calendar_days": days,
-            "calendar_version": calendar_version,
-            "engine_version": ENGINE_VERSION,
-            "strategy_version": get_strategy(body.strategy_key)["metadata"]["version"],
-            "data_version": DATA_VERSION,
+            "source_updated_at": r.source_updated_at,
+            "collected_at": r.collected_at.isoformat(),
         }
-        run = BacktestRun(
-            instrument_code=body.instrument_code,
-            strategy_key=body.strategy_key,
-            created_at=now(),
-            input_sha256=digest(snapshot),
-            input_snapshot=snapshot,
-            result_snapshot=result,
+        for r in candles
+    ]
+    settings = body.model_dump(mode="json")
+    try:
+        days, calendar_version = trading_days(
+            rows[0]["trade_date"], settings["end_date"]
         )
-        db.add(run)
-        db.commit()
-        return describe(run, detail=True)
+        if not days or days[-1] != rows[-1]["trade_date"]:
+            raise ValueError("截止日前的交易日行情缺失，请先补采或缩短区间")
+        validate_market(rows, source.corporate_actions)
+        result = run_backtest(rows, source.corporate_actions["dividends"], settings)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+    snapshot = {
+        "settings": settings,
+        "rows": rows,
+        "actions": source.corporate_actions,
+        "source": {
+            "source_url": source.source_url,
+            "source_sha256": source.source_sha256,
+            "source_html": source.source_html,
+            "checked_through_date": str(source.checked_through_date),
+            "collected_at": source.collected_at.isoformat(),
+            "market_source": "财通证券历史日行情",
+        },
+        "calendar_days": days,
+        "calendar_version": calendar_version,
+        "engine_version": ENGINE_VERSION,
+        "strategy_version": get_strategy(body.strategy_key)["metadata"]["version"],
+        "data_version": DATA_VERSION,
+    }
+    run = BacktestRun(
+        instrument_code=body.instrument_code,
+        strategy_key=body.strategy_key,
+        created_at=now(),
+        input_sha256=digest(snapshot),
+        input_snapshot=snapshot,
+        result_snapshot=result,
+    )
+    db.add(run)
+    db.flush()
+    return describe(run, detail=True)
 
 
 @router.get("")
-def history():
-    """读取最近二十次成功实验，不生成或覆盖结果。"""
+def history(instrument_code: str | None = None):
+    """读取最近二十次实验；ETF筛选在数据库完成，避免批次结果挤掉其他对象。"""
+    if instrument_code is not None and (
+        len(instrument_code) != 6
+        or not instrument_code.isascii()
+        or not instrument_code.isdigit()
+    ):
+        raise HTTPException(422, "ETF代码须为六位数字")
+    statement = select(BacktestRun)
+    if instrument_code is not None:
+        statement = statement.where(BacktestRun.instrument_code == instrument_code)
     with Session() as db:
         return [
             describe(r)
             for r in db.scalars(
-                select(BacktestRun)
-                .order_by(BacktestRun.backtest_run_id.desc())
-                .limit(20)
+                statement.order_by(BacktestRun.backtest_run_id.desc()).limit(20)
             )
         ]
 
