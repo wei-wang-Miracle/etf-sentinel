@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from sqlalchemy import select, text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 
 from app.account_state import latest_holdings
 from app.backtest import ENGINE_VERSION, metrics
@@ -449,6 +449,7 @@ def batches():
             }
             for b in db.scalars(
                 select(StrategyResearchBatch)
+                .where(StrategyResearchBatch.input_snapshot["kind"].as_string().is_distinct_from("single_etf"))
                 .order_by(StrategyResearchBatch.research_batch_id.desc())
                 .limit(30)
             )
@@ -460,8 +461,8 @@ def get_batch(batch_id: int):
     """读取原研究快照，不触发外部接口或更新实验。"""
     with Session() as db:
         batch = db.get(StrategyResearchBatch, batch_id)
-        if not batch:
-            raise HTTPException(404, "研究批次不存在")
+        if not batch or batch.input_snapshot.get("kind") == "single_etf":
+            raise HTTPException(404, "持仓候选研究批次不存在；单ETF策略请从我的策略查看")
         return batch_payload(batch)
 
 
@@ -470,6 +471,7 @@ def observation_payload(row):
     return {
         "id": row.observation_id,
         "research_batch_id": row.research_batch_id,
+        "strategy_version_id": row.strategy_version_id,
         "instrument_code": row.instrument_code,
         "created_at": row.created_at.astimezone(TZ),
         "active": row.active,
@@ -488,6 +490,8 @@ def adopt(body: ObservationRequest):
         batch = db.get(StrategyResearchBatch, body.research_batch_id)
         if not batch or digest(batch.input_snapshot) != batch.input_sha256:
             raise HTTPException(404, "研究批次不存在或输入校验失败")
+        if batch.input_snapshot.get("kind") == "single_etf":
+            raise HTTPException(422, "单ETF策略版本须通过我的策略显式启用，不作为固定持仓候选采用")
         item = next(
             (
                 r
@@ -589,6 +593,10 @@ def execution_window(at):
 
 def make_plan(db, observation, at, cutoff, execution):
     """复用注册规则，冻结已采集证据，研究目标与实际可卖份额独立核对。"""
+    if observation.strategy_version_id is not None:
+        from app.strategy_plans import make_saved_plan
+
+        return make_saved_plan(db, observation, at, cutoff, execution)
     rule = observation.rule_snapshot
     if (
         rule["strategy_version"]
@@ -735,11 +743,23 @@ def generate_signals():
         )
     for observation_id in ids:
         with Session() as db:
-            observation = db.scalar(
-                select(StrategyObservation)
-                .where(StrategyObservation.observation_id == observation_id)
-                .with_for_update()
-            )
+            db.connection(execution_options={"isolation_level": "REPEATABLE READ"})
+            try:
+                observation = db.scalar(
+                    select(StrategyObservation)
+                    .where(StrategyObservation.observation_id == observation_id)
+                    .with_for_update()
+                )
+            except OperationalError as exc:
+                if getattr(exc.orig, "sqlstate", None) != "40001":
+                    raise
+                blocked.append(
+                    {
+                        "observation_id": observation_id,
+                        "reason": "观察状态在生成期间发生变化，请重新确认运行版本后重试",
+                    }
+                )
+                continue
             if not observation.active:
                 continue
             try:
@@ -773,6 +793,18 @@ def generate_signals():
                 db.add(signal)
                 db.commit()
                 created.append(signal_payload(db, signal))
+            except IntegrityError as exc:
+                # 重复生成可能在等待观察锁前取得旧快照；唯一约束保证只发布一次。
+                if getattr(getattr(exc.orig, "diag", None), "constraint_name", None) != "uq_strategy_signal_observation_day":
+                    raise
+                db.rollback()
+                saved = db.scalar(select(StrategySignal).where(
+                    StrategySignal.observation_id == observation_id,
+                    StrategySignal.execution_date == execution,
+                ))
+                if saved is None:
+                    raise
+                existing.append(signal_payload(db, saved))
             except ValueError as exc:
                 blocked.append(
                     {
@@ -823,6 +855,8 @@ def signal_payload(db, signal):
     status = (
         "skipped"
         if signal.skip_note
+        else "quantity_unknown"
+        if signal.plan_snapshot.get("quantity_status") == "unknown"
         else "no_action"
         if wanted == 0
         else "unconfirmed"
@@ -896,7 +930,7 @@ def execution_candidates(signal_id: int):
                 }
                 for r in rows
             ]
-            if signal.plan_snapshot["action"] != "hold"
+            if signal.plan_snapshot["action"] in ("buy", "sell") and signal.plan_snapshot.get("quantity_status") != "unknown"
             else []
         )
 
@@ -916,7 +950,8 @@ def link_execution(signal_id: int, body: ExecutionRequest):
         if (
             not body.confirm_plan_preceded_trade
             or signal.skip_note
-            or signal.plan_snapshot["action"] == "hold"
+            or signal.plan_snapshot["action"] not in ("buy", "sell")
+            or signal.plan_snapshot.get("quantity_status") == "unknown"
             or body.confirmed_trade_date != signal.execution_date
             or body.confirmed_trade_date > now().astimezone(TZ).date()
             or (
@@ -992,6 +1027,10 @@ def review_observation(observation_id: int):
         observation = db.get(StrategyObservation, observation_id)
         if not observation:
             raise HTTPException(404, "观察版本不存在")
+        if observation.strategy_version_id is not None:
+            from app.strategy_plans import review_saved_observation
+
+            return review_saved_observation(db, observation, now())
         adopted_at = observation.created_at.astimezone(TZ)
         source = db.get(BacktestSource, observation.instrument_code)
         rows = source_rows(
@@ -1053,8 +1092,11 @@ def review_observation(observation_id: int):
 def collect_signals(run_id):
     """独立任务5记录08:30计划生成结果，失败不阻塞行情或账户同步。"""
     from app.models import Run
+    from app.strategy_plans import prepare_signal_dependencies
 
+    dependency_errors = prepare_signal_dependencies()
     result = generate_signals()
+    result["blocked"].extend(dependency_errors)
     logs = [
         {"status": "failed", "code": r.get("instrument_code"), "message": r["reason"]}
         for r in result["blocked"]

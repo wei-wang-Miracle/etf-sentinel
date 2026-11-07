@@ -57,7 +57,7 @@ type Research = {
   note: string;
 };
 
-export default function EtfReview({ theme }: { theme: string }) {
+export default function EtfReview({ theme, fixedObject = false }: { theme: string; fixedObject?: boolean }) {
   const researchGeneration = useRef(0);
   const [query, update] = useResearchQuery({
     code: "510500",
@@ -177,6 +177,7 @@ export default function EtfReview({ theme }: { theme: string }) {
           <label>
             ETF{" "}
             <select
+              disabled={fixedObject}
               value={code}
               onChange={(e) => update({ code: e.target.value })}
             >

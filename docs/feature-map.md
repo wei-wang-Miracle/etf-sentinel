@@ -29,8 +29,11 @@
 
 | 功能 | 主归属 | 状态 | 依赖与边界 | 设计或实现入口 |
 | --- | --- | --- | --- | --- |
+| 面向个人的单 ETF 策略流程 | 策略研究 | 已实现 | 三入口与单ETF流程；支持非持仓ETF，中文条件配置、回测比较、保存启用和每日信号；不做组合，不改写历史结果 | [单ETF流程设计稿](superpowers/specs/2026-11-07-single-etf-strategy-journey-design.md) |
+| 同 ETF 自定义策略对比 | 策略研究 | 已实现 | 属于单ETF流程，依赖策略版本、统一回测及真实复盘；统一区间、本金、成本与数据版本重算，保留原结果；真实收益可比时作参照，缺失不阻断策略比较，不凭历史收益推断策略归属 | [策略对比设计](superpowers/specs/2026-11-07-single-etf-strategy-journey-design.md#51-同一只-etf-的自定义策略对比) |
 | 前后端工程初始化 | 工程基础 | 已实现 | 已扩展业务页面、迁移及采集；Docker Hub 连接受阻，三容器启动未验证 | [前端](../web/src/App.tsx)、[API](../api/app/main.py)、[Compose](../compose.yaml)、[初始化清单](superpowers/plans/2026-11-05-initialize.md) |
 | 投研简报视觉融合 | 工程基础 | 已实现 | 暖纸亮色、宋体标题、朱红操作强调、连续指标条；保留暗色和业务语义色 | [设计契约](design-contract.md)、[主题变量](../web/src/styles/tokens.css) |
+| 前端视觉精修 | 工程基础 | 已实现 | 统一导航线条图标、筛选控件、间距和图注字号；中性选中态、窄屏换行；不改变业务口径 | [设计契约](design-contract.md#前端视觉精修)、[共享样式](../web/src/styles/global.css) |
 | 数据库语义与注释规范 | 工程基础 | 已实现 | 原地重命名迁移，不删除行情 | [数据库说明](database.md) |
 | 本地一键启动 | 工程基础 | 已实现 | Docker仅运行PostgreSQL；本机前后端支持start/restart、进程互斥与安全清理 | [启动脚本](../scripts/start-local.sh) |
 | 20只 ETF 统一标的配置 | 数据基础 | 已实现 | 原五只与国家队18只去重，采集开关、起点、覆盖范围 | [配置页](../web/src/pages/Instruments.tsx)、[功能说明](daily-data.md) |
@@ -49,8 +52,8 @@
 | 全账户复盘与现金基线 | 投资记录与复盘 | 待讨论 | 需要现金余额、配置外持仓、LOF/逆回购；当前不实施 | [设计](superpowers/specs/2026-11-06-real-account-review-design.md) |
 
 | 8个关联指数五类估值及指数日K采集 | 数据基础 | 已实现 | 20ETF映射去重、任务4、增量写入、修订证据、失败恢复 | [指数估值说明](index-valuations.md)、[采集](../api/app/index_collection.py) |
-| 指数估值与走势对照 | 投研分析 | 已实现 | 中文图表优先、来源分位与本地十日历年回看分位分开；当前不接入回测，研究模式接入设计已确认待实现 | [估值页](../web/src/pages/IndexValuations.tsx)、[设计](superpowers/specs/2026-11-06-index-valuation-design.md) |
-| 研究对象详情合并 | 投研分析 | 已实现 | ETF唯一主体、旧指数URL映射关联ETF、分区懒加载、五估值、情绪背景、国家队、个人摘要、研究入口与URL迁移；因子后接 | [设计](superpowers/specs/2026-11-06-research-object-design.md)、[页面](../web/src/pages/ResearchObject.tsx) |
+| 指数估值与走势对照 | 投研分析 | 已实现 | 中文图表优先、来源分位与本地十日历年回看分位分开；单ETF自定义条件支持修订历史研究，不声称原时点已知 | [估值页](../web/src/pages/IndexValuations.tsx)、[设计](superpowers/specs/2026-11-06-index-valuation-design.md) |
+| 研究对象详情合并 | 投研分析 | 已实现 | ETF唯一主体、旧指数URL映射关联ETF、分区懒加载、五估值、情绪背景、国家队、个人摘要、研究入口与URL迁移；自定义策略条件见单ETF策略说明 | [设计](superpowers/specs/2026-11-06-research-object-design.md)、[页面](../web/src/pages/ResearchObject.tsx) |
 | 横向同维度对比 | 投研分析 | 已实现 | 当前持仓默认／全部配置切换，ETF关联估值、资金与趋势；情绪单列背景；同日排名、共享指数提示、六线图、热力图与URL | [设计](superpowers/specs/2026-11-06-cross-comparison-design.md)、[页面](../web/src/pages/Compare.tsx) |
 
 分析页采用紧凑筛选与图表优先布局，移除底部数据明细表；配置与日志保留。

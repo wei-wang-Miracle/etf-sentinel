@@ -139,3 +139,16 @@ alembic check
 集合头和明细通过单条SQL在同一快照读取；同日消失仓位不继续作为当前持仓，
 解析失败不覆盖上次完整集合。旧记录缺少集合证据时保留兼容回退，重新完整同步后采用新证据。
 所有业务表及字段的名称、类型、约束和中文注释由独立测试库检查。
+
+## 单ETF策略版本与比较
+
+迁移 `0012_single_etf_strategies.py` 新增四张业务表，模型与落库均含中文注释。
+
+- `saved_strategies`：单ETF命名策略身份。
+- `saved_strategy_versions`：不可变规则、共同回测设置及结果关联。
+- `strategy_comparisons`：统一假设的比较结果、冻结输入与校验摘要。
+- `strategy_drafts`：可恢复的ETF编辑草稿。
+
+`strategy_observations.strategy_version_id` 可空关联新版本，旧观察不强行补关联。
+同ETF启用互斥；每日预览与生成以一致数据库快照读取账户和数据，避免并发同步
+拼接持仓集合与明细。序列化冲突明确阻断，不当作成功。

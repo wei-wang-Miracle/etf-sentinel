@@ -1,39 +1,49 @@
 import { useEffect, useState } from "react";
-import Instruments from "./pages/Instruments";
-import Jobs from "./pages/Jobs";
-import Backtests from "./pages/Backtests";
-import Review from "./pages/Review";
 import Compare from "./pages/Compare";
-import ResearchObject from "./pages/ResearchObject";
+import MyEtfs from "./pages/MyEtfs";
+import MyStrategies from "./pages/MyStrategies";
+import DataManagement from "./pages/DataManagement";
+import "./styles/strategy-journey.css";
 
 const pages = [
-  { key: "research", label: "研究对象", icon: "⌕" },
-  { key: "backtests", label: "策略回测", icon: "⌁" },
-  { key: "review", label: "投资复盘", icon: "▦" },
-  { key: "compare", label: "横向对比", icon: "≋" },
-  { key: "instruments", label: "标的配置", icon: "≡" },
-  { key: "jobs", label: "定时任务", icon: "◷" },
+  { key: "etfs", label: "我的 ETF", icon: "M10 17a7 7 0 1 0 0-14 7 7 0 0 0 0 14Zm5-2 6 6" },
+  { key: "strategies", label: "我的策略", icon: "M3 3v18h18M6 15l4-5 4 3 6-8" },
+  { key: "data", label: "数据管理", icon: "M3 6h18M3 12h18M3 18h18M8 4v4M16 10v4M10 16v4" },
 ];
 function pageFromUrl() {
   const query = new URLSearchParams(location.search);
   const old = query.get("page");
-  const routes: Record<string, { page: string; object?: string; tab?: string; dimension?: string }> = {
-    market: { page: "research", object: `etf:${query.get("code") ?? "510500"}`, tab: "price" },
-    "national-team": { page: "research", object: `etf:${query.get("code") ?? "510500"}`, tab: "funds" },
-    "index-valuations": { page: "research", object: `index:${query.get("code") ?? "000905.SH"}`, tab: "valuation" },
-    sentiment: { page: "compare", dimension: "sentiment" },
+  const routes: Record<string, Record<string, string>> = {
+    research: { page: "etfs", detail: "overview" },
+    review: { page: "etfs", detail: "operations", code: query.get("code") ?? "510500" },
+    backtests: { page: "strategies", view: "legacy" },
+    compare: { page: "etfs", auxiliary: "compare" },
+    instruments: { page: "data", manage: "instruments" },
+    jobs: { page: "data", manage: "jobs" },
+    market: { page: "etfs", object: `etf:${query.get("code") ?? "510500"}`, detail: "overview", tab: "price" },
+    "national-team": { page: "etfs", object: `etf:${query.get("code") ?? "510500"}`, detail: "overview", tab: "funds" },
+    "index-valuations": { page: "etfs", object: `index:${query.get("code") ?? "000905.SH"}`, detail: "overview", tab: "valuation" },
+    sentiment: { page: "etfs", auxiliary: "compare", dimension: "sentiment" },
   };
   if (old && routes[old]) {
     Object.entries(routes[old]).forEach(([key, value]) => query.set(key, value));
     if (old === "sentiment" && query.get("category")) query.set("codes", query.get("category")!);
     history.replaceState(null, "", `?${query}`);
   }
-  return pages.some((item) => item.key === query.get("page")) ? query.get("page")! : "research";
+  if (query.get("code") && !query.has("object")) {
+    query.set("object", `etf:${query.get("code")}`);
+    history.replaceState(null, "", `?${query}`);
+  } else if (query.get("object")?.startsWith("etf:") && !query.has("code")) {
+    query.set("code", query.get("object")!.slice(4));
+    history.replaceState(null, "", `?${query}`);
+  }
+  return pages.some((item) => item.key === query.get("page")) ? query.get("page")! : "etfs";
 }
 export default function App() {
   const [page, setPage] = useState(pageFromUrl);
-  useEffect(() => { const changed = () => setPage(pageFromUrl()); window.addEventListener("popstate", changed); return () => window.removeEventListener("popstate", changed); }, []);
-  function navigate(next: string) { const query = new URLSearchParams(location.search); query.set("page", next); history.pushState(null, "", `?${query}`); setPage(next); }
+  const [, refreshUrl] = useState(0);
+  useEffect(() => { const changed = () => { setPage(pageFromUrl()); refreshUrl((old) => old + 1); }; window.addEventListener("popstate", changed); return () => window.removeEventListener("popstate", changed); }, []);
+  function navigate(next: string) { history.pushState(null, "", `?page=${next}`); setPage(next); window.dispatchEvent(new PopStateEvent("popstate")); }
   const [collapsed, setCollapsed] = useState(false);
   const [theme, setTheme] = useState(
     () => localStorage.getItem("theme") ?? "dark",
@@ -61,8 +71,11 @@ export default function App() {
           className="collapse-button"
           onClick={() => setCollapsed(!collapsed)}
           aria-label={collapsed ? "展开导航" : "折叠导航"}
+          aria-expanded={!collapsed}
         >
-          {collapsed ? "»" : "«"}
+          <svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d={collapsed ? "m9 6 6 6-6 6" : "m15 6-6 6 6 6"} />
+          </svg>
         </button>
         {!collapsed && <div className="nav-label">研究工作台</div>}
         <nav aria-label="主导航">
@@ -72,9 +85,12 @@ export default function App() {
               className={`nav-item ${page === p.key ? "active" : ""}`}
               aria-current={page === p.key ? "page" : undefined}
               title={p.label}
+              aria-label={p.label}
               onClick={() => navigate(p.key)}
             >
-              <span aria-hidden="true">{p.icon}</span>
+              <svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d={p.icon} />
+              </svg>
               {!collapsed && p.label}
             </button>
           ))}
@@ -108,19 +124,7 @@ export default function App() {
           </div>
         </div>
         <main>
-          {page === "backtests" ? (
-            <Backtests theme={theme} />
-          ) : page === "review" ? (
-            <Review theme={theme} />
-          ) : page === "compare" ? (
-            <Compare theme={theme} />
-          ) : page === "research" ? (
-            <ResearchObject theme={theme} />
-          ) : page === "instruments" ? (
-            <Instruments />
-          ) : (
-            <Jobs initialTask="etf" />
-          )}
+          {page === "strategies" ? <MyStrategies theme={theme} /> : page === "data" ? <DataManagement key={new URLSearchParams(location.search).get("manage") ?? "instruments"} initialTab={new URLSearchParams(location.search).get("manage") ?? "instruments"} /> : new URLSearchParams(location.search).get("auxiliary") === "compare" ? <><a href="?page=etfs">← 返回我的 ETF</a><Compare theme={theme} /></> : <MyEtfs theme={theme} />}
         </main>
         <div className="workspace-footer">
           <span>投研工作台</span>

@@ -24,8 +24,11 @@ export function useResearchQuery(defaults: Record<string, string>) {
   function update(values: Record<string, string>) {
     const query = new URLSearchParams(location.search);
     Object.entries(values).forEach(([key, value]) => query.set(key, value));
+    if (values.object?.startsWith("etf:")) query.set("code", values.object.slice(4));
+    else if (values.code && query.get("object")?.startsWith("etf:")) query.set("object", `etf:${values.code}`);
     history.replaceState(null, "", `?${query}`);
     setState((old) => ({ ...old, ...values }));
+    window.dispatchEvent(new PopStateEvent("popstate"));
   }
   return [state, update] as const;
 }

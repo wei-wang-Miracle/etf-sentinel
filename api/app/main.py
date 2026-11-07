@@ -22,6 +22,7 @@ from app.research_routes import router as research_router
 from app.review_routes import router as review_router
 from app.sentiment_routes import router as sentiment_router
 from app.strategy_lab import router as strategy_lab_router
+from app.strategy_workbench import router as strategy_workbench_router
 
 
 @asynccontextmanager
@@ -49,6 +50,7 @@ app.include_router(index_valuation_router)
 app.include_router(research_router)
 app.include_router(review_router)
 app.include_router(strategy_lab_router)
+app.include_router(strategy_workbench_router)
 
 
 class InstrumentUpdate(BaseModel):

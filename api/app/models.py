@@ -553,6 +553,7 @@ class StrategyObservation(Base):
         {"comment": "ETF策略观察版本；采用规则不代表已下单或实际成交，修改规则需新建版本"},
     )
     observation_id: Mapped[int] = mapped_column(primary_key=True, comment="观察版本唯一编号")
+    strategy_version_id: Mapped[int | None] = mapped_column(ForeignKey("saved_strategy_versions.strategy_version_id"), nullable=True, comment="自定义策略版本编号；NULL表示旧持仓候选观察，保留原批次语义")
     research_batch_id: Mapped[int] = mapped_column(ForeignKey("strategy_research_batches.research_batch_id"), comment="规则来源研究批次编号")
     instrument_code: Mapped[str] = mapped_column(ForeignKey("instruments.instrument_code"), comment="可交易ETF六位代码，指数不得作为观察对象")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), comment="用户采用时间，带时区；此前历史不算前向业绩")
@@ -598,3 +599,54 @@ class StrategyExecutionLink(Base):
     confirmed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), comment="人工关联确认时间，带时区；不当作成交时间")
     confirmed_amount: Mapped[Decimal] = mapped_column(Numeric(20, 4), comment="确认时源累计成交份额快照，份；源后续变化用于展示修订差异")
     confirmation_note: Mapped[str] = mapped_column(comment="人工确认依据或偏离说明，不可空白；不包含自动下单含义")
+
+
+class SavedStrategy(Base):
+    """同一ETF用户策略的稳定身份，规则变化由独立版本承接。"""
+
+    __tablename__ = "saved_strategies"
+    __table_args__: ClassVar[dict] = {"comment": "用户命名的单ETF策略身份；保存不自动启用，不代表真实交易"}
+    strategy_id: Mapped[int] = mapped_column(primary_key=True, comment="自定义策略稳定编号，同一策略的各不可变版本共用")
+    instrument_code: Mapped[str] = mapped_column(ForeignKey("instruments.instrument_code"), comment="绑定的可交易ETF六位证券代码，指数不可作为主体")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), comment="首次保存策略身份的带时区本地时间")
+
+
+class StrategyComparison(Base):
+    """冻结同ETF各版本的统一条件、数据及成功失败结果。"""
+
+    __tablename__ = "strategy_comparisons"
+    __table_args__: ClassVar[dict] = {"comment": "单ETF自定义策略统一比较记录；包含失败对象及研究证据类型，不覆盖既有回测或启用状态"}
+    comparison_id: Mapped[int] = mapped_column(primary_key=True, comment="本次统一比较的唯一编号")
+    instrument_code: Mapped[str] = mapped_column(ForeignKey("instruments.instrument_code"), comment="比较的唯一可交易ETF证券代码")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), comment="比较完成并保存的带时区本地时间")
+    input_sha256: Mapped[str] = mapped_column(String(64), comment="规范输入JSON的SHA256，包括策略版本、共同假设及全部输入快照")
+    input_snapshot: Mapped[dict] = mapped_column(JSON, comment="不可变JSON：settings统一区间本金费用、candidates规则与版本、market行情权益日历、external各日期外部指标与采集证据、引擎与条件版本")
+    result_snapshot: Mapped[dict] = mapped_column(JSON, comment="不可变JSON：tracks各策略与持有参照的status成功失败、reason原因、backtest_id、account日权益成交分红绩效、diagnostics及evidence_type；complete表示全部成功")
+
+
+class SavedStrategyVersion(Base):
+    """有效回测产生的不可变策略版本，启用状态由观察记录表示。"""
+
+    __tablename__ = "saved_strategy_versions"
+    __table_args__: ClassVar[tuple] = (
+        Index("uq_saved_strategy_version", "strategy_id", "version_number", unique=True),
+        {"comment": "自定义策略不可变版本；规则、预算、费用和原回测固定，编辑需保存新版本"},
+    )
+    strategy_version_id: Mapped[int] = mapped_column(primary_key=True, comment="自定义策略具体版本唯一编号，与稳定strategy_id不同")
+    strategy_id: Mapped[int] = mapped_column(ForeignKey("saved_strategies.strategy_id"), comment="归属策略稳定编号")
+    version_number: Mapped[int] = mapped_column(comment="同一策略内从1递增的版本号")
+    strategy_name: Mapped[str] = mapped_column(String(100), comment="此版本的用户可读中文策略名称，非收益承诺")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), comment="版本保存时间，带时区")
+    configuration: Mapped[dict] = mapped_column(JSON, comment="不可变JSON：rule买卖条件组及资金分配、settings回测日期本金成本；条件含指标参数比较符阈值，单位由条件注册版本定义")
+    backtest_run_id: Mapped[int] = mapped_column(ForeignKey("backtest_runs.backtest_run_id"), comment="已成功核算且规则配置相符的不可变原回测编号")
+    comparison_id: Mapped[int] = mapped_column(ForeignKey("strategy_comparisons.comparison_id"), comment="产生该有效回测的统一比较编号")
+
+
+class StrategyDraft(Base):
+    """每ETF保留最近编辑内容，不将未经回测草稿当成已启用规则。"""
+
+    __tablename__ = "strategy_drafts"
+    __table_args__: ClassVar[dict] = {"comment": "单ETF最近编辑草稿；可覆盖保存，独立于不可变策略版本和观察状态"}
+    instrument_code: Mapped[str] = mapped_column(ForeignKey("instruments.instrument_code"), primary_key=True, comment="草稿绑定ETF六位证券代码，一只ETF一份最近草稿")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), comment="最近保存草稿的带时区本地时间")
+    draft_snapshot: Mapped[dict] = mapped_column(JSON, comment="可恢复草稿JSON：name名称、rule完整买卖条件及投入、settings日期本金成本、strategy_id原策略编号或空；不意味着有效回测")

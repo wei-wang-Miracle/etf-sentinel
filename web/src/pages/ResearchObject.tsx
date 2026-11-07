@@ -95,7 +95,7 @@ const investmentNames: Record<string, string> = {
   not_traded: "尚无实际成交",
 };
 
-export default function ResearchObject({ theme }: { theme: string }) {
+export default function ResearchObject({ theme, fixedObject = false }: { theme: string; fixedObject?: boolean }) {
   const [query, update] = useResearchQuery({
     object: "",
     legacy_index: "",
@@ -250,10 +250,11 @@ export default function ResearchObject({ theme }: { theme: string }) {
       </header>
       <section className="panel research-chart-panel integrated-research">
         <div className="panel-header">
-          <label>
+          <label className="compact-selector">
             研究对象{" "}
             <select
               aria-label="研究对象"
+              disabled={fixedObject}
               value={`${kind}:${code}`}
               onChange={(e) => update({ object: e.target.value, legacy_index: "" })}
             >

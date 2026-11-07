@@ -37,10 +37,12 @@ export default function KLine({
   holdings,
   indexPoints = false,
   trades = [],
+  onTrade,
 }: {
   indexPoints?: boolean;
-  trades?: { trade_date: string; side: string; quantity: string; price: string }[];
-  rows: Candle[];
+  trades?: { trade_date: string; side: string; quantity: string; price: string; source?: "simulation" | "actual" }[];
+  onTrade?: (index: number) => void;
+  rows: Omit<Candle, "amount">[];
   theme: string;
   holdings?: { trade_date: string; estimated_holding_pct: number | null }[];
 }) {
@@ -127,6 +129,9 @@ export default function KLine({
           `<div style="margin-top:3px">国家队估算持仓比例 <span style="color:${palette.chart2}">${holding == null ? "—" : `${holding.toFixed(2)}%`}</span></div>`,
         );
       }
+      trades.filter((trade) => trade.trade_date === day).forEach((trade) => {
+        lines.push(`<div>${trade.source === "simulation" ? "模拟" : "真实记录"}${trade.side === "buy" ? "买入" : "卖出"} ${escapeHtml(trade.quantity)} 份 @ ${escapeHtml(trade.price)} 元</div>`);
+      });
       return lines.join("");
     };
     chart.setOption({
@@ -236,9 +241,12 @@ export default function KLine({
       series: [
         {
           type: "candlestick",
-          markPoint: { symbolSize: 30, data: trades.map((trade) => ({
-            name: trade.side === "buy" ? "实际买入（委托日）" : "实际卖出（委托日）",
-            coord: [trade.trade_date, Number(trade.price)], value: trade.side === "buy" ? "买" : "卖",
+          markPoint: { symbolSize: 30, data: trades.map((trade, tradeIndex) => ({
+            name: `${trade.source === "simulation" ? "模拟" : "实际（委托日）"}${trade.side === "buy" ? "买入" : "卖出"}`,
+            coord: [trade.trade_date, Number(trade.price)], value: `${trade.source === "simulation" ? "模" : "实"}${trade.side === "buy" ? "买" : "卖"}`,
+            symbol: trade.source === "simulation" ? "triangle" : "pin",
+            symbolRotate: trade.source === "simulation" && trade.side === "sell" ? 180 : 0,
+            tradeIndex: trade.source === "simulation" ? tradeIndex : null,
             itemStyle: { color: trade.side === "buy" ? palette.up : palette.down },
             label: { color: palette.surface, fontSize: 10 },
           })) },
@@ -311,13 +319,17 @@ export default function KLine({
             },
       ],
     });
+    chart.on("click", (event) => {
+      const data = event.data as { tradeIndex?: number | null } | undefined;
+      if (data?.tradeIndex != null) onTrade?.(data.tradeIndex);
+    });
     const observer = new ResizeObserver(() => chart.resize());
     observer.observe(element.current);
     return () => {
       observer.disconnect();
       chart.dispose();
     };
-  }, [rows, theme, holdings, indexPoints, trades]);
+  }, [rows, theme, holdings, indexPoints, trades, onTrade]);
   return (
     <div
       className={`kline ${holdings ? "holdings-comparison-chart" : ""}`}
