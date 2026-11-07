@@ -10,6 +10,7 @@ import {
 } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
 import { api, stamp } from "../lib/api";
+import ChartReadout from "../components/ChartReadout";
 import ChartCaption from "../components/ChartCaption";
 import { escapeHtml, chartStamp, readChartPalette } from "../lib/chart";
 
@@ -35,12 +36,13 @@ type Category = {
   collected_at: string | null;
   source: string;
 };
-type Daily = {
+export type SentimentDaily = {
   trade_date: string;
   fear_greed_score: number;
   close_price: number | null;
   collected_at: string;
 };
+type Daily = SentimentDaily;
 const today = () =>
   new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Shanghai" });
 function yearsAgo(years: number) {
@@ -53,7 +55,7 @@ function sentimentTone(label: string | null) {
   if (label?.includes("贪婪")) return "greed";
   return "neutral";
 }
-function Trend({ rows, theme }: { rows: Daily[]; theme: string }) {
+export function SentimentTrend({ rows, theme }: { rows: Daily[]; theme: string }) {
   const element = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!element.current) return;
@@ -90,11 +92,11 @@ function Trend({ rows, theme }: { rows: Daily[]; theme: string }) {
         textStyle: {
           color: palette.ink,
           fontFamily: palette.fontFamily,
-          fontSize: 11,
+          fontSize: 12,
         },
         formatter: tooltip,
       },
-      grid: { left: 55, right: 112, top: 32, bottom: 65 },
+      grid: { left: element.current.clientWidth < 500 ? 40 : 55, right: element.current.clientWidth < 500 ? 60 : 112, top: 32, bottom: 65 },
       xAxis: {
         type: "category",
         data: rows.map((r) => r.trade_date),
@@ -103,7 +105,7 @@ function Trend({ rows, theme }: { rows: Daily[]; theme: string }) {
         axisLabel: {
           color: palette.muted,
           fontFamily: palette.fontFamily,
-          fontSize: 10,
+          fontSize: 12,
         },
       },
       yAxis: [
@@ -116,12 +118,12 @@ function Trend({ rows, theme }: { rows: Daily[]; theme: string }) {
           nameTextStyle: {
             color: palette.fear,
             fontFamily: palette.fontFamily,
-            fontSize: 10,
+            fontSize: 12,
           },
           axisLabel: {
             color: palette.muted,
             fontFamily: palette.fontFamily,
-            fontSize: 10,
+            fontSize: 12,
           },
           splitLine: { lineStyle: { color: palette.border, opacity: 0.45 } },
         },
@@ -132,12 +134,12 @@ function Trend({ rows, theme }: { rows: Daily[]; theme: string }) {
           nameTextStyle: {
             color: palette.chart2,
             fontFamily: palette.fontFamily,
-            fontSize: 10,
+            fontSize: 12,
           },
           axisLabel: {
             color: palette.chart2,
             fontFamily: palette.fontFamily,
-            fontSize: 10,
+            fontSize: 12,
             formatter: (value: number) => value.toFixed(0),
           },
           splitLine: { show: false },
@@ -192,7 +194,7 @@ function Trend({ rows, theme }: { rows: Daily[]; theme: string }) {
           endLabel: {
             show: true,
             color: palette.chart2,
-            fontSize: 9,
+            fontSize: 12,
             fontFamily: palette.fontFamily,
             formatter: (params: { value?: unknown }) => {
               const value = Number(params.value);
@@ -212,12 +214,12 @@ function Trend({ rows, theme }: { rows: Daily[]; theme: string }) {
     };
   }, [rows, theme]);
   return (
-    <div
+    <><div
       ref={element}
       className="sentiment-chart"
       role="img"
       aria-label="恐贪分数与指数点位双轴历史图，左轴分数0至100，右轴指数点位，共享日期和缩放"
-    />
+    /><ChartReadout rows={rows.map(row => ({ date: row.trade_date, values: { "恐贪分数": String(row.fear_greed_score), "指数点位": row.close_price == null ? "—" : String(row.close_price) } }))} /></>
   );
 }
 export default function Sentiment({
@@ -408,7 +410,7 @@ export default function Sentiment({
                 meta={`${start} ~ ${end} · 左轴 0–100 / 右轴指数点位 · 来源：韭圈 · 生成：${chartStamp()}`}
                 disclaimer="恐贪不是买卖信号；分数连续着色不代表源阈值。仅供研究。"
               />
-              <Trend rows={rows} theme={theme} />
+              <SentimentTrend rows={rows} theme={theme} />
               <div className="panel-footer">
                 两条曲线使用独立刻度；悬停对照同日数据，滚轮或底部滑块缩放。分数连续着色，不代表源情绪阈值；指数缺失不补零。
               </div>

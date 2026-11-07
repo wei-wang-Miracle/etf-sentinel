@@ -49,12 +49,10 @@ export default function StrategyComparison({ result, theme }: { result: Comparis
     <div className="journey-section-heading"><div><h2>同一只 ETF，比较不同方法</h2><p className="muted mono">{code} · {start} 至 {end} · 研究本金 {number(result.settings.initial_cash)} 元</p></div><button disabled={verifying} onClick={() => void verify()}>{verifying ? "复算中…" : "核验这次比较"}</button></div>
     {!result.complete && <p className="notice warning">本次比较不完整，失败对象保留如下；不能将失败当作零收益。</p>}
     {verification && <p className="notice" role="status">{verification}</p>}
-    <div className="journey-tracks" aria-label="策略指标对照">
-      {result.tracks.map((row) => <article key={row.key} className={`journey-track ${track?.key === row.key ? "selected" : ""}`}>
-        <h3>{row.name}</h3><p className="muted">{row.evidence_type === "revised" || row.evidence_type.includes("revis") ? "修订历史研究 · 未证明当时可得" : "历史回测模拟"}</p>
-        {row.account ? <><dl className="journey-metrics"><div><dt>收益率</dt><dd className={row.account.metrics.total_return >= 0 ? "up" : "down"}>{percent(row.account.metrics.total_return)}</dd></div><div><dt>赚亏金额</dt><dd>{number(Number(row.account.metrics.final_equity) - Number(result.settings.initial_cash))} 元</dd></div><div><dt>最大回撤</dt><dd>{percent(row.account.metrics.max_drawdown)}</dd></div><div><dt>交易次数</dt><dd>{row.account.metrics.trade_count}</dd></div><div><dt>佣金／滑点成本</dt><dd>{number(row.account.metrics.commission)}／{number(row.account.metrics.slippage_cost)} 元</dd></div><div><dt>在场时间</dt><dd>{percent(row.diagnostics?.time_in_market ?? null)}</dd></div></dl><button onClick={() => { setSelected(row.key); setTradeIndex(0); }} aria-pressed={track?.key === row.key}>查看买卖点</button></> : <p className="notice warning">{row.reason ?? "本次未能完成计算"}</p>}
-      </article>)}
-    </div>
+    <div className="strategy-matrix" role="region" aria-label="策略指标对照滚动区域" tabIndex={0}><table aria-label="策略指标对照"><thead><tr><th>比较指标</th>{result.tracks.map((row) => <th key={row.key}>{row.name}<p className="muted">{row.evidence_type.includes("revis") ? "修订历史研究 · 未证明当时可得" : "历史回测模拟"}</p></th>)}</tr></thead><tbody>
+      {["收益率", "最大回撤", "模拟盈亏（元）", "交易次数", "佣金／滑点成本（元）", "在场时间"].map((label, index) => <tr key={label}><th scope="row">{label}</th>{result.tracks.map((row) => <td key={row.key}>{row.account ? [percent(row.account.metrics.total_return), percent(row.account.metrics.max_drawdown), number(Number(row.account.metrics.final_equity) - Number(result.settings.initial_cash)), row.account.metrics.trade_count, `${number(row.account.metrics.commission)}／${number(row.account.metrics.slippage_cost)}`, percent(row.diagnostics?.time_in_market ?? null)][index] : index === 0 ? row.reason ?? "本次未能完成计算" : "—"}</td>)}</tr>)}
+      <tr><th scope="row">模拟交易解释</th>{result.tracks.map((row) => <td key={row.key}>{row.account ? <button onClick={() => { setSelected(row.key); setTradeIndex(0); }} aria-pressed={track?.key === row.key}>查看买卖点</button> : "计算失败"}</td>)}</tr>
+    </tbody></table></div>
     <section className="panel">
       <div className="panel-header"><h2>资金曲线与回撤</h2><div className="journey-actions"><button aria-pressed={field === "nav"} onClick={() => setField("nav")}>研究净值</button><button aria-pressed={field === "drawdown"} onClick={() => setField("drawdown")}>回撤</button></div></div>
       <ResearchChart theme={theme} unit={field === "nav" ? "净值" : "%"} series={tracks.map((row) => ({ name: `${row.name} · 模拟`, points: row.account!.daily.map((day) => [day.trade_date, day[field] * (field === "nav" ? 1 : 100)]) }))} />
@@ -66,13 +64,13 @@ export default function StrategyComparison({ result, theme }: { result: Comparis
       <ChartCaption title={`${code} · 日 K 与买卖点`} meta="财通证券原始日行情的本次冻结快照 · 复权口径未确认 · 模拟为三角标记，真实为图钉标记；真实标记日期为累计委托所属日，待核验" />
       {track?.account?.trades.length ? <div className="journey-inset"><label>逐次交易解释 <select value={tradeIndex} onChange={(e) => setTradeIndex(Number(e.target.value))}>{track.account.trades.map((row, index) => <option key={index} value={index}>{row.trade_date} · {row.side === "buy" ? "买入" : "卖出"} · {row.quantity} 份</option>)}</select></label>{trade && <p>信号日 <span className="mono">{trade.signal_date ?? "区间首日参照"}</span> → 模拟执行 <span className="mono">{trade.trade_date}</span>；{trade.reason}；价格 {trade.price} 元，佣金 {trade.commission} 元。</p>}</div> : <p className="journey-inset muted">这条策略在所选区间没有模拟成交。</p>}
     </section>
-    <section className="panel journey-inset">
-      <h2>我的真实操作 · 独立核算</h2>
+    <details className="panel journey-inset">
+      <summary>我的真实操作 · 独立核算</summary>
       <p className="muted">实际资金路径与固定本金回测不同，不用真实 XIRR 减去回测收益率，也不将个人历史收益自动归属某条策略。</p>
       <div className="journey-confirmations"><label><input type="checkbox" checked={opening} onChange={(e) => setOpening(e.target.checked)} />依据对账资料确认：2025-01-20 同步起点前该 ETF 持仓为零</label><label><input type="checkbox" checked={dates} onChange={(e) => setDates(e.target.checked)} />依据对账资料确认：累计成交属于委托日期</label></div>
       {actualError ? <p className="notice warning">真实操作暂不可核算：{actualError}。策略比较仍可使用。</p> : !actual ? <p role="status">正在核验真实记录…</p> : actual.actual.status === "ready" || actual.actual.net_pnl != null ? <dl className="journey-metrics"><div><dt>真实净盈亏</dt><dd>{number(actual.actual.net_pnl)} 元</dd></div><div><dt>实际费用</dt><dd>{number(actual.actual.fees)} 元</dd></div><div><dt>真实 XIRR（非区间收益率）</dt><dd>{percent(actual.actual.xirr ?? null)}</dd></div></dl> : <div className="notice warning">{actual.actual.reasons?.join("；") ?? "暂无可核算的真实收益"}。可继续比较其他策略。</div>}
       {actual && <p className="muted">{actual.comparability}</p>}
-    </section>
+    </details>
     <details className="journey-inset"><summary>本次计算依据</summary><p>佣金率 {result.settings.commission_rate}，最低佣金 {result.settings.minimum_commission} 元，不利滑点 {result.settings.slippage_bps} 基点。输入摘要 <span className="journey-digest mono">{result.input_sha256}</span>。</p><p>每条策略保留自身规则和投入比例。研究模拟不等于真实收益；没有自动选择或启用胜者。</p></details>
   </div>;
 }

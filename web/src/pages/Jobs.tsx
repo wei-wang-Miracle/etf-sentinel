@@ -1,32 +1,21 @@
 import { useEffect, useState } from "react";
 import { api, stamp, statusNames, type Job, type Run } from "../lib/api";
+import { useResearchQuery } from "../lib/research";
+import Tabs from "../components/Tabs";
 
 export default function Jobs({
   initialTask = "etf",
 }: {
   initialTask?: string;
 }) {
-  const [task, setTask] = useState(initialTask);
+  const [query, update] = useResearchQuery({ task: initialTask });
+  const tasks = [["etf", "基金日行情"], ["sentiment", "行业恐贪"], ["national-team", "国家队持仓"], ["index-valuations", "指数估值"], ["strategy-signals", "策略日计划"]];
+  const task = tasks.some(([key]) => key === query.task) ? query.task : "etf";
   return (
     <>
-      <div className="range-buttons" aria-label="采集任务">
-        {[
-          ["etf", "基金日行情"],
-          ["sentiment", "行业恐贪"],
-          ["national-team", "国家队持仓"],
-          ["index-valuations", "指数估值"],
-          ["strategy-signals", "策略日计划"],
-        ].map(([key, label]) => (
-          <button
-            key={key}
-            className={task === key ? "active" : ""}
-            onClick={() => setTask(key)}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-      <TaskPanel key={task} task={task} />
+      <Tabs label="任务分类" items={tasks.map(([value, label]) => ({ value, label }))} value={task} onChange={(task) => update({ task })}>
+        <TaskPanel key={task} task={task} />
+      </Tabs>
     </>
   );
 }
@@ -87,7 +76,7 @@ function TaskPanel({ task }: { task: string }) {
     <>
       <header className="page-header">
         <div>
-          <h1>定时任务</h1>
+          <h2>定时任务</h2>
           <p>历史回补与每日增量，采集进度按区间保存</p>
         </div>
         <button

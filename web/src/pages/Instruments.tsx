@@ -86,7 +86,7 @@ function InstrumentRow({
   );
 }
 
-export default function Instruments() {
+export default function Instruments({ embedded = false }: { embedded?: boolean }) {
   const [rows, setRows] = useState<Instrument[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -107,7 +107,7 @@ export default function Instruments() {
     <>
       <header className="page-header">
         <div>
-          <h1>标的配置</h1>
+          {embedded ? <h2>标的配置</h2> : <h1>标的配置</h1>}
           <p>管理研究范围与历史行情采集边界</p>
         </div>
         <button onClick={load}>刷新状态</button>

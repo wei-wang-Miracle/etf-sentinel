@@ -9,6 +9,7 @@ import {
   LegendComponent,
 } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
+import ChartReadout from "./ChartReadout";
 import { readChartPalette } from "../lib/chart";
 import type { ValuationPoint } from "../pages/IndexValuations";
 import type { Candle } from "../lib/api";
@@ -64,6 +65,7 @@ export default function ValuationChart({
       },
       tooltip: {
         trigger: "axis",
+        confine: true,
         backgroundColor: p.surface,
         borderColor: p.border,
         textStyle: { color: p.ink },
@@ -72,8 +74,8 @@ export default function ValuationChart({
       },
       axisPointer: { link: [{ xAxisIndex: "all" }] },
       grid: [
-        { left: 70, right: 85, top: 50, height: "52%" },
-        { left: 70, right: 85, top: "70%", height: "18%" },
+        { left: element.current.clientWidth < 500 ? 44 : 70, right: element.current.clientWidth < 500 ? 46 : 85, top: 50, height: "52%" },
+        { left: element.current.clientWidth < 500 ? 44 : 70, right: element.current.clientWidth < 500 ? 46 : 85, top: "70%", height: "18%" },
       ],
       xAxis: [0, 1].map((i) => ({
         type: "category",
@@ -167,11 +169,11 @@ export default function ValuationChart({
     };
   }, [rows, candles, title, unit, theme]);
   return (
-    <div
+    <><div
       className="kline"
       ref={element}
       role="img"
       aria-label={`${title}、指数点位与本地回看分位，可缩放及悬停查看`}
-    />
+    /><ChartReadout rows={rows.map(row => ({ date: row.trade_date, values: { [title]: row.value == null ? "—" : `${row.value} ${unit}`, "本地十年回看分位": row.local_percentile == null ? "—" : `${row.local_percentile}%`, "指数收盘点位": String(candles.find(item => item.date === row.trade_date)?.close ?? "—") } }))} /></>
   );
 }

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import * as echarts from "echarts";
+import ChartReadout from "./ChartReadout";
 import { readChartPalette } from "../lib/chart";
 
 export type LineSeries = { name: string; points: [string, number | null][] };
@@ -24,7 +25,7 @@ export default function ResearchChart({
     ].sort();
     chart.setOption({
       animation: false,
-      color: [p.chart1, p.chart2, p.greed, p.fear, p.chart6, p.up],
+      color: [p.chart1, p.chart2, p.chart3, p.chart4, p.chart5, p.chart6],
       textStyle: { color: p.muted, fontFamily: p.fontFamily },
       aria: { enabled: true },
       legend: { type: "scroll", top: 0, textStyle: { color: p.ink } },
@@ -52,6 +53,7 @@ export default function ResearchChart({
         return {
           type: "line",
           name: row.name,
+          itemStyle: { color: [p.chart1, p.chart2, p.chart3, p.chart4, p.chart5, p.chart6][Array.from(row.name).reduce((sum, char) => sum + char.charCodeAt(0), 0) % 6] },
           data: dates.map((day) => points.get(day) ?? null),
           showSymbol: false,
           connectNulls: false,
@@ -66,12 +68,12 @@ export default function ResearchChart({
     };
   }, [series, theme, unit, bounded]);
   return series.some((row) => row.points.length) ? (
-    <div
+    <><div
       className="kline"
       ref={element}
       role="img"
       aria-label={`${unit}时序对比，缺失不连线，支持缩放和悬停`}
-    />
+    /><ChartReadout rows={[...new Set(series.flatMap(row => row.points.map(([day]) => day)))].sort().map(date => ({ date, values: Object.fromEntries(series.map(row => { const value = row.points.find(([day]) => day === date)?.[1]; return [row.name, value == null ? "—" : `${value.toFixed(2)} ${unit}`]; })) }))} /></>
   ) : (
     <div className="empty">所选对象在此区间无可绘制序列</div>
   );

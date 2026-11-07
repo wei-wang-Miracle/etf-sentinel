@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import ChartCaption from "../components/ChartCaption";
+import { journeyUrl } from "../lib/strategyJourney";
 import { api } from "../lib/api";
 import { dateAgo, metrics, number, useResearchQuery } from "../lib/research";
 import ResearchChart, {
@@ -47,7 +48,6 @@ const dimensions: Record<string, string> = {
   sentiment: "市场情绪背景",
   holdings: "国家队资金",
   trend: "价格趋势",
-  factors: "因子（后接）",
 };
 const reasons: Record<string, string> = {
   available: "可比较",
@@ -126,24 +126,14 @@ export default function Compare({ theme }: { theme: string }) {
     <>
       <header className="page-header">
         <div>
+          <a className="back-link" href={journeyUrl("etfs", new URLSearchParams(location.search).get("code") ?? undefined, { start, end, detail: "overview" })}>返回 ETF 研究</a>
           <h1>横向对比</h1>
           <p>以ETF为研究主体，指数提供关联因子；市场情绪单独作为背景</p>
         </div>
       </header>
       <section className="panel research-chart-panel integrated-research">
         <div className="chart-toolbar">
-          <div className="research-tabs" role="tablist" aria-label="比较维度">
-            {Object.entries(dimensions).map(([key, name]) => (
-              <button
-                key={key}
-                role="tab"
-                aria-selected={dimension === key}
-                onClick={() => switchDimension(key)}
-              >
-                {name}
-              </button>
-            ))}
-          </div>
+          <label>比较维度 <select aria-label="比较维度" value={dimension} onChange={event => switchDimension(event.target.value)}>{Object.entries(dimensions).map(([key, name]) => <option key={key} value={key}>{name}</option>)}</select></label>
           <div className="date-controls">
             {dimension !== "sentiment" && <label>
               ETF集合{" "}
@@ -228,7 +218,7 @@ export default function Compare({ theme }: { theme: string }) {
               ))}
               {items.length > 0 && (
                 <>
-                  <div className="research-selection">
+                  <details><summary>选择对比对象（最多六个）</summary><div className="research-selection">
                     {items.map((item) => (
                       <label key={item.code}>
                         <input
@@ -252,7 +242,7 @@ export default function Compare({ theme }: { theme: string }) {
                       </label>
                     ))}
                   </div>
-                  <div className="chart-toolbar">
+                  </details><div className="chart-toolbar">
                     <button onClick={() => update({ codes: "" })}>
                       {dimension === "sentiment" ? "分数前六类别" : "数值前六ETF"}
                     </button>

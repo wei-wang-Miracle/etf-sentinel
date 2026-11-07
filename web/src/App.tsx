@@ -3,7 +3,9 @@ import Compare from "./pages/Compare";
 import MyEtfs from "./pages/MyEtfs";
 import MyStrategies from "./pages/MyStrategies";
 import DataManagement from "./pages/DataManagement";
+import { workspaceUrl } from "./lib/navigation";
 import "./styles/strategy-journey.css";
+
 
 const pages = [
   { key: "etfs", label: "我的 ETF", icon: "M10 17a7 7 0 1 0 0-14 7 7 0 0 0 0 14Zm5-2 6 6" },
@@ -27,6 +29,8 @@ function pageFromUrl() {
   };
   if (old && routes[old]) {
     Object.entries(routes[old]).forEach(([key, value]) => query.set(key, value));
+    if (old === "research" && query.get("tab") === "investment") { query.set("detail", "operations"); query.delete("tab"); }
+    if (old === "research" && query.get("tab") === "strategy") { query.set("page", "strategies"); query.set("view", "list"); query.delete("tab"); }
     if (old === "sentiment" && query.get("category")) query.set("codes", query.get("category")!);
     history.replaceState(null, "", `?${query}`);
   }
@@ -43,7 +47,7 @@ export default function App() {
   const [page, setPage] = useState(pageFromUrl);
   const [, refreshUrl] = useState(0);
   useEffect(() => { const changed = () => { setPage(pageFromUrl()); refreshUrl((old) => old + 1); }; window.addEventListener("popstate", changed); return () => window.removeEventListener("popstate", changed); }, []);
-  function navigate(next: string) { history.pushState(null, "", `?page=${next}`); setPage(next); window.dispatchEvent(new PopStateEvent("popstate")); }
+  function navigate(next: string) { history.pushState(null, "", workspaceUrl(next)); setPage(next); window.dispatchEvent(new PopStateEvent("popstate")); }
   const [collapsed, setCollapsed] = useState(false);
   const [theme, setTheme] = useState(
     () => localStorage.getItem("theme") ?? "dark",
@@ -60,12 +64,7 @@ export default function App() {
       <aside className="sidebar">
         <div className="brand">
           <span className="brand-mark">研</span>
-          {!collapsed && (
-            <div>
-              <strong>投研工作台</strong>
-              <span>基金哨兵</span>
-            </div>
-          )}
+          <div className="brand-name"><strong>基金哨兵</strong><span>个人 ETF 投研</span></div>
         </div>
         <button
           className="collapse-button"
@@ -91,7 +90,7 @@ export default function App() {
               <svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true">
                 <path d={p.icon} />
               </svg>
-              {!collapsed && p.label}
+              <span className="nav-text">{p.label}</span>
             </button>
           ))}
         </nav>
@@ -123,8 +122,8 @@ export default function App() {
             </button>
           </div>
         </div>
-        <main>
-          {page === "strategies" ? <MyStrategies theme={theme} /> : page === "data" ? <DataManagement key={new URLSearchParams(location.search).get("manage") ?? "instruments"} initialTab={new URLSearchParams(location.search).get("manage") ?? "instruments"} /> : new URLSearchParams(location.search).get("auxiliary") === "compare" ? <><a href="?page=etfs">← 返回我的 ETF</a><Compare theme={theme} /></> : <MyEtfs theme={theme} />}
+        <main id="workspace-main">
+          {page === "strategies" ? <MyStrategies theme={theme} /> : page === "data" ? <DataManagement /> : new URLSearchParams(location.search).get("auxiliary") === "compare" ? <Compare theme={theme} /> : <MyEtfs theme={theme} />}
         </main>
         <div className="workspace-footer">
           <span>投研工作台</span>

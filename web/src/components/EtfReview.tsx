@@ -68,6 +68,7 @@ export default function EtfReview({ theme, fixedObject = false }: { theme: strin
   const [instruments, setInstruments] = useState<Instrument[]>([]);
   const [result, setResult] = useState<Result | null>(null);
   const [candles, setCandles] = useState<Candle[]>([]);
+  const [candlesError, setCandlesError] = useState("");
   const [research, setResearch] = useState<Research | null>(null);
   const [confirmOpening, setConfirmOpening] = useState(false),
     [confirmDates, setConfirmDates] = useState(false);
@@ -96,6 +97,7 @@ export default function EtfReview({ theme, fixedObject = false }: { theme: strin
     const controller = new AbortController();
     setResult(null);
     setCandles([]);
+    setCandlesError("");
     setError("");
     setLoading(true);
     if (!start || !end || start > end) {
@@ -109,7 +111,7 @@ export default function EtfReview({ theme, fixedObject = false }: { theme: strin
       confirm_zero_opening: String(confirmOpening),
       confirm_trade_dates: String(confirmDates),
     });
-    Promise.all([
+    Promise.allSettled([
       api<Result>(
         `/account/review/${code}?${params}`,
         "GET",
@@ -124,11 +126,11 @@ export default function EtfReview({ theme, fixedObject = false }: { theme: strin
       ),
     ])
       .then(([review, rows]) => {
-        setResult(review);
-        setCandles(rows);
-      })
-      .catch((e) => {
-        if (!controller.signal.aborted) setError(e.message);
+        if (controller.signal.aborted) return;
+        if (review.status === "fulfilled") setResult(review.value);
+        else setError(review.reason.message);
+        if (rows.status === "fulfilled") setCandles(rows.value);
+        else setCandlesError(rows.reason.message);
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
@@ -174,7 +176,7 @@ export default function EtfReview({ theme, fixedObject = false }: { theme: strin
       <div className="panel-header">
         <h2>单 ETF 复盘</h2>
         <div className="date-controls">
-          <label>
+          {!fixedObject && <label>
             ETF{" "}
             <select
               disabled={fixedObject}
@@ -187,7 +189,7 @@ export default function EtfReview({ theme, fixedObject = false }: { theme: strin
                 </option>
               ))}
             </select>
-          </label>
+          </label>}
           <label>
             起始{" "}
             <input
@@ -206,6 +208,7 @@ export default function EtfReview({ theme, fixedObject = false }: { theme: strin
           </label>
         </div>
       </div>
+      {result?.actual.status !== "available" && result && <p className="notice warning">{result.actual.status === "not_applicable" ? "真实核算不适用" : "真实核算暂不可计算"}：{result.actual.reasons?.join("；")}</p>}
       <div className="chart-toolbar">
         <label>
           <input
@@ -350,6 +353,9 @@ export default function EtfReview({ theme, fixedObject = false }: { theme: strin
           </>
         )
       )}
+      {candlesError && <p className="notice warning">日K读取失败：{candlesError}。真实核算独立保留。</p>}
+      {error && candles.length > 0 && <KLine rows={candles} theme={theme} />}
+      <details className="research-evidence"><summary>统一资金规则研究（模拟，与真实盈亏分开）</summary>
       <h2>统一资金规则研究</h2>
       <p className="muted">
         研究使用独立名义资金，与真实盈亏分开；买入持有、20日均线、60日均线和现金同起止。信号次日开盘执行，T+1，整手，现金零利息。
@@ -456,6 +462,7 @@ export default function EtfReview({ theme, fixedObject = false }: { theme: strin
           </p>
         </>
       )}
+      </details>
     </section>
   );
 }

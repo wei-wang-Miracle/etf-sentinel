@@ -19,6 +19,9 @@ export type ChartPalette = {
   primarySoft: string;
   chart1: string;
   chart2: string;
+  chart3: string;
+  chart4: string;
+  chart5: string;
   chart6: string;
   fear: string;
   greed: string;
@@ -40,6 +43,9 @@ export function readChartPalette(): ChartPalette {
     primarySoft: color("primary-soft"),
     chart1: color("chart-1"),
     chart2: color("chart-2"),
+    chart3: color("chart-3"),
+    chart4: color("chart-4"),
+    chart5: color("chart-5"),
     chart6: color("chart-6"),
     fear: color("sentiment-fear"),
     greed: color("sentiment-greed"),

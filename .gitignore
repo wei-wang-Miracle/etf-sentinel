@@ -9,6 +9,8 @@ dist/
 .DS_Store
 *.egg-info/
 *.tsbuildinfo
+web/test-results/
+web/playwright-report/
 
 # 本地启动器的进程锁与运行状态
 .local/

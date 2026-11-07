@@ -20,6 +20,7 @@ echarts.use([
   MarkPointComponent,
   CanvasRenderer,
 ]);
+import ChartReadout from "./ChartReadout";
 import type { Candle } from "../lib/api";
 import {
   MA_LINE_WIDTH,
@@ -138,7 +139,7 @@ export default function KLine({
       animation: false,
       textStyle: { fontFamily: palette.fontFamily, color: palette.muted },
       aria: {
-        enabled: true,
+        enabled: false,
         description:
           (comparison
             ? "本地日K与国家队估算持仓比例同图双轴对照，左轴价格、右轴比例，共享日期与缩放；缺失数据不补零。"
@@ -147,6 +148,7 @@ export default function KLine({
       },
       tooltip: {
         trigger: "axis",
+        confine: true,
         axisPointer: {
           type: "cross",
           label: { backgroundColor: palette.border, color: palette.ink },
@@ -156,17 +158,17 @@ export default function KLine({
         textStyle: {
           color: palette.ink,
           fontFamily: palette.fontFamily,
-          fontSize: 11,
+          fontSize: 12,
         },
         extraCssText: "max-width: 380px; white-space: normal;",
         formatter: tooltip,
       },
       axisPointer: { link: [{ xAxisIndex: "all" }] },
       grid: comparison
-        ? [{ left: 64, right: 96, top: 24, bottom: 64 }]
+        ? [{ left: element.current.clientWidth < 500 ? 44 : 64, right: element.current.clientWidth < 500 ? 48 : 96, top: 24, bottom: 64 }]
         : [
-            { left: 64, right: 96, top: 20, height: "62%" },
-            { left: 64, right: 96, top: "74%", height: "16%" },
+            { left: element.current.clientWidth < 500 ? 44 : 64, right: element.current.clientWidth < 500 ? 48 : 96, top: 20, height: "62%" },
+            { left: element.current.clientWidth < 500 ? 44 : 64, right: element.current.clientWidth < 500 ? 48 : 96, top: "74%", height: "16%" },
           ],
       xAxis: (comparison ? [0] : [0, 1]).map((index) => ({
         type: "category",
@@ -178,7 +180,7 @@ export default function KLine({
           show: comparison || index === 1,
           color: palette.muted,
           fontFamily: palette.fontFamily,
-          fontSize: 10,
+          fontSize: 12,
         },
         boundaryGap: true,
       })),
@@ -189,12 +191,12 @@ export default function KLine({
           nameTextStyle: {
             color: palette.muted,
             fontFamily: palette.fontFamily,
-            fontSize: 10,
+            fontSize: 12,
           },
           axisLabel: {
             color: palette.muted,
             fontFamily: palette.fontFamily,
-            fontSize: 10,
+            fontSize: 12,
             formatter: (value: number) => value.toFixed(3),
           },
           splitLine: { lineStyle: { color: palette.border, opacity: 0.45 } },
@@ -209,7 +211,7 @@ export default function KLine({
           axisLabel: {
             color: comparison ? palette.chart2 : palette.muted,
             fontFamily: palette.fontFamily,
-            fontSize: 10,
+            fontSize: 12,
             formatter: comparison
               ? "{value}%"
               : (value: number) => formatCompact(value),
@@ -217,7 +219,7 @@ export default function KLine({
           nameTextStyle: {
             color: comparison ? palette.chart2 : palette.muted,
             fontFamily: palette.fontFamily,
-            fontSize: 10,
+            fontSize: 12,
           },
           splitNumber: comparison ? 5 : 2,
           splitLine: { show: false },
@@ -248,7 +250,7 @@ export default function KLine({
             symbolRotate: trade.source === "simulation" && trade.side === "sell" ? 180 : 0,
             tradeIndex: trade.source === "simulation" ? tradeIndex : null,
             itemStyle: { color: trade.side === "buy" ? palette.up : palette.down },
-            label: { color: palette.surface, fontSize: 10 },
+            label: { color: palette.surface, fontSize: 12 },
           })) },
           name: "日K · 开/收/低/高",
           data: dates.map((day) => {
@@ -277,7 +279,7 @@ export default function KLine({
                 endLabel: {
                   show: true,
                   color: palette.ma[window],
-                  fontSize: 9,
+                  fontSize: 12,
                   fontFamily: palette.fontFamily,
                   formatter: (params: { value?: unknown }) => {
                     const value = Number(params.value);
@@ -330,8 +332,24 @@ export default function KLine({
       chart.dispose();
     };
   }, [rows, theme, holdings, indexPoints, trades, onTrade]);
+  const candleByDate = new Map(rows.map(row => [row.date, row]));
+  const holdingByDate = new Map((holdings ?? []).map(row => [row.trade_date, row.estimated_holding_pct]));
+  const maByDate = new Map<string, Record<string, string>>();
+  MA_WINDOWS.forEach(window => movingAverage(rows.map(row => Number(row.close)), window).forEach((value, index) => {
+    const values = maByDate.get(rows[index].date) ?? {};
+    values[`MA${window}`] = value == null ? "—" : formatPrice(value);
+    maByDate.set(rows[index].date, values);
+  }));
+  const readout = [...new Set([...candleByDate.keys(), ...holdingByDate.keys()])].sort().map(date => {
+    const row = candleByDate.get(date);
+    const values: Record<string, string> = { "开盘（元）": row ? String(row.open) : "—", "最高（元）": row ? String(row.high) : "—", "最低（元）": row ? String(row.low) : "—", "收盘（元）": row ? String(row.close) : "—", "成交量": row ? String(row.volume) : "—", ...maByDate.get(date) };
+    if (holdings) { const ratio = holdingByDate.get(date); values["国家队估算比例"] = ratio == null ? "—" : `${ratio}%`; }
+    const records = trades.filter(item => item.trade_date === date);
+    if (records.length) values["操作标记"] = records.map(item => `${item.source === "simulation" ? "模拟" : "真实记录"}${item.side === "buy" ? "买入" : "卖出"} ${item.quantity}份 @ ${item.price}`).join("；");
+    return { date, values };
+  });
   return (
-    <div
+    <> <div
       className={`kline ${holdings ? "holdings-comparison-chart" : ""}`}
       ref={element}
       role="img"
@@ -340,6 +358,6 @@ export default function KLine({
           ? "基金日K与国家队估算持仓比例同图双轴对照，共享日期与缩放，缺失不补零"
           : `${indexPoints ? "指数" : "基金"}日K、MA5至MA60均线与成交量，可滚轮缩放，悬停查看同日数值`
       }
-    />
+    /><ChartReadout rows={readout} /></>
   );
 }

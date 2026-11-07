@@ -29,11 +29,12 @@
 
 | 功能 | 主归属 | 状态 | 依赖与边界 | 设计或实现入口 |
 | --- | --- | --- | --- | --- |
-| 策略条件指标说明 | 策略研究 | 已实现 | 十类指标在焦点进入或点击时展开投资含义、数值解读、计算、来源和限制；区分通用定义与实际源口径，不改变计算与阈值 | [使用说明](single-etf-strategies.md#指标说明)、[编辑器](../web/src/components/StrategyEditor.tsx)、[说明内容](../web/src/lib/strategyIndicatorHelp.ts) |
+| 策略条件指标说明 | 策略研究 | 已实现 | 十类指标宽屏在稳定侧区随焦点更新、窄屏主动展开，解释投资含义、数值解读、计算、来源和限制；区分通用定义与实际源口径，不改变计算与阈值 | [使用说明](single-etf-strategies.md#指标说明)、[编辑器](../web/src/components/StrategyEditor.tsx)、[说明内容](../web/src/lib/strategyIndicatorHelp.ts) |
 | 面向个人的单 ETF 策略流程 | 策略研究 | 已实现 | 三入口与单ETF流程；支持非持仓ETF，中文条件配置、回测比较、保存启用和每日信号；不做组合，不改写历史结果 | [单ETF流程设计稿](superpowers/specs/2026-11-07-single-etf-strategy-journey-design.md) |
 | 同 ETF 自定义策略对比 | 策略研究 | 已实现 | 属于单ETF流程，依赖策略版本、统一回测及真实复盘；统一区间、本金、成本与数据版本重算，保留原结果；真实收益可比时作参照，缺失不阻断策略比较，不凭历史收益推断策略归属 | [策略对比设计](superpowers/specs/2026-11-07-single-etf-strategy-journey-design.md#51-同一只-etf-的自定义策略对比) |
 | 前后端工程初始化 | 工程基础 | 已实现 | 已扩展业务页面、迁移及采集；Docker Hub 连接受阻，三容器启动未验证 | [前端](../web/src/App.tsx)、[API](../api/app/main.py)、[Compose](../compose.yaml)、[初始化清单](superpowers/plans/2026-11-05-initialize.md) |
 | 投研简报视觉融合 | 工程基础 | 已实现 | 暖纸亮色、宋体标题、朱红操作强调、连续指标条；保留暗色和业务语义色 | [设计契约](design-contract.md)、[主题变量](../web/src/styles/tokens.css) |
+| ETF 研究案卷重设计 | 工程基础 | 已实现 | 协作投研、策略、信号、复盘及数据域；对象与日期连续、单对象标题、三阶段策略、只读快照、适用与历史信号、双主题及键盘读数；不改变投资或任务规则 | [总设计](../DESIGN.md)、[实施验收](design/frontend-validation.md) |
 | 前端视觉精修 | 工程基础 | 已实现 | 统一导航线条图标、筛选控件、间距和图注字号；中性选中态、窄屏换行；不改变业务口径 | [设计契约](design-contract.md#前端视觉精修)、[共享样式](../web/src/styles/global.css) |
 | 数据库语义与注释规范 | 工程基础 | 已实现 | 原地重命名迁移，不删除行情 | [数据库说明](database.md) |
 | 本地一键启动 | 工程基础 | 已实现 | Docker仅运行PostgreSQL；本机前后端支持start/restart、进程互斥与安全清理 | [启动脚本](../scripts/start-local.sh) |

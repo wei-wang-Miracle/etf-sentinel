@@ -21,12 +21,20 @@ export function useResearchQuery(defaults: Record<string, string>) {
     window.addEventListener("popstate", changed);
     return () => window.removeEventListener("popstate", changed);
   }, []);
-  function update(values: Record<string, string>) {
+  function update(values: Record<string, string>, options?: { history: "push" | "replace" }) {
     const query = new URLSearchParams(location.search);
     Object.entries(values).forEach(([key, value]) => query.set(key, value));
     if (values.object?.startsWith("etf:")) query.set("code", values.object.slice(4));
-    else if (values.code && query.get("object")?.startsWith("etf:")) query.set("object", `etf:${values.code}`);
-    history.replaceState(null, "", `?${query}`);
+    else if (values.object?.startsWith("index:")) query.delete("code");
+    else if (values.code !== undefined) {
+      if (values.code) query.set("object", `etf:${values.code}`);
+      else query.delete("object");
+    }
+    const navigation = Object.keys(values).some((key) =>
+      ["code", "object", "detail", "tab", "manage", "task", "dimension", "view", "stage", "edit"].includes(key),
+    );
+    const mode = options?.history ?? (navigation ? "push" : "replace");
+    if (`?${query}` !== location.search) history[mode === "push" ? "pushState" : "replaceState"](null, "", `?${query}`);
     setState((old) => ({ ...old, ...values }));
     window.dispatchEvent(new PopStateEvent("popstate"));
   }

@@ -60,6 +60,8 @@ export type Coverage = {
   conditions: { key: string; status: string; reason?: string; first_date?: string | null; last_date?: string | null }[];
 };
 export type ComparisonTrack = {
+  rule?: Rule | null;
+  allocation?: 50 | 100;
   key: string;
   name: string;
   version_id?: number | null;
@@ -103,6 +105,6 @@ export function journeyUrl(page: string, code?: string, extra: Record<string, st
 
 export function activationMessage(version: SavedStrategy, positions?: AccountHoldings) {
   const position = positions?.items.find((row) => row.instrument_code === version.instrument_code);
-  const quantity = positions?.as_of ? `${position?.current_amount ?? 0} 份（源日期 ${positions.as_of}，是否适用须在生成计划时重新核验）` : "未取得完整仓位证据，数量待核验";
+  const quantity = positions?.as_of && position ? `${position.current_amount} 份（源日期 ${positions.as_of}，是否适用须在生成计划时重新核验）` : "未取得完整仓位证据，数量待核验";
   return `规则当前要求${version.readiness?.target == null ? "暂不可判断" : version.readiness.target ? "持有" : "空仓"}；你的真实仓位：${quantity}。${version.readiness?.reason ?? "等待下一次依赖检查"}。下次自动运行：${version.next_run ? stamp(version.next_run) : "尚未安排，请检查任务5开关"}。计划不是订单或成交。`;
 }

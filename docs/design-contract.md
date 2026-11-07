@@ -1,6 +1,6 @@
 ---
-version: alpha
-name: "Ledger Terminal"
+version: research-dossier
+name: "ETF 研究案卷"
 description: "个人宽基 ETF 量化研究平台的设计契约：暗色优先、数据密集、低装饰、可审计；分离行情方向、情绪与系统状态三套颜色语义。"
 colors:
   primary: "#FF8A72"
@@ -27,31 +27,31 @@ colors:
   chart-1: "#5B8CFF"
   chart-2: "#A78BFA"
   chart-3: "#22D3EE"
-  chart-4: "#F59E0B"
+  chart-4: "#D4B86A"
   chart-5: "#F472B6"
   chart-6: "#94A3B8"
   focus-ring: "#FFAA94"
 typography:
   display-lg:
-    fontFamily: "Inter, PingFang SC, Source Han Sans SC, Microsoft YaHei, sans-serif"
+    fontFamily: "Songti SC, Noto Serif CJK SC, STSong, SimSun, Georgia, serif"
     fontSize: 32px
     fontWeight: 600
     lineHeight: 40px
     letterSpacing: 0px
   heading-lg:
-    fontFamily: "Inter, PingFang SC, Source Han Sans SC, Microsoft YaHei, sans-serif"
+    fontFamily: "Songti SC, Noto Serif CJK SC, STSong, SimSun, Georgia, serif"
     fontSize: 24px
     fontWeight: 600
     lineHeight: 32px
     letterSpacing: 0px
   heading-md:
-    fontFamily: "Inter, PingFang SC, Source Han Sans SC, Microsoft YaHei, sans-serif"
+    fontFamily: "Songti SC, Noto Serif CJK SC, STSong, SimSun, Georgia, serif"
     fontSize: 20px
     fontWeight: 600
     lineHeight: 28px
     letterSpacing: 0px
   heading-sm:
-    fontFamily: "Inter, PingFang SC, Source Han Sans SC, Microsoft YaHei, sans-serif"
+    fontFamily: "Songti SC, Noto Serif CJK SC, STSong, SimSun, Georgia, serif"
     fontSize: 16px
     fontWeight: 600
     lineHeight: 24px
@@ -250,7 +250,7 @@ components:
     padding: "16px"
 ---
 
-# Ledger Terminal — 设计契约
+# ETF 研究案卷 — 设计契约
 
 ## 前端视觉精修
 
@@ -258,12 +258,12 @@ components:
 图表与核心指标承担视觉重点，来源与日期说明研究依据；功能、数据与区块顺序保持。
 
 - 导航图标统一为 18px、1.5px 线宽的 SVG，折叠时保留可访问名称。
-- 导航行高采用 36px，行间距 4px；主要间距遵循 4px 网格。
+- 导航行高采用 40px，窄屏44px，行间距 4px；主要间距遵循 4px 网格。
 - 导航、研究分区与区间选择采用中性表面和细边框；导航保留朱红指示线，
-  主操作及链接仍使用操作强调色。此规则优先于下文组件模板的彩色选中底。
+  主操作使用操作强调色；普通链接使用正文色和下划线。
 - 下拉框与输入框共享主题表面、边框和字体，保留原生键盘操作。
-- 来源图注与说明采用 12px；代码、日期与主要数值保留等宽数字。
-- 窄屏筛选、日期与页头可换行，表格保留局部滚动，导航保留图标入口。
+- 来源图注与说明采用 13px，图表轴标签至少12px；代码、日期与主要数值保留等宽数字。
+- 窄屏筛选、日期与页头可换行，表格保留局部滚动，导航保留文字与图标入口。
 
 本次方法参考 Damir Sokolovsky 的
 [unslop](https://x.com/heydamir)（CC BY 4.0）；
@@ -374,23 +374,11 @@ UI:    Inter, PingFang SC, Source Han Sans SC, Microsoft YaHei, sans-serif
 
 ### App Shell
 
-```text
-┌────────────── 240px ──────────────┬──────────────────────────────┐
-│ Logo / 导航                        │ TopBar 56px                  │
-│                                   ├──────────────────────────────┤
-│ 数据收集                           │ Page header                  │
-│ 数据展示                           │                              │
-│ 策略配置                           │ Content, padding 24px        │
-│ 策略回测                           │                              │
-│ 买卖信号                           │                              │
-│ 持仓与日志                         │                              │
-└───────────────────────────────────┴──────────────────────────────┘
-```
-
-- 侧栏 240px，可折叠到 64px（仅图标）。
-- 顶栏 56px：市场日期、数据新鲜度、同步状态、全局搜索、主题切换。
-- 内容区不留最大宽度，数据表可以铺满；页面内边距 24px。
-- 12 列网格，列间距 16px；卡片跨 3/4/6/8/12 列。
+- 三个主入口：我的 ETF、我的策略、数据管理。桌面侧栏208px，可手动折叠至64px。
+- 顶栏48px，仅显示当前栏目、北京时间日期与主题切换；数据新鲜度放在对象证据带。
+- 内容内边距桌面16px 24px，窄屏12px 16px；不设固定最小页面宽度。
+- 对象头只有一个h1和一个可操作ETF选择器，证据日期带下接业务Tab。
+- 行情、估值、国家队和市场情绪使用单一维度选择，共用日期，摘要和历史图分清时点。
 
 ### 密度
 
@@ -434,21 +422,20 @@ UI:    Inter, PingFang SC, Source Han Sans SC, Microsoft YaHei, sans-serif
 
 ### AppSidebar
 
-- 240px / 折叠 64px；背景 `canvas`；右侧 1px `border`。
+- 208px / 折叠 64px；背景 `canvas`；右侧 1px `border`。
 - 导航项 `nav-item`；激活项 `nav-item-active`，左侧 2px `primary` 指示条。
-- 底部显示版本号与数据源状态点。
+- 底部显示版本号与日频研究定位，数据状态在具体对象与任务中显示。
 
 ### TopBar
 
-- 56px；左侧面包屑，中间留空，右侧市场日期、数据新鲜度、同步状态、主题切换。
-- 数据新鲜度使用 `badge-success/warning/danger` + 文本，不只用圆点。
-- 同步进行中显示旋转图标和“同步中”，禁止重复点击。
+- 桌面48px，窄屏40px；栏目、北京时间日期与主题切换。
+- 源日期、未知和缺失状态在对象头及对应数据区显示，不混为一个全局新鲜度。
 
 ### InstrumentSelector
 
-- 6 个宽基以 chip 形式多选；选中态 `primary-soft` + `primary` 文本。
-- 每个 chip 可显示最新数据日期；过期时加 `status-warning` 点。
-- 不可超过 6 个；清空时回退到默认 6 只。
+- ETF详情使用带名称与代码的单选下拉，无对象时不默认选择第一只。
+- 跨ETF比较最多六条曲线，选取面板主动展开；失败对象仍在覆盖矩阵保留。
+- 清空曲线选择显示无序列；默认前六是独立显式操作。
 
 ### StatusBadge
 
@@ -554,12 +541,12 @@ UI:    Inter, PingFang SC, Source Han Sans SC, Microsoft YaHei, sans-serif
 ### Do
 
 - 用红绿只表达行情方向，并且同时给箭头和文字。
-- 用蓝色表达操作与选中，用琥珀/蓝表达情绪。
+- 用朱红／珊瑚表达主要操作，用中性表面、边框和字重表达选中；琥珀／蓝表达情绪。
 - 用等宽数字、右对齐、固定小数位。
 - 用 1px 边框和表面层级建立结构。
 - 每个数据点显示 `as_of` 日期和来源徽标。
 - 空值显示 `—`，并说明原因。
-- 图表提供可访问的表格替代或数据下载。
+- 时序图提供原生日期选择、前后日期按钮与文字读数，不以悬停为唯一读取方式。
 - 动效只用于状态变化，120–180ms。
 
 ### Don't
@@ -579,13 +566,12 @@ UI:    Inter, PingFang SC, Source Han Sans SC, Microsoft YaHei, sans-serif
 
 | 断点 | 行为 |
 |---|---|
-| ≥ 1440px | 完整侧栏 + 12 列网格 + 全部列 |
-| 1280–1439px | 侧栏可折叠；图表高度降为 280px |
-| 1024–1279px | 侧栏折叠为 64px；卡片从 4 列变 2 列 |
-| 768–1023px | 单列；表格隐藏次要列，保留横向滚动 |
-| < 768px | 只读模式：看状态、看信号；不做策略编辑与回测运行 |
+| ≥ 1024px | 完整208px侧栏，可手动折叠；筛选与指标紧凑横排 |
+| 768–1023px | 顶部文字导航；表单换行，保留编辑能力 |
+| < 768px | 顶部文字导航；对象、日期、条件按阅读顺序重排；表格局部滚动 |
 
-移动端不是 MVP 目标；如果未来要做，单独设计，不把桌面表格硬塞进手机。
+390px宽时行情图宽至少350px且页面无横向溢出；常规行情图顶端桌面不晚于360px、
+390px屏不晚于640px。图表支持文字读数；手机仍可创建策略，不提供自动下单。
 
 ## Accessibility
 
@@ -620,7 +606,7 @@ UI:    Inter, PingFang SC, Source Han Sans SC, Microsoft YaHei, sans-serif
 - 数字等宽；日期与数值左对齐；最多展示 6 行。
 - 十字光标跟随，不遮挡当前点。
 
-## Page Templates
+## Page Templates（历史功能参考，不是当前导航或排期）
 
 ### 1. 数据收集
 
@@ -814,13 +800,11 @@ easing: cubic-bezier(0.2, 0.8, 0.2, 1)
 - `stale` / `missing` / `conflict` 状态必须可见，不能静默隐藏。
 - 信号卡必须显示 `data_as_of`，确保复盘时知道当时看到的数据。
 
-## Known Gaps
+## 当前实现与验证边界
 
-- **needs-design-verification**：`market-up` / `market-down` 在 `surface` 与软背景上的对比度需用工具实测，特别是 13px 表格数字。
-- **needs-design-verification**：亮色主题的 K 线红绿、分位带和图表序列需要在真实数据上校准，不能只靠 token 表。
-- **needs-design-decision**：移动端只做只读是否足够；如果要在手机上下单或改策略，需要单独设计交互。
-- **needs-design-decision**：图表库最终选 ECharts 还是 lightweight-charts；本契约默认按 ECharts 的 theme 能力编写。
-- **needs-design-decision**：默认密度用 compact 还是 comfort；本契约默认 compact，并提供切换。
+采用 ECharts、CSS主题变量及紧凑密度，不新增密度切换器。
+当前页面骨架和动线见[总设计](../DESIGN.md)，验证范围及未验证项见[实施验收](design/frontend-validation.md)。
+下面保留视觉融合的来源说明；页面模板仅供已有功能选用，不构成功能排期。
 
 ## 投研简报风格融合（2026-11-06）
 
