@@ -43,15 +43,18 @@ API 内调度每 30 秒检查一次；当天已过执行时间且未运行时会
 
 | 变量 | 说明 |
 | --- | --- |
-| `CHATBI_URL` | 数据源地址，默认指向已验证的 ChatBI API |
-| `CHATBI_ACCESS_CODE` | 用户提供的访问码，示例文件留空 |
 | `CHATBI_TOKEN` | Bearer token，仅填写 token 本体，不含 `Bearer ` 前缀 |
 | `PGHOST` / `PGPORT` | 本地开发连接的 PostgreSQL 地址和端口 |
-| `PGUSER` / `PGPASSWORD` / `PGDATABASE` | 数据库用户、口令与库名 |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | 统一的数据库用户、口令与库名 |
 
-数据库用户、口令与库名在未指定 PG 变量时，回退读取 `.env` 的对应
-`POSTGRES_USER`、`POSTGRES_PASSWORD`、`POSTGRES_DB`。
+本地 `.env` 只维护一套 `POSTGRES_*` 用户、口令和库名，不重复填写
+`PGUSER`、`PGPASSWORD`、`PGDATABASE`。后端仍兼容 PG 变量，供独立测试库等
+临时连接覆盖使用；同时设置时 PG 变量优先。
 Compose 内会显式注入容器数据库参数，不使用本机 PGHOST 或 PGPORT。
+固定 ChatBI 地址与行情、账户各自访问码统一由
+`api/app/chatbi_config.py` 管理，不再通过环境变量覆盖；只有 token 放 `.env`。
+资金号使用 Git 忽略的 `api/config/account.json`，示例见同目录
+`account.example.json`。
 数据源客户端直接连接目标地址，不继承系统 HTTP 代理，且不跟随鉴权重定向。
 
 容器启动先执行 `alembic upgrade head`；本地开发需要手动执行迁移。
