@@ -902,3 +902,81 @@ td button {
 .backtest-panel .chart-toolbar { padding: 8px 20px; }
 .backtest-panel .panel-header { flex-wrap: wrap; }
 .backtest-panel .alert, .backtest-panel .notice { margin: 12px 20px; }
+
+/* 投资复盘：配置内实盘持仓与成交。 */
+.review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.review-panel .quote-strip,
+.review-status-panel .quote-strip {
+  padding: 16px 20px;
+  gap: 16px 32px;
+}
+.review-panel .quote-strip > div:first-child strong {
+  font-size: 24px;
+}
+.review-status-panel .notice {
+  margin: 0 20px 16px;
+}
+.review-panel .alert {
+  margin: 12px 20px;
+}
+.review-panel .table-scroll {
+  max-height: 560px;
+}
+.review-filters {
+  justify-content: flex-start;
+  padding: 12px 20px;
+  border-top: 1px solid var(--color-border);
+}
+.review-filters label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-ink-muted);
+  font-size: 12px;
+}
+.review-filters input,
+.review-filters select {
+  min-height: 32px;
+  padding: 4px 8px;
+  font-size: 13px;
+  font-family: var(--font-ui);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+}
+.badge.buy {
+  color: var(--color-market-up);
+  background: color-mix(in srgb, var(--color-market-up) 14%, transparent);
+}
+.badge.sell {
+  color: var(--color-market-down);
+  background: color-mix(in srgb, var(--color-market-down) 14%, transparent);
+}
+@media (max-width: 800px) {
+  .review-filters {
+    flex-wrap: wrap;
+  }
+  .review-panel .table-scroll {
+    max-height: 420px;
+  }
+}
+
+.research-tabs { display: flex; flex-wrap: wrap; gap: 4px; padding: 10px 0; border-bottom: 1px solid var(--color-border); }
+.research-tabs [aria-selected="true"] { color: var(--color-primary); border-color: var(--color-primary); }
+.research-selection { display: flex; flex-wrap: wrap; gap: 8px 18px; padding: 12px 0; }
+.research-selection label { display: inline-flex; align-items: center; gap: 5px; }
+.research-chart-panel > [role="tabpanel"] { padding-top: 16px; }
+.research-chart-panel details { overflow-wrap: anywhere; padding: 12px 0; }
+.research-chart-panel input[type="number"] { width: 115px; }
+@media (max-width: 640px) { .research-chart-panel .panel-header { flex-wrap: wrap; gap: 12px; } .research-chart-panel select { max-width: 260px; } }
+.integrated-research > * { order: 0 !important; }
+.integrated-research > h2, .integrated-research > p, .integrated-research > details,
+.integrated-research > [role="tabpanel"], .integrated-research > .research-tabs,
+.integrated-research > .research-selection { margin-left: 20px; margin-right: 20px; }
+.integrated-research > h2 { margin-top: 24px; }
+.integrated-research > [role="tabpanel"] { min-width: 0; }

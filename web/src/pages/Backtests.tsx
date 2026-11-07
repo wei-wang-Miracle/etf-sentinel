@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import StrategyLab from "../components/StrategyLab";
 import BacktestChart from "../components/BacktestChart";
 import ChartCaption from "../components/ChartCaption";
 import { api, stamp } from "../lib/api";
@@ -13,17 +14,48 @@ import {
 } from "../lib/backtests";
 
 export default function Backtests({ theme }: { theme: string }) {
+  const [tab, setTab] = useState(() => {
+    const query = new URLSearchParams(location.search);
+    return query.has("run_id") || query.has("code") ? "single" : "holdings";
+  });
+  return (
+    <>
+      <div className="research-tabs" aria-label="策略研究入口">
+        <button
+          aria-pressed={tab === "holdings"}
+          onClick={() => setTab("holdings")}
+        >
+          当前持仓研究与观察
+        </button>
+        <button
+          aria-pressed={tab === "single"}
+          onClick={() => setTab("single")}
+        >
+          单次回测与历史实验
+        </button>
+      </div>
+      {tab === "holdings" ? (
+        <StrategyLab theme={theme} />
+      ) : (
+        <SingleBacktest theme={theme} />
+      )}
+    </>
+  );
+}
+function SingleBacktest({ theme }: { theme: string }) {
   const [catalog, setCatalog] = useState<Catalog>();
-  const [code, setCode] = useState("510500");
+  const [code, setCode] = useState(
+    () => new URLSearchParams(location.search).get("code") ?? "510500",
+  );
   const [strategy, setStrategy] = useState("ma_trend");
   const [parameters, setParameters] = useState<Record<string, number>>({
     window: 60,
   });
   const [start, setStart] = useState("2025-01-01");
   const [end, setEnd] = useState("");
-  const [cash, setCash] = useState("100000");
+  const [cash, setCash] = useState("50000");
   const [rate, setRate] = useState("0.0001");
-  const [minimum, setMinimum] = useState("5");
+  const [minimum, setMinimum] = useState("0");
   const [slip, setSlip] = useState("5");
   const [run, setRun] = useState<Result>();
   const [history, setHistory] = useState<Experiment[]>([]);
@@ -48,7 +80,19 @@ export default function Backtests({ theme }: { theme: string }) {
   }, []);
   useEffect(() => {
     load()
-      .then((data) => setEnd(data.instruments[0]?.last_date ?? ""))
+      .then(async (data) => {
+        const query = new URLSearchParams(location.search);
+        if (query.get("run_id")) await restore(query.get("run_id")!);
+        else {
+          setEnd(
+            query.get("end") ??
+              data.instruments.find((item) => item.instrument_code === code)
+                ?.last_date ??
+              "",
+          );
+          if (query.get("start")) setStart(query.get("start")!);
+        }
+      })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [load]);
@@ -82,9 +126,9 @@ export default function Backtests({ theme }: { theme: string }) {
     setError("");
     setNotice("");
     try {
-      await api("/backtests/sources/refresh", "POST");
+      await api(`/backtests/sources/refresh?instrument_code=${code}`, "POST");
       await load();
-      setNotice("两只基金的分红资料已更新，旧实验保持原快照。");
+      setNotice("当前基金的分红资料已更新，旧实验保持原快照。");
     } catch (e) {
       setError((e as Error).message);
     } finally {

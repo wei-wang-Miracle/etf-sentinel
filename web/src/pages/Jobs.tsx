@@ -15,6 +15,7 @@ export default function Jobs({
           ["sentiment", "行业恐贪"],
           ["national-team", "国家队持仓"],
           ["index-valuations", "指数估值"],
+          ["strategy-signals", "策略日计划"],
         ].map(([key, label]) => (
           <button
             key={key}
@@ -30,7 +31,7 @@ export default function Jobs({
   );
 }
 function TaskPanel({ task }: { task: string }) {
-  const path = task === "index-valuations" ? "/index-valuations/job" : task === "national-team" ? "/national-team/job" : task === "sentiment" ? "/sentiment/job" : "/job";
+  const path = task === "strategy-signals" ? "/strategy-lab/job" : task === "index-valuations" ? "/index-valuations/job" : task === "national-team" ? "/national-team/job" : task === "sentiment" ? "/sentiment/job" : "/job";
   const [job, setJob] = useState<Job | null>(null);
   const [time, setTime] = useState("01:00");
   const [enabled, setEnabled] = useState(true);
@@ -94,7 +95,7 @@ function TaskPanel({ task }: { task: string }) {
           disabled={busy || running || !job?.source_configured}
           onClick={() => action("run")}
         >
-          {running ? "采集中…" : "立即采集"}
+          {running ? "运行中…" : task === "strategy-signals" ? "生成日计划" : "立即采集"}
         </button>
       </header>
       {error && (
@@ -115,7 +116,7 @@ function TaskPanel({ task }: { task: string }) {
       )}
       <section className="panel">
         <div className="panel-header">
-          <h2>{task === "index-valuations"
+          <h2>{task === "strategy-signals" ? "观察策略日计划" : task === "index-valuations"
             ? "指数估值与指数日K采集"
             : task === "national-team" ? "国家队持仓比例采集" : task === "sentiment" ? "行业恐贪采集" : "基金日行情采集"}</h2>
           <span
@@ -161,7 +162,9 @@ function TaskPanel({ task }: { task: string }) {
           </div>
         )}
         <div className="panel-footer">
-          {task === "index-valuations"
+          {task === "strategy-signals"
+            ? "默认08:30，仅为人工采用的观察版本生成尚未开盘交易日计划；行情或持仓过期、权益未核验会阻止生成，开盘后不补写当日信号。不自动下单。"
+            : task === "index-valuations"
             ? "8个关联指数，5类日频估值全历史核验、增量写入；指数日K首次按月回填，后续七日交叠，失败区间重试。估值无需凭据，日K使用后端行情凭据。"
             : task === "national-team"
             ? "采集源页面18只基金的估算持仓比例，固定2026-01-01基准，全历史核验，仅新增或修订的数据写入本地库；不重复采集源价格。"

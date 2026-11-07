@@ -1,24 +1,39 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Instruments from "./pages/Instruments";
 import Jobs from "./pages/Jobs";
-import Sentiment from "./pages/Sentiment";
-import Market from "./pages/Market";
-import NationalTeam from "./pages/NationalTeam";
 import Backtests from "./pages/Backtests";
-import IndexValuations from "./pages/IndexValuations";
+import Review from "./pages/Review";
+import Compare from "./pages/Compare";
+import ResearchObject from "./pages/ResearchObject";
 
 const pages = [
-  { key: "market", label: "行情展示", icon: "▥" },
-  { key: "sentiment", label: "行业恐贪", icon: "∿" },
-  { key: "national-team", label: "国家队持仓", icon: "▤" },
-  { key: "index-valuations", label: "指数估值", icon: "∿" },
+  { key: "research", label: "研究对象", icon: "⌕" },
   { key: "backtests", label: "策略回测", icon: "⌁" },
+  { key: "review", label: "投资复盘", icon: "▦" },
+  { key: "compare", label: "横向对比", icon: "≋" },
   { key: "instruments", label: "标的配置", icon: "≡" },
   { key: "jobs", label: "定时任务", icon: "◷" },
 ];
+function pageFromUrl() {
+  const query = new URLSearchParams(location.search);
+  const old = query.get("page");
+  const routes: Record<string, { page: string; object?: string; tab?: string; dimension?: string }> = {
+    market: { page: "research", object: `etf:${query.get("code") ?? "510500"}`, tab: "price" },
+    "national-team": { page: "research", object: `etf:${query.get("code") ?? "510500"}`, tab: "funds" },
+    "index-valuations": { page: "research", object: `index:${query.get("code") ?? "000905.SH"}`, tab: "valuation" },
+    sentiment: { page: "compare", dimension: "sentiment" },
+  };
+  if (old && routes[old]) {
+    Object.entries(routes[old]).forEach(([key, value]) => query.set(key, value));
+    if (old === "sentiment" && query.get("category")) query.set("codes", query.get("category")!);
+    history.replaceState(null, "", `?${query}`);
+  }
+  return pages.some((item) => item.key === query.get("page")) ? query.get("page")! : "research";
+}
 export default function App() {
-  const [jobTask, setJobTask] = useState("etf");
-  const [page, setPage] = useState("market");
+  const [page, setPage] = useState(pageFromUrl);
+  useEffect(() => { const changed = () => setPage(pageFromUrl()); window.addEventListener("popstate", changed); return () => window.removeEventListener("popstate", changed); }, []);
+  function navigate(next: string) { const query = new URLSearchParams(location.search); query.set("page", next); history.pushState(null, "", `?${query}`); setPage(next); }
   const [collapsed, setCollapsed] = useState(false);
   const [theme, setTheme] = useState(
     () => localStorage.getItem("theme") ?? "dark",
@@ -57,7 +72,7 @@ export default function App() {
               className={`nav-item ${page === p.key ? "active" : ""}`}
               aria-current={page === p.key ? "page" : undefined}
               title={p.label}
-              onClick={() => setPage(p.key)}
+              onClick={() => navigate(p.key)}
             >
               <span aria-hidden="true">{p.icon}</span>
               {!collapsed && p.label}
@@ -93,35 +108,18 @@ export default function App() {
           </div>
         </div>
         <main>
-          {page === "market" ? (
-            <Market
-              theme={theme}
-              goJobs={() => {
-                setJobTask("etf");
-                setPage("jobs");
-              }}
-            />
-          ) : page === "sentiment" ? (
-            <Sentiment
-              theme={theme}
-              goJobs={() => {
-                setJobTask("sentiment");
-                setPage("jobs");
-              }}
-            />
-          ) : page === "national-team" ? (
-            <NationalTeam theme={theme} goJobs={() => {
-              setJobTask("national-team");
-              setPage("jobs");
-            }} />
-          ) : page === "index-valuations" ? (
-            <IndexValuations theme={theme} goJobs={() => { setJobTask("index-valuations"); setPage("jobs"); }} />
-          ) : page === "backtests" ? (
+          {page === "backtests" ? (
             <Backtests theme={theme} />
+          ) : page === "review" ? (
+            <Review theme={theme} />
+          ) : page === "compare" ? (
+            <Compare theme={theme} />
+          ) : page === "research" ? (
+            <ResearchObject theme={theme} />
           ) : page === "instruments" ? (
             <Instruments />
           ) : (
-            <Jobs initialTask={jobTask} />
+            <Jobs initialTask="etf" />
           )}
         </main>
         <div className="workspace-footer">

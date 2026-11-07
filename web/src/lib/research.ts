@@ -1,0 +1,45 @@
+import { useEffect, useState } from "react";
+
+export function dateAgo(days: number) {
+  const date = new Date();
+  date.setDate(date.getDate() - days);
+  return date.toLocaleDateString("sv-SE", { timeZone: "Asia/Shanghai" });
+}
+export function useResearchQuery(defaults: Record<string, string>) {
+  const read = () => {
+    const query = new URLSearchParams(location.search);
+    return Object.fromEntries(
+      Object.entries(defaults).map(([key, value]) => [
+        key,
+        query.get(key) ?? value,
+      ]),
+    );
+  };
+  const [state, setState] = useState(read);
+  useEffect(() => {
+    const changed = () => setState(read());
+    window.addEventListener("popstate", changed);
+    return () => window.removeEventListener("popstate", changed);
+  }, []);
+  function update(values: Record<string, string>) {
+    const query = new URLSearchParams(location.search);
+    Object.entries(values).forEach(([key, value]) => query.set(key, value));
+    history.replaceState(null, "", `?${query}`);
+    setState((old) => ({ ...old, ...values }));
+  }
+  return [state, update] as const;
+}
+export const number = (value: unknown, digits = 2) =>
+  value == null
+    ? "—"
+    : Number(value).toLocaleString("zh-CN", {
+        maximumFractionDigits: digits,
+        minimumFractionDigits: digits,
+      });
+export const metrics: Record<string, { name: string; unit: string }> = {
+  pe: { name: "市盈率", unit: "倍" },
+  pb: { name: "市净率", unit: "倍" },
+  xilv: { name: "股息率", unit: "%" },
+  roe: { name: "净资产收益率", unit: "%" },
+  premium_diff: { name: "风险溢价", unit: "百分点" },
+};

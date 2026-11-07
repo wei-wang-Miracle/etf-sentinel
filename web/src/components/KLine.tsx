@@ -6,6 +6,7 @@ import {
   TooltipComponent,
   DataZoomComponent,
   AriaComponent,
+  MarkPointComponent,
 } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
 echarts.use([
@@ -16,6 +17,7 @@ echarts.use([
   TooltipComponent,
   DataZoomComponent,
   AriaComponent,
+  MarkPointComponent,
   CanvasRenderer,
 ]);
 import type { Candle } from "../lib/api";
@@ -34,8 +36,10 @@ export default function KLine({
   theme,
   holdings,
   indexPoints = false,
+  trades = [],
 }: {
   indexPoints?: boolean;
+  trades?: { trade_date: string; side: string; quantity: string; price: string }[];
   rows: Candle[];
   theme: string;
   holdings?: { trade_date: string; estimated_holding_pct: number | null }[];
@@ -232,6 +236,12 @@ export default function KLine({
       series: [
         {
           type: "candlestick",
+          markPoint: { symbolSize: 30, data: trades.map((trade) => ({
+            name: trade.side === "buy" ? "实际买入（委托日）" : "实际卖出（委托日）",
+            coord: [trade.trade_date, Number(trade.price)], value: trade.side === "buy" ? "买" : "卖",
+            itemStyle: { color: trade.side === "buy" ? palette.up : palette.down },
+            label: { color: palette.surface, fontSize: 10 },
+          })) },
           name: "日K · 开/收/低/高",
           data: dates.map((day) => {
             const r = candleByDate.get(day);
@@ -307,7 +317,7 @@ export default function KLine({
       observer.disconnect();
       chart.dispose();
     };
-  }, [rows, theme, holdings, indexPoints]);
+  }, [rows, theme, holdings, indexPoints, trades]);
   return (
     <div
       className={`kline ${holdings ? "holdings-comparison-chart" : ""}`}
