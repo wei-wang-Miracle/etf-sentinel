@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { api } from "../lib/api";
 import type { AccountHoldings } from "../lib/account";
 import { dateAgo } from "../lib/research";
@@ -8,6 +8,7 @@ import {
   type Coverage, type Draft, type JourneyCatalog, type Rule, type SavedStrategy,
 } from "../lib/strategyJourney";
 import StrategyComparison from "./StrategyComparison";
+import { strategyIndicatorHelp } from "../lib/strategyIndicatorHelp";
 
 const coverageNames: Record<string, string> = { historical: "可用于历史回测", revised: "可做修订历史研究", unavailable: "当前不能使用" };
 
@@ -17,6 +18,8 @@ function ConditionCard({ title, group, definitions, categories, coverage, onChan
   onChange: (group: ConditionGroup) => void; disabled: boolean;
 }) {
   const [more, setMore] = useState(false);
+  const [helpIndex, setHelpIndex] = useState<number>();
+  const helpPrefix = useId();
   const update = (index: number, patch: Partial<Condition>) => onChange({ ...group, conditions: group.conditions.map((row, i) => i === index ? { ...row, ...patch } : row) });
   const duplicate = group.conditions.some((row, i) => group.conditions.some((other, j) => i !== j && row.indicator === other.indicator && row.window === other.window));
   return <fieldset className="journey-rule-card" disabled={disabled}>
@@ -25,19 +28,37 @@ function ConditionCard({ title, group, definitions, categories, coverage, onChan
     {group.conditions.map((row, index) => {
       const definition = definitions.find((item) => item.key === row.indicator);
       const available = coverage?.conditions.find((item) => item.key === row.indicator);
+      const help = strategyIndicatorHelp[row.indicator];
+      const helpId = `${helpPrefix}-${index}`;
+      const helpOpen = helpIndex === index && !!help;
+      const describedBy = helpOpen ? `${helpId}-meaning` : undefined;
       return <div className="journey-condition" key={index}>
-        <div className="journey-condition-inputs"><label>条件 {index + 1}<select value={row.indicator} onChange={(e) => {
+        <div className="journey-condition-inputs" onFocusCapture={(e) => {
+          if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) setHelpIndex(index);
+        }}><label>条件 {index + 1}<select aria-describedby={describedBy} value={row.indicator} onChange={(e) => {
+          setHelpIndex(index);
           const next = definitions.find((item) => item.key === e.target.value);
           const condition: Condition = { indicator: e.target.value, operator: row.operator, threshold: "0", ...(next?.window ? { window: 20 } : {}), ...(e.target.value === "sentiment" ? { category_key: "" } : {}) };
           onChange({ ...group, conditions: group.conditions.map((item, i) => i === index ? condition : item) });
         }}>{definitions.filter((item) => more || item.key === "trend" || item.key === "momentum" || item.key === row.indicator).map((item) => <option key={item.key} value={item.key}>{item.label}{coverage?.conditions.find((c) => c.key === item.key)?.status === "unavailable" ? " · 暂不可用" : ""}</option>)}</select></label>
-        {definition?.window && <label>回看交易日<input type="number" min={2} max={250} required value={row.window ?? 20} onChange={(e) => update(index, { window: Number(e.target.value) })} /></label>}
-        {row.indicator === "sentiment" && <label>市场背景类别<select required value={row.category_key ?? ""} onChange={(e) => update(index, { category_key: e.target.value })}><option value="">明确选择类别</option>{categories.map((category) => <option key={category.key} value={category.key}>{category.name}</option>)}</select></label>}
-        <label>比较<select value={row.operator} onChange={(e) => update(index, { operator: e.target.value as Condition["operator"] })}>{Object.entries(operatorNames).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
-        <label>阈值（{definition?.unit ?? "数值"}）<input required type="number" step="any" value={row.threshold} onChange={(e) => update(index, { threshold: e.target.value })} /></label>
-        <button type="button" aria-label={`删除${title}条件${index + 1}`} disabled={group.conditions.length === 1} onClick={() => onChange({ ...group, conditions: group.conditions.filter((_, i) => i !== index) })}>删除</button></div>
+        {definition?.window && <label>回看交易日<input aria-describedby={describedBy} type="number" min={2} max={250} required value={row.window ?? 20} onChange={(e) => update(index, { window: Number(e.target.value) })} /></label>}
+        {row.indicator === "sentiment" && <label>市场背景类别<select aria-describedby={describedBy} required value={row.category_key ?? ""} onChange={(e) => update(index, { category_key: e.target.value })}><option value="">明确选择类别</option>{categories.map((category) => <option key={category.key} value={category.key}>{category.name}</option>)}</select></label>}
+        <label>比较<select aria-describedby={describedBy} value={row.operator} onChange={(e) => update(index, { operator: e.target.value as Condition["operator"] })}>{Object.entries(operatorNames).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
+        <label>阈值（{definition?.unit ?? "数值"}）<input aria-describedby={describedBy} required type="number" step="any" value={row.threshold} onChange={(e) => update(index, { threshold: e.target.value })} /></label>
+        <button type="button" aria-label={`删除${title}条件${index + 1}`} disabled={group.conditions.length === 1} onClick={() => { setHelpIndex(undefined); onChange({ ...group, conditions: group.conditions.filter((_, i) => i !== index) }); }}>删除</button>
+        {help && <button type="button" className="journey-help-toggle" aria-expanded={helpOpen} aria-controls={helpOpen ? helpId : undefined} onClick={() => setHelpIndex(helpOpen ? undefined : index)}>{helpOpen ? "收起指标说明" : "指标说明"}</button>}</div>
         <p className="muted">{definition?.description}</p>
         {available && <p className={`journey-coverage ${available.status === "unavailable" ? "danger-text" : "muted"}`}>{coverageNames[available.status] ?? available.status} · {available.first_date ?? "无覆盖"}—{available.last_date ?? "无覆盖"}{available.reason ? ` · ${available.reason}` : ""}</p>}
+        {helpOpen && help && <section className="journey-indicator-help" id={helpId} aria-labelledby={`${helpId}-title`}>
+          <h3 id={`${helpId}-title`}>{definition?.label} · 指标说明</h3>
+          <dl>
+            <div><dt>投资含义</dt><dd id={`${helpId}-meaning`}>{help.meaning}</dd></div>
+            <div><dt>如何理解</dt><dd>{help.interpretation}</dd></div>
+            <div><dt>计算方式</dt><dd>{help.calculation}</dd></div>
+            <div><dt>数据来源与口径</dt><dd>{help.source}</dd></div>
+            <div><dt>使用边界</dt><dd>{help.caveat}</dd></div>
+          </dl>
+        </section>}
       </div>;
     })}
     <div className="journey-actions"><button type="button" onClick={() => onChange({ ...group, conditions: [...group.conditions, { indicator: "momentum", window: 20, operator: "gt", threshold: "0" }] })}>添加条件</button><button type="button" aria-expanded={more} onClick={() => setMore(!more)}>{more ? "收起更多指标" : "更多指标：波动、估值、资金与情绪"}</button></div>

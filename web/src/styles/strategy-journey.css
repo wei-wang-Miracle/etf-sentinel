@@ -26,6 +26,13 @@
 .journey-condition-inputs input { width: 130px; }
 .journey-condition-inputs select { max-width: 280px; }
 .journey-coverage { margin-top: 6px; }
+.journey-help-toggle { color: var(--color-ink-muted); }
+.journey-indicator-help { margin-top: 16px; padding: 16px 20px; background: var(--color-surface-elevated); border-left: 2px solid var(--color-border-strong); }
+.journey-indicator-help h3 { margin: 0 0 14px; font-size: 15px; font-weight: 600; }
+.journey-indicator-help dl { display: grid; gap: 12px; margin: 0; }
+.journey-indicator-help dl > div { display: grid; grid-template-columns: 7em minmax(0, 1fr); gap: 16px; font-size: 14px; line-height: 1.75; }
+.journey-indicator-help dt { color: var(--color-ink-muted); }
+.journey-indicator-help dd { margin: 0; overflow-wrap: anywhere; }
 .journey-version-picker { display: flex; flex-wrap: wrap; gap: 12px 24px; border: 0; padding: 16px 0; min-width: 0; }
 .journey-version-picker legend { padding: 12px 0 0; font-weight: 600; }
 .journey-version-picker label,
@@ -54,6 +61,8 @@
 .journey-editor > form > .panel,
 .journey-comparison > .panel { margin: 20px 0; }
 @media (max-width: 720px) {
+  .journey-indicator-help { padding: 14px; }
+  .journey-indicator-help dl > div { grid-template-columns: 1fr; gap: 2px; }
   .journey-inset,
   .journey-rule-card,
   .journey-track { padding: 16px; }

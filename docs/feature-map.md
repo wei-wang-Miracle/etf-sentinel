@@ -29,6 +29,7 @@
 
 | 功能 | 主归属 | 状态 | 依赖与边界 | 设计或实现入口 |
 | --- | --- | --- | --- | --- |
+| 策略条件指标说明 | 策略研究 | 已实现 | 十类指标在焦点进入或点击时展开投资含义、数值解读、计算、来源和限制；区分通用定义与实际源口径，不改变计算与阈值 | [使用说明](single-etf-strategies.md#指标说明)、[编辑器](../web/src/components/StrategyEditor.tsx)、[说明内容](../web/src/lib/strategyIndicatorHelp.ts) |
 | 面向个人的单 ETF 策略流程 | 策略研究 | 已实现 | 三入口与单ETF流程；支持非持仓ETF，中文条件配置、回测比较、保存启用和每日信号；不做组合，不改写历史结果 | [单ETF流程设计稿](superpowers/specs/2026-11-07-single-etf-strategy-journey-design.md) |
 | 同 ETF 自定义策略对比 | 策略研究 | 已实现 | 属于单ETF流程，依赖策略版本、统一回测及真实复盘；统一区间、本金、成本与数据版本重算，保留原结果；真实收益可比时作参照，缺失不阻断策略比较，不凭历史收益推断策略归属 | [策略对比设计](superpowers/specs/2026-11-07-single-etf-strategy-journey-design.md#51-同一只-etf-的自定义策略对比) |
 | 前后端工程初始化 | 工程基础 | 已实现 | 已扩展业务页面、迁移及采集；Docker Hub 连接受阻，三容器启动未验证 | [前端](../web/src/App.tsx)、[API](../api/app/main.py)、[Compose](../compose.yaml)、[初始化清单](superpowers/plans/2026-11-05-initialize.md) |
