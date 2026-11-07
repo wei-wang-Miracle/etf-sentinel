@@ -29,8 +29,10 @@
 
 | 功能 | 主归属 | 状态 | 依赖与边界 | 设计或实现入口 |
 | --- | --- | --- | --- | --- |
+| 面向个人的单 ETF 策略流程 | 策略研究 | 已确认待实现 | 三入口与单ETF方向已确认，具体设计稿待评审；支持非持仓ETF，中文条件配置、回测比较、保存启用和每日信号；不做组合，不改写历史结果 | [单ETF流程设计稿](superpowers/specs/2026-11-07-single-etf-strategy-journey-design.md) |
 | 前后端工程初始化 | 工程基础 | 已实现 | 已扩展业务页面、迁移及采集；Docker Hub 连接受阻，三容器启动未验证 | [前端](../web/src/App.tsx)、[API](../api/app/main.py)、[Compose](../compose.yaml)、[初始化清单](superpowers/plans/2026-11-05-initialize.md) |
 | 投研简报视觉融合 | 工程基础 | 已实现 | 暖纸亮色、宋体标题、朱红操作强调、连续指标条；保留暗色和业务语义色 | [设计契约](design-contract.md)、[主题变量](../web/src/styles/tokens.css) |
+| 前端视觉精修 | 工程基础 | 已实现 | 统一导航线条图标、筛选控件、间距和图注字号；中性选中态、窄屏换行；不改变业务口径 | [设计契约](design-contract.md#前端视觉精修)、[共享样式](../web/src/styles/global.css) |
 | 数据库语义与注释规范 | 工程基础 | 已实现 | 原地重命名迁移，不删除行情 | [数据库说明](database.md) |
 | 本地一键启动 | 工程基础 | 已实现 | Docker仅运行PostgreSQL；本机前后端支持start/restart、进程互斥与安全清理 | [启动脚本](../scripts/start-local.sh) |
 | 20只 ETF 统一标的配置 | 数据基础 | 已实现 | 原五只与国家队18只去重，采集开关、起点、覆盖范围 | [配置页](../web/src/pages/Instruments.tsx)、[功能说明](daily-data.md) |

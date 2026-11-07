@@ -7,12 +7,12 @@ import Compare from "./pages/Compare";
 import ResearchObject from "./pages/ResearchObject";
 
 const pages = [
-  { key: "research", label: "研究对象", icon: "⌕" },
-  { key: "backtests", label: "策略回测", icon: "⌁" },
-  { key: "review", label: "投资复盘", icon: "▦" },
-  { key: "compare", label: "横向对比", icon: "≋" },
-  { key: "instruments", label: "标的配置", icon: "≡" },
-  { key: "jobs", label: "定时任务", icon: "◷" },
+  { key: "research", label: "研究对象", icon: "M10 17a7 7 0 1 0 0-14 7 7 0 0 0 0 14Zm5-2 6 6" },
+  { key: "backtests", label: "策略回测", icon: "M3 3v18h18M6 15l4-5 4 3 6-8" },
+  { key: "review", label: "投资复盘", icon: "M4 3h16v18H4ZM8 7h8M8 12h8M8 17h5" },
+  { key: "compare", label: "横向对比", icon: "M12 3v18M4 7h4v10H4ZM16 5h4v14h-4Z" },
+  { key: "instruments", label: "标的配置", icon: "M3 6h18M3 12h18M3 18h18M8 4v4M16 10v4M10 16v4" },
+  { key: "jobs", label: "定时任务", icon: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20ZM12 6v6l4 2" },
 ];
 function pageFromUrl() {
   const query = new URLSearchParams(location.search);
@@ -61,8 +61,11 @@ export default function App() {
           className="collapse-button"
           onClick={() => setCollapsed(!collapsed)}
           aria-label={collapsed ? "展开导航" : "折叠导航"}
+          aria-expanded={!collapsed}
         >
-          {collapsed ? "»" : "«"}
+          <svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d={collapsed ? "m9 6 6 6-6 6" : "m15 6-6 6 6 6"} />
+          </svg>
         </button>
         {!collapsed && <div className="nav-label">研究工作台</div>}
         <nav aria-label="主导航">
@@ -72,9 +75,12 @@ export default function App() {
               className={`nav-item ${page === p.key ? "active" : ""}`}
               aria-current={page === p.key ? "page" : undefined}
               title={p.label}
+              aria-label={p.label}
               onClick={() => navigate(p.key)}
             >
-              <span aria-hidden="true">{p.icon}</span>
+              <svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d={p.icon} />
+              </svg>
               {!collapsed && p.label}
             </button>
           ))}

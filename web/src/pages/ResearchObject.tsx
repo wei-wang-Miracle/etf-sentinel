@@ -250,7 +250,7 @@ export default function ResearchObject({ theme }: { theme: string }) {
       </header>
       <section className="panel research-chart-panel integrated-research">
         <div className="panel-header">
-          <label>
+          <label className="compact-selector">
             研究对象{" "}
             <select
               aria-label="研究对象"
