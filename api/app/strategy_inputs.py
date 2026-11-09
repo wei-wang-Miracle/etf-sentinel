@@ -12,7 +12,7 @@ from app.models import (
     NationalTeamDaily,
     SentimentDaily,
 )
-from app.strategy_conditions import external_key
+from app.strategy_conditions import DEFINITIONS, external_key
 
 VALUATIONS = {
     "pe_percentile": "pe",
@@ -108,7 +108,7 @@ def external_snapshot(db, code, rules, end, collected_before=None):
         for rule in rules
         for side in ("buy", "sell")
         for item in rule[side]["conditions"]
-        if item["indicator"] not in ("trend", "momentum", "volatility")
+        if DEFINITIONS[item["indicator"]]["source"] != "etf_daily"
     }
     result = {}
     links = list(

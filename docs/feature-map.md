@@ -29,7 +29,10 @@
 
 | 功能 | 主归属 | 状态 | 依赖与边界 | 设计或实现入口 |
 | --- | --- | --- | --- | --- |
-| 策略条件指标说明 | 策略研究 | 已实现 | 十类指标宽屏在稳定侧区随焦点更新、窄屏主动展开，解释投资含义、数值解读、计算、来源和限制；区分通用定义与实际源口径，不改变计算与阈值 | [使用说明](single-etf-strategies.md#指标说明)、[编辑器](../web/src/components/StrategyEditor.tsx)、[说明内容](../web/src/lib/strategyIndicatorHelp.ts) |
+| 策略条件指标说明 | 策略研究 | 已实现 | 左侧指标栏统一打开说明弹层，切换查看十七类指标含义、解读、计算、来源及限制；覆盖与缺失原因集中展示，条件卡片只保留必要状态；关闭后返回焦点，不改变计算与阈值 | [使用说明](single-etf-strategies.md#指标说明)、[配置台](../web/src/components/StrategyFactorBuilder.tsx)、[说明内容](../web/src/lib/strategyIndicatorHelp.ts) |
+| 模拟买卖点与每日仓位副图 | 策略研究 | 已实现 | 复用所选策略冻结账本，0%至100%收盘仓位中性色柱，与日 K、买卖点、缩放联动；半资金按完整账户计算，缺失不补零，真实标记不改变模拟仓位；其他行情保留成交量 | [仓位设计](superpowers/specs/2026-11-09-strategy-position-chart-design.md)、[比较图](../web/src/components/StrategyComparison.tsx)、[图表验证](../web/tests/position-chart.spec.ts) |
+| 指标来源分类与日 K 微观条件 | 策略研究 | 已实现 | 四来源十七类指标；新增双均线、均线方向、穿越、均量比和区间突破，历史／盘前共用因果计算；比较保存逐条件及整组满足天数、模拟成交次数，兼容旧快照 | [指标设计](superpowers/specs/2026-11-09-strategy-micro-factors-design.md)、[计算引擎](../api/app/strategy_conditions.py) |
+| 创建策略因子拖拽配置 | 策略研究 | 已实现 | 默认完整指标库，拖拽复制或点击加入买入／卖出组；桌面一屏并排配置、长条件组内滚动，窄屏点击添加；沿用每组全部／任一满足、1至20条和原草稿／比较格式 | [配置台设计](superpowers/specs/2026-11-09-strategy-factor-builder-design.md)、[配置台](../web/src/components/StrategyFactorBuilder.tsx)、[浏览器验证](../web/tests/factor-builder.spec.ts) |
 | 面向个人的单 ETF 策略流程 | 策略研究 | 已实现 | 三入口与单ETF流程；支持非持仓ETF，中文条件配置、回测比较、保存启用和每日信号；不做组合，不改写历史结果；落地五步指引与按状态下一步提示；旧单次回测与持仓候选创建已下线，共用引擎/信号保留 | [单ETF流程设计稿](superpowers/specs/2026-11-07-single-etf-strategy-journey-design.md)、[我的策略页](../web/src/pages/MyStrategies.tsx) |
 | 同 ETF 自定义策略对比 | 策略研究 | 已实现 | 属于单ETF流程，依赖策略版本、统一回测及真实复盘；统一区间、本金、成本与数据版本重算，保留原结果；真实收益可比时作参照，缺失不阻断策略比较，不凭历史收益推断策略归属 | [策略对比设计](superpowers/specs/2026-11-07-single-etf-strategy-journey-design.md#51-同一只-etf-的自定义策略对比) |
 | 前后端工程初始化 | 工程基础 | 已实现 | 已扩展业务页面、迁移及采集；Docker Hub 连接受阻，三容器启动未验证 | [前端](../web/src/App.tsx)、[API](../api/app/main.py)、[Compose](../compose.yaml)、[初始化清单](superpowers/plans/2026-11-05-initialize.md) |

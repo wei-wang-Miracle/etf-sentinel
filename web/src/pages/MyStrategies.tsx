@@ -31,7 +31,7 @@ export default function MyStrategies({ theme }: { theme: string }) {
   const codeVersions = versions.filter((row) => row.instrument_code === code);
   const hasActive = codeVersions.some((row) => row.active);
   useEffect(() => { setPending(undefined); setNotice(""); }, [code]);
-  return <>
+  return <div className={query.view === "editor" && code ? "strategy-create-page" : undefined}>
     <header className="page-header"><div><h1>{query.view === "editor" ? edit ? "基于版本修改" : "创建策略" : "我的策略"}</h1><p>保存不同方法，在同一只 ETF 上比较，再决定是否每日运行</p></div></header>
     {error && <p className="alert" role="alert">{error}<button onClick={() => void refresh().then(() => setError("")).catch((e) => setError(e.message))}>重试</button></p>}{notice && <p className="notice" role="status">{notice}</p>}
     <div className="journey-actions journey-page-controls"><label>当前 ETF <select aria-label="当前 ETF" value={code} disabled={busy || loading || query.view === "editor"} onChange={(e) => update({ code: e.target.value, edit: "", view: "list" })}><option value="">选择 ETF</option>{catalog?.instruments.map((row) => <option key={row.instrument_code} value={row.instrument_code}>{row.instrument_code} · {row.instrument_name}</option>)}</select></label>{query.view === "list" && <button disabled={!code || loading} className="primary" onClick={() => update({ view: "editor", edit: "", code, stage: "rules" })}>创建新策略</button>}<button disabled={!code || loading} onClick={() => update({ view: "list", edit: "" })}>{query.view === "list" ? "查看策略与信号" : "返回版本列表"}</button></div>
@@ -41,5 +41,5 @@ export default function MyStrategies({ theme }: { theme: string }) {
       {pending && pending.instrument_code === code && <section className="panel journey-inset" role="region" aria-label="确认启用策略"><h2>{catalog?.instruments.find((row) => row.instrument_code === pending.instrument_code)?.instrument_name} {pending.instrument_code} · 确认启用“{pending.name}”第 {pending.version} 版</h2><p>{versions.some((row) => row.active && row.instrument_code === pending.instrument_code) ? `这将替换 ${versions.find((row) => row.active && row.instrument_code === pending.instrument_code)?.name} 第 ${versions.find((row) => row.active && row.instrument_code === pending.instrument_code)?.version} 版，保留历史信号和执行记录。` : "从下一适用交易日开始准备计划，不补写过去的信号。"}下一适用日期、就绪状态和下次运行待服务端核验；不补历史、不自动下单。启用不代表真实账户已经买入或卖出。</p><div className="journey-actions"><button className="primary" disabled={busy} onClick={() => void toggle(pending)}>确认启用</button><button disabled={busy} onClick={() => setPending(undefined)}>取消</button></div></section>}
       <DailySignals key={`${code}:${versions.filter((row) => row.active && row.instrument_code === code).map((row) => row.id).join(",")}`} code={code} compact />
     </>}
-  </>;
+  </div>;
 }

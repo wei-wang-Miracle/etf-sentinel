@@ -6,7 +6,9 @@ import { stamp } from "./api";
 export type Condition = {
   indicator: string;
   window?: number;
-  operator: "gt" | "gte" | "lt" | "lte";
+  long_window?: number;
+  lag?: number;
+  operator: "gt" | "gte" | "lt" | "lte" | "cross_up" | "cross_down";
   threshold: string;
   category_key?: string;
 };
@@ -39,6 +41,8 @@ export type SavedStrategy = {
 export type ConditionDefinition = {
   key: string;
   label: string;
+  display_label?: string;
+  source?: string;
   unit: string;
   window: boolean;
   description: string;
@@ -70,6 +74,12 @@ export type ComparisonTrack = {
   backtest_id?: number;
   account?: Account;
   diagnostics?: Diagnostics;
+  condition_diagnostics?: {
+    decision_start: string; decision_end: string; days: number;
+    buy_trades: number; sell_trades: number;
+    buy: { mode: string; matched_days: number; missing_days: number; conditions: { label: string; matched_days: number; valid_days: number; missing_days: number }[] };
+    sell: { mode: string; matched_days: number; missing_days: number; conditions: { label: string; matched_days: number; valid_days: number; missing_days: number }[] };
+  };
   evidence_type: string;
 };
 export type Comparison = {
@@ -84,7 +94,20 @@ export type Comparison = {
 };
 export type Draft = { name: string; rule: Rule; settings: ResearchSettings; strategy_id?: number };
 
-export const operatorNames = { gt: "高于", gte: "不低于", lt: "低于", lte: "不高于" };
+export const operatorNames = { gt: "高于", gte: "不低于", lt: "低于", lte: "不高于", cross_up: "上穿", cross_down: "下穿" };
+export const eventIndicators = new Set(["price_cross", "ma_cross", "breakout"]);
+export const doubleWindowIndicators = new Set(["ma_spread", "ma_cross", "volume_ma_ratio"]);
+export function conditionWarmup(row: Condition) {
+  if (doubleWindowIndicators.has(row.indicator)) return (row.long_window ?? 20) + (row.indicator === "ma_cross" ? 1 : 0);
+  if (row.indicator === "ma_slope") return (row.window ?? 20) + (row.lag ?? 5);
+  return (row.window ?? 0) + (["momentum", "volatility", "price_cross", "volume_ratio", "breakout", "national_team_change"].includes(row.indicator) ? 1 : 0);
+}
+export function conditionParameters(condition: Partial<Condition>, unit = "") {
+  const windows = condition.long_window ? `短${condition.window}／长${condition.long_window}日` : `${condition.window}个交易日`;
+  const parameters = condition.window ? `（${windows}${condition.lag ? `，较${condition.lag}日前` : ""}）` : "";
+  const comparison = condition.indicator === "breakout" ? (condition.operator === "cross_up" ? "上破前期最高收盘" : "下破前期最低收盘") : condition.operator ? operatorNames[condition.operator] : "";
+  return `${parameters}${comparison}${eventIndicators.has(condition.indicator ?? "") ? "" : `${condition.threshold ?? ""}${unit}`}`;
+}
 export const trendRule = (): Rule => ({
   buy: { mode: "all", conditions: [{ indicator: "trend", window: 60, operator: "gt", threshold: "0" }] },
   sell: { mode: "any", conditions: [{ indicator: "trend", window: 60, operator: "lte", threshold: "0" }] },
@@ -94,7 +117,7 @@ export function ruleSummary(rule: Rule, definitions: ConditionDefinition[], cate
   const group = (value: ConditionGroup) => value.conditions.map((condition) => {
     const definition = definitions.find((row) => row.key === condition.indicator);
     const category = categories.find((row) => row.key === condition.category_key);
-    return `${category ? `${category.name} · ` : ""}${definition?.label ?? condition.indicator}${condition.window ? `（${condition.window}个交易日）` : ""}${operatorNames[condition.operator]}${condition.threshold}${definition?.unit ?? ""}`;
+    return `${category ? `${category.name} · ` : ""}${definition?.display_label ?? definition?.label ?? condition.indicator}${conditionParameters(condition, definition?.unit)}`;
   }).join(value.mode === "all" ? "，并且" : "，或者");
   return `空仓时，${group(rule.buy)}则买入；持仓时，${group(rule.sell)}则退出。使用${rule.allocation === 50 ? "一半资金，另一半保留现金" : "全部资金"}，收盘判断，下一交易日开盘模拟执行；持仓期间不每日补减仓。`;
 }

@@ -56,18 +56,22 @@ test("保存成功启用失败时只重试同一版本", async ({ page }) => {
   expect(enables).toBe(2);
 });
 
-test("桌面聚焦说明不推移条件，窄屏聚焦不自动展开", async ({ page }) => {
+test("聚焦字段不自动打开说明，主动查看说明不推移条件", async ({ page }) => {
   await page.goto("/?page=strategies&code=510500&view=editor");
   const window = page.getByLabel("回看交易日").first();
   const before = await window.boundingBox();
   await window.focus();
   await expect(window).toBeFocused();
   expect((await window.boundingBox())?.y).toBe(before?.y);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   await page.setViewportSize({ width: 390, height: 844 });
   await window.focus();
-  await expect(page.locator(".journey-indicator-help").first()).toBeHidden();
-  await page.locator(".journey-help-toggle").first().click();
-  await expect(page.locator(".journey-indicator-help").first()).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  const help = page.getByRole("button", { name: "指标说明", exact: true });
+  await help.click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.getByRole("button", { name: "关闭", exact: true }).click();
+  await expect(help).toBeFocused();
 });
 
 

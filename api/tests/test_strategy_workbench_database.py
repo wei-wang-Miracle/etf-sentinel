@@ -516,3 +516,80 @@ def test_pause_racing_generation_does_not_publish_or_raise_server_error(monkeypa
     assert response.status_code == 200
     assert not response.json()['created']
     assert response.json()['blocked']
+
+
+def test_micro_factors_use_local_market_and_freeze_trigger_diagnostics():
+    body = deepcopy(BODY)
+    body["start_date"] = "2026-06-04"
+    body["current"]["rule"] = rule(
+        [condition("volume_ratio", "gte", "1", 2)],
+        [condition("price_cross", "cross_down", window=2)],
+    )
+    result = compare(body)
+    assert result["complete"]
+    stats = result["tracks"][0]["condition_diagnostics"]
+    assert stats["days"] == 3
+    assert stats["buy"]["matched_days"] == 3
+    assert stats["buy_trades"] == 1 and stats["sell_trades"] == 0
+    assert client.post(f"/strategies/comparisons/{result['id']}/verify").json()[
+        "identical"
+    ]
+    version = save(result)
+    assert (
+        client.post(f"/strategies/{version['id']}/enable", json={}).status_code == 200
+    )
+    catalog = client.get("/strategies/catalog").json()
+    assert catalog["catalog_version"] == "1.1"
+    assert {c["source"] for c in catalog["conditions"]} == {
+        "etf_daily",
+        "index_valuation",
+        "sentiment",
+        "national_team",
+    }
+    coverage = client.get(
+        "/strategies/coverage", params={"instrument_code": "510500"}
+    ).json()
+    assert (
+        next(c for c in coverage["conditions"] if c["key"] == "volume_ratio")["status"]
+        == "historical"
+    )
+
+
+def test_micro_factor_saved_version_generates_forward_plan_with_same_evidence(monkeypatch):
+    spec = rule([condition("ma_cross", "cross_up", window=2, long_window=3)])
+    body = {**BODY, "start_date": "2026-06-05", "current": {"name": "双均线", "rule": spec}}
+    version = save(compare(body))
+    freeze_plan_clock(monkeypatch)
+    assert client.post(f"/strategies/{version['id']}/enable", json={}).status_code == 200
+    generated = client.post("/strategy-lab/signals/generate").json()
+    assert len(generated["created"]) == 1, generated
+    check = generated["created"][0]["plan"]["conditions"]["buy"][0]
+    assert check["window"] == 2 and check["long_window"] == 3
+    assert check["operator"] == "cross_up" and check["satisfied"] is True
+    assert check["unit"] == "事件"
+
+
+def test_old_comparison_without_catalog_or_diagnostics_still_recomputes_and_enables():
+    from app.backtest_routes import digest
+    from app.models import StrategyComparison
+
+    original = compare()
+    # 模拟扩充目录之前的原始快照：旧计算版本、旧目录和无触发统计。
+    with Session() as db:
+        row = db.get(StrategyComparison, original["id"])
+        snapshot = deepcopy(row.input_snapshot)
+        snapshot.pop("catalog_version")
+        snapshot["condition_definitions"] = [
+            {k: v for k, v in item.items() if k not in ("source", "display_label")}
+            for item in snapshot["condition_definitions"]
+            if item["key"] not in {"ma_spread", "ma_slope", "price_cross", "ma_cross", "volume_ratio", "volume_ma_ratio", "breakout"}
+        ]
+        result = deepcopy(row.result_snapshot)
+        for track in result["tracks"]:
+            track.pop("condition_diagnostics", None)
+        row.input_snapshot, row.input_sha256 = snapshot, digest(snapshot)
+        row.result_snapshot = result
+        db.commit()
+    assert client.post(f"/strategies/comparisons/{original['id']}/verify").json()["identical"]
+    version = save(original)
+    assert client.post(f"/strategies/{version['id']}/enable", json={}).status_code == 200

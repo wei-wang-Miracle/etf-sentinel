@@ -1,72 +1,16 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { conditionWarmup } from "../lib/strategyJourney";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
 import type { AccountHoldings } from "../lib/account";
 import { dateAgo, number, useResearchQuery } from "../lib/research";
 import {
-  activationMessage, journeyUrl, operatorNames, ruleSummary, trendRule,
-  type Comparison, type Condition, type ConditionDefinition, type ConditionGroup,
+  activationMessage, journeyUrl, ruleSummary, trendRule,
+  type Comparison,
   type Coverage, type Draft, type JourneyCatalog, type Rule, type SavedStrategy,
 } from "../lib/strategyJourney";
 import "../styles/strategy-journey.css";
 import StrategyComparison from "./StrategyComparison";
-import { strategyIndicatorHelp } from "../lib/strategyIndicatorHelp";
-
-const coverageNames: Record<string, string> = { historical: "可用于历史回测", revised: "可做修订历史研究", unavailable: "当前不能使用" };
-
-function ConditionCard({ title, group, definitions, categories, coverage, onChange, disabled }: {
-  title: string; group: ConditionGroup; definitions: ConditionDefinition[];
-  categories: JourneyCatalog["sentiment_categories"]; coverage?: Coverage;
-  onChange: (group: ConditionGroup) => void; disabled: boolean;
-}) {
-  const [more, setMore] = useState(false);
-  const [helpIndex, setHelpIndex] = useState<number>(0);
-  const [explicitHelp, setExplicitHelp] = useState(false);
-  const helpPrefix = useId();
-  const update = (index: number, patch: Partial<Condition>) => onChange({ ...group, conditions: group.conditions.map((row, i) => i === index ? { ...row, ...patch } : row) });
-  const duplicate = group.conditions.some((row, i) => group.conditions.some((other, j) => i !== j && row.indicator === other.indicator && row.window === other.window));
-  return <fieldset className="journey-rule-card journey-conditions-card" disabled={disabled}>
-    <legend>{title}</legend>
-    <label>触发方式 <select value={group.mode} onChange={(e) => onChange({ ...group, mode: e.target.value as ConditionGroup["mode"] })}><option value="all">全部条件满足</option><option value="any">任一条件满足</option></select></label>
-    {group.conditions.map((row, index) => {
-      const definition = definitions.find((item) => item.key === row.indicator);
-      const available = coverage?.conditions.find((item) => item.key === row.indicator);
-      const help = strategyIndicatorHelp[row.indicator];
-      const helpId = `${helpPrefix}-${index}`;
-      const helpOpen = helpIndex === index && !!help;
-      const describedBy = helpOpen ? `${helpId}-meaning` : undefined;
-      return <div className="journey-condition" key={index}>
-        <div className="journey-condition-inputs" onFocusCapture={(e) => {
-          if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) { setHelpIndex(index); setExplicitHelp(false); }
-        }}><label>条件 {index + 1}<select aria-describedby={describedBy} value={row.indicator} onChange={(e) => {
-          setHelpIndex(index);
-          const next = definitions.find((item) => item.key === e.target.value);
-          const condition: Condition = { indicator: e.target.value, operator: row.operator, threshold: "0", ...(next?.window ? { window: 20 } : {}), ...(e.target.value === "sentiment" ? { category_key: "" } : {}) };
-          onChange({ ...group, conditions: group.conditions.map((item, i) => i === index ? condition : item) });
-        }}>{definitions.filter((item) => more || item.key === "trend" || item.key === "momentum" || item.key === row.indicator).map((item) => <option key={item.key} value={item.key}>{item.label}{coverage?.conditions.find((c) => c.key === item.key)?.status === "unavailable" ? " · 暂不可用" : ""}</option>)}</select></label>
-        {definition?.window && <label>回看交易日<input aria-describedby={describedBy} type="number" min={2} max={250} required value={row.window ?? 20} onChange={(e) => update(index, { window: Number(e.target.value) })} /></label>}
-        {row.indicator === "sentiment" && <label>市场背景类别<select aria-describedby={describedBy} required value={row.category_key ?? ""} onChange={(e) => update(index, { category_key: e.target.value })}><option value="">明确选择类别</option>{categories.map((category) => <option key={category.key} value={category.key}>{category.name}</option>)}</select></label>}
-        <label>比较<select aria-describedby={describedBy} value={row.operator} onChange={(e) => update(index, { operator: e.target.value as Condition["operator"] })}>{Object.entries(operatorNames).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
-        <label>阈值（{definition?.unit ?? "数值"}）<input aria-describedby={describedBy} required type="number" step="any" value={row.threshold} onChange={(e) => update(index, { threshold: e.target.value })} /></label>
-        <button type="button" aria-label={`删除${title}条件${index + 1}`} disabled={group.conditions.length === 1} onClick={() => { setHelpIndex(0); onChange({ ...group, conditions: group.conditions.filter((_, i) => i !== index) }); }}>删除</button>
-        {help && <button type="button" className="journey-help-toggle" aria-expanded={helpOpen && explicitHelp} aria-controls={helpOpen ? helpId : undefined} onClick={() => { setHelpIndex(index); setExplicitHelp(!explicitHelp); }}>{helpOpen && explicitHelp ? "收起指标说明" : "指标说明"}</button>}</div>
-        <p className="muted">{definition?.description}</p>
-        {available && <p className={`journey-coverage ${available.status === "unavailable" ? "danger-text" : "muted"}`}>{coverageNames[available.status] ?? available.status} · {available.first_date ?? "无覆盖"}—{available.last_date ?? "无覆盖"}{available.reason ? ` · ${available.reason}` : ""}</p>}
-        {helpOpen && help && <section className={`journey-indicator-help ${explicitHelp ? "explicit-help" : ""}`} id={helpId} aria-labelledby={`${helpId}-title`}>
-          <h3 id={`${helpId}-title`}>{definition?.label} · 指标说明</h3>
-          <dl>
-            <div><dt>投资含义</dt><dd id={`${helpId}-meaning`}>{help.meaning}</dd></div>
-            <div><dt>如何理解</dt><dd>{help.interpretation}</dd></div>
-            <div><dt>计算方式</dt><dd>{help.calculation}</dd></div>
-            <div><dt>数据来源与口径</dt><dd>{help.source}</dd></div>
-            <div><dt>使用边界</dt><dd>{help.caveat}</dd></div>
-          </dl>
-        </section>}
-      </div>;
-    })}
-    <div className="journey-actions"><button type="button" onClick={() => onChange({ ...group, conditions: [...group.conditions, { indicator: "momentum", window: 20, operator: "gt", threshold: "0" }] })}>添加条件</button><button type="button" aria-expanded={more} onClick={() => setMore(!more)}>{more ? "收起更多指标" : "更多指标：波动、估值、资金与情绪"}</button></div>
-    {duplicate && <p className="notice warning">存在相同指标与窗口，可能与已有条件重复。</p>}
-  </fieldset>;
-}
+import StrategyFactorBuilder from "./StrategyFactorBuilder";
 
 export default function StrategyEditor({ code, theme, initial, onSaved }: { code: string; theme: string; initial?: SavedStrategy; onSaved: () => void }) {
   const [query, updateQuery] = useResearchQuery({ stage: "rules" });
@@ -186,26 +130,31 @@ export default function StrategyEditor({ code, theme, initial, onSaved }: { code
   const ranges = coverage?.conditions.filter((row) => usedConditions.some((condition) => condition.indicator === row.key)) ?? [];
   const firstDate = ranges.map((row) => row.first_date).filter((value): value is string => !!value).sort().at(-1);
   const lastDate = ranges.map((row) => row.last_date).filter((value): value is string => !!value).sort()[0];
-  const warmup = Math.max(1, ...usedConditions.map((row) => (row.window ?? 0) + (row.indicator === "momentum" || row.indicator === "volatility" ? 1 : 0)));
+  const warmup = Math.max(1, ...usedConditions.map(conditionWarmup));
   if (historical) return <div className="journey-editor">
     <section className="panel journey-inset"><h2>历史比较 · 只读快照</h2><p>{historical.instrument_code} · {historical.settings.start_date}—{historical.settings.end_date} · 研究本金 {number(historical.settings.initial_cash)} 元</p><p>佣金率 {historical.settings.commission_rate}；最低佣金 {historical.settings.minimum_commission} 元；不利滑点 {historical.settings.slippage_bps} 基点。次交易日开盘模拟执行，100 份整手，期末按收盘估值。</p><p>以下使用当次冻结输入，核验不采用最新行情。当前草稿与当前比较结果均保留，不会被历史快照覆盖。</p>
       {historical.tracks.map((row) => <section key={row.key}><h3>{row.name} · 冻结规则</h3><p>{row.rule && catalog ? ruleSummary(row.rule, catalog.conditions, catalog.sentiment_categories) : row.key === "hold" || row.key === "hold_half" ? `持有参照；投入比例${row.allocation == null ? "未提供" : `${row.allocation}%`}，其余依据见当次模拟成交。` : "本次快照未提供条件规则，不能用当前草稿或后来版本代替。"}</p>{row.status !== "success" && <p className="notice warning">{row.reason ?? "本次未完成计算"}</p>}</section>)}
       <button className="primary" onClick={() => setHistorical(undefined)}>返回当前草稿</button>
     </section><StrategyComparison key={historical.id} result={historical} theme={theme} />
   </div>;
-  return <div className="journey-editor">
-    <header className="journey-section-heading"><div><h2>{initial ? "修改策略 · 保存为新版" : "为这只 ETF 创建策略"}</h2><p className="muted mono">{code} · {catalog?.instruments.find((row) => row.instrument_code === code)?.instrument_name} · 仅供研究</p></div><a href={journeyUrl("etfs", code)}>查看真实操作与数据</a></header>
-    <ol className="journey-steps">{[["rules", "配置规则"], ["compare", "回测比较"], ["save", "保存与启用"]].map(([value, label]) => <li key={value} aria-current={stage === value ? "step" : undefined}><button disabled={busy || (value === "save" && (!result || stale))} onClick={() => updateQuery({ stage: value })}>{label}</button></li>)}</ol>
+  return <div className={`journey-editor ${stage === "rules" ? "factor-editor" : ""}`}>
+    <div className="factor-stage-navigation"><ol className="journey-steps">{[["rules", "配置规则"], ["compare", "回测比较"], ["save", "保存与启用"]].map(([value, label]) => <li key={value} aria-current={stage === value ? "step" : undefined}><button disabled={busy || (value === "save" && (!result || stale))} onClick={() => updateQuery({ stage: value })}>{label}</button></li>)}</ol><a href={journeyUrl("etfs", code)}>查看真实操作与数据</a></div>
     {error && <p className="alert" role="alert">{error}</p>}{notice && <p className="notice" role="status">{notice}</p>}{refreshError && <p className="notice warning">{refreshError}</p>}{retainedDates && <p className="notice">已保留草稿或版本的日期 {draft.settings.start_date}—{draft.settings.end_date}，未用研究链接的日期覆盖。可在回测比较中调整。</p>}
     {!catalog ? <div className="empty">策略资料暂不可用。<button onClick={() => location.reload()}>重试</button></div> : <form onSubmit={(e) => { e.preventDefault(); if (stage === "rules") updateQuery({ stage: "compare" }); else void compare(); }}>
-      <div hidden={stage !== "rules"}>
-      <section className="panel journey-inset"><div className="journey-actions"><label>策略名称<input required maxLength={80} value={draft.name} disabled={busy} onChange={(e) => { generation.current += 1; setDraft({ ...draft, name: e.target.value }); setSaved(undefined); }} /></label><label>从模板开始<select defaultValue="" disabled={busy} onChange={(e) => template(e.target.value)}><option value="" disabled>选择可修改的起点</option><option value="trend">顺着趋势交易</option><option value="momentum">趋势加上涨确认</option><option value="custom">自己设置（从基础条件修改）</option></select></label></div><p className="muted">模板只是研究起点，不代表已找到最佳参数。{draftStatus}</p></section>
-      <ConditionCard title="什么时候买" group={draft.rule.buy} definitions={catalog.conditions} categories={catalog.sentiment_categories} coverage={coverage} disabled={busy} onChange={(buy) => updateRule({ ...draft.rule, buy })} />
-      <ConditionCard title="什么时候卖" group={draft.rule.sell} definitions={catalog.conditions} categories={catalog.sentiment_categories} coverage={coverage} disabled={busy} onChange={(sell) => updateRule({ ...draft.rule, sell })} />
-      <fieldset className="journey-rule-card" disabled={busy}><legend>投入多少</legend><div className="journey-actions"><label>参与交易的比例<select value={draft.rule.allocation} onChange={(e) => updateRule({ ...draft.rule, allocation: Number(e.target.value) as 50 | 100 })}><option value={100}>全部资金</option><option value={50}>一半资金，另一半保留现金</option></select></label></div><p className="muted">研究本金不是实际账户现金；保留现金不补仓，持仓期间不每日调份额。</p></fieldset>
-      <section className="panel journey-inset"><h2>这条策略会怎样操作</h2><p>{ruleSummary(draft.rule, catalog.conditions, catalog.sentiment_categories)}</p><p className="muted">买入确认不满足，不自动等于卖出；空仓时买卖条件同时成立则保持空仓。</p></section>
-      {coverage?.conditions.some((row) => row.status === "revised" && [...draft.rule.buy.conditions, ...draft.rule.sell.conditions].some((condition) => condition.indicator === row.key)) && <p className="notice warning">修订历史研究，未证明原时点可得。历史来源可能修订，不作为原时点已知信息。</p>}
-      <button className="primary" disabled={busy}>下一步：回测比较</button></div>
+      <div className="factor-configuration" hidden={stage !== "rules"}>
+        <div className="factor-metadata">
+          <label>策略名称<input required maxLength={80} value={draft.name} disabled={busy} onChange={(e) => { generation.current += 1; setDraft({ ...draft, name: e.target.value }); setSaved(undefined); }} /></label>
+          <label>从模板开始<select defaultValue="" disabled={busy} onChange={(e) => template(e.target.value)}><option value="" disabled>选择可修改的起点</option><option value="trend">顺着趋势交易</option><option value="momentum">趋势加上涨确认</option><option value="custom">自己设置（从基础条件修改）</option></select></label>
+          <label>参与交易的比例<select value={draft.rule.allocation} disabled={busy} onChange={(e) => updateRule({ ...draft.rule, allocation: Number(e.target.value) as 50 | 100 })}><option value={100}>全部资金</option><option value={50}>一半资金，另一半保留现金</option></select></label>
+        </div>
+        <StrategyFactorBuilder rule={draft.rule} catalog={catalog} coverage={coverage} disabled={busy} onChange={updateRule} />
+        <footer className="factor-editor-footer">
+          <div className="factor-footer-info"><details className="factor-rule-summary"><summary>规则摘要 · 买入 {draft.rule.buy.conditions.length} 条／卖出 {draft.rule.sell.conditions.length} 条</summary><div><p>{ruleSummary(draft.rule, catalog.conditions, catalog.sentiment_categories)}</p><p>买入确认不满足，不自动等于卖出；空仓时买卖条件同时成立则保持空仓。</p></div></details>
+            <span className="factor-draft-status" role="status">{draftStatus}</span>
+          </div>
+          <button className="primary" disabled={busy}>下一步：回测比较</button>
+        </footer>
+      </div>
       <div hidden={stage !== "compare"}><section className="panel journey-inset"><h2>回测并比较</h2><div className="journey-actions"><label>开始日期<input required type="date" value={draft.settings.start_date} onChange={(e) => updateSettings("start_date", e.target.value)} disabled={busy} /></label><label>截止日期<input required type="date" min={draft.settings.start_date} max={dateAgo(1)} value={draft.settings.end_date} onChange={(e) => updateSettings("end_date", e.target.value)} disabled={busy} /></label></div><p className="muted">选择另一段时间可检验不同市场阶段；看过的区间不再属于未见样本。所有策略统一比较条件，各自预热要求仍须满足。</p>
         <p className="notice">所选条件原始共同覆盖：{ranges.some((row) => row.status === "unavailable") || !firstDate || !lastDate || firstDate > lastDate ? "尚无完整共同覆盖，请先检查数据" : `${firstDate} 至 ${lastDate}`}；最长预热需求 {warmup} 个收盘点。开始日前须有完整预热数据，系统逐日校验，不自动缩短区间。</p>
         <div><h3>交易假设与成本</h3><label>初始研究资金（元）<input required type="number" min={1000} max={100000000} step="0.01" value={draft.settings.initial_cash} disabled={busy} onChange={(e) => updateSettings("initial_cash", e.target.value)} /></label><div className="journey-actions"><label>佣金率<input required type="number" min="0" max="0.01" step="0.00001" value={draft.settings.commission_rate} onChange={(e) => updateSettings("commission_rate", e.target.value)} disabled={busy} /></label><label>最低佣金（元）<input required type="number" min="0" max="100" step="0.01" value={draft.settings.minimum_commission} onChange={(e) => updateSettings("minimum_commission", e.target.value)} disabled={busy} /></label><label>不利滑点（基点）<input required type="number" min="0" max="100" step="0.1" value={draft.settings.slippage_bps} onChange={(e) => updateSettings("slippage_bps", e.target.value)} disabled={busy} /></label></div><p className="muted">统一使用次交易日开盘、100份整手及分红权益核算，期末按收盘估值。未模拟盘口与真实撮合，低佣金不等于零成本。</p></div>

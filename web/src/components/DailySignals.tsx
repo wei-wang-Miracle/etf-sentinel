@@ -3,13 +3,13 @@ import { api, stamp, type Job } from "../lib/api";
 import { dateAgo, number } from "../lib/research";
 import { useApiResource } from "../lib/useApiResource";
 import { executionNames, type Observation, type PlanSignal } from "../lib/strategyLab";
-import { journeyUrl, type SavedStrategy } from "../lib/strategyJourney";
+import { conditionParameters, eventIndicators, journeyUrl, type Condition, type SavedStrategy } from "../lib/strategyJourney";
 import { dataManagementUrl } from "../lib/navigation";
 import { ExecutionForm } from "./ExecutionForm";
 
 type ExtendedSignal = PlanSignal & { plan: PlanSignal["plan"] & {
   quantity_status?: string; new_trigger?: boolean; target_weight?: number;
-  conditions?: Record<string, { label?: string; indicator?: string; matched?: boolean | null; satisfied?: boolean | null; value?: string | number | null; reason?: string; description?: string }[]>;
+  conditions?: Record<string, (Partial<Condition> & { unit?: string; label?: string; indicator?: string; matched?: boolean | null; satisfied?: boolean | null; value?: string | number | null; reason?: string; description?: string })[]>;
 } };
 const actionNames: Record<string, string> = { buy: "买入", sell: "卖出", hold: "继续持有", wait: "等待", unknown: "方向待核验" };
 
@@ -81,7 +81,7 @@ export default function DailySignals({ code, compact = false }: { code?: string;
           <dl className="journey-metrics"><div><dt>参考目标</dt><dd>{quantityUnknown || row.plan.target_quantity == null ? "方向已计算，数量待核验" : `${number(row.plan.target_quantity, 0)} 份`}</dd></div><div><dt>真实／可用份额</dt><dd>{quantityUnknown ? "尚无完整仓位证据" : `${number(row.plan.actual_quantity, 0)}／${number(row.plan.available_quantity, 0)}`}</dd></div></dl>
           {row.plan.funding_check_required && <p className="notice warning">买入前须人工核验可用现金，研究本金不代表实际可用资金。</p>}
           {(row.plan.warnings ?? []).map((warning, index) => <p className="notice warning" key={index}>{warning}</p>)}
-          {row.plan.conditions && <details><summary>逐条条件与当时数值</summary>{Object.entries(row.plan.conditions).map(([group, conditions]) => <section key={group}><h4>{group === "buy" ? "买入" : "卖出"}条件</h4>{conditions.map((item, index) => { const matched = item.satisfied ?? item.matched; return <p key={index}>{item.label ?? item.description ?? item.indicator ?? `条件 ${index + 1}`}：{matched == null ? "未知" : matched ? "满足" : "不满足"}；当时数值 {item.value ?? "缺失"}{item.reason ? ` · ${item.reason}` : ""}</p>; })}</section>)}</details>}
+          {row.plan.conditions && <details><summary>逐条条件与当时数值</summary>{Object.entries(row.plan.conditions).map(([group, conditions]) => <section key={group}><h4>{group === "buy" ? "买入" : "卖出"}条件</h4>{conditions.map((item, index) => { const matched = item.satisfied ?? item.matched; return <p key={index}>{item.label ?? item.description ?? item.indicator ?? `条件 ${index + 1}`}{conditionParameters(item, item.unit)}：{matched == null ? "未知" : matched ? "满足" : "不满足"}；{eventIndicators.has(item.indicator ?? "") ? `事件${matched == null ? "未知" : matched ? "发生" : "未发生"}` : `当时数值 ${item.value ?? "缺失"}${item.value == null ? "" : item.unit ?? ""}`}{item.reason ? ` · ${item.reason}` : ""}</p>; })}</section>)}</details>}
           <details><summary>仓位与版本依据</summary><p>{row.plan.position_basis ?? "仓位依据待核验"} · 观察记录 #{row.observation_id}</p><p>计划不等于订单或成交，累计委托只作为匹配候选；卖出以可用份额为约束。</p></details>
           {!quantityUnknown && <ExecutionForm signal={row} refresh={refresh} report={setError} />}
           {row.skip_note && <p>主动跳过：{row.skip_note}</p>}

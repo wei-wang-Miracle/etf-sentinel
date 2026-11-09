@@ -28,8 +28,10 @@ from app.models import (
 )
 from app.strategies import get_strategy
 from app.strategy_conditions import (
+    CATALOG_VERSION,
     CONDITION_VERSION,
     CONDITIONS,
+    condition_diagnostics,
     evidence_type,
     normalize_rule,
     prepare_conditions,
@@ -137,6 +139,7 @@ def catalog():
         "sentiment_categories": categories,
         "engine_version": ENGINE_VERSION,
         "condition_version": CONDITION_VERSION,
+        "catalog_version": CATALOG_VERSION,
     }
 
 
@@ -287,6 +290,20 @@ def execute_candidate(candidate, snapshot):
     return result, account, run_input
 
 
+def candidate_diagnostics(candidate: dict, snapshot: dict, account: dict) -> dict:
+    """在比较结果保存独立诊断，不改变旧回测账户及其复算摘要。"""
+    rows = snapshot["market"]["rows"]
+    signals = prepare_conditions(
+        rows,
+        snapshot["market"]["actions"]["dividends"],
+        {
+            "rule": candidate["rule"],
+            "external": snapshot["external"],
+        },
+    )
+    return condition_diagnostics(candidate["rule"], rows, signals, account)
+
+
 def comparison_payload(row, detail=True):
     """返回统一比较及其失败状态，完整输入只保留在本地库。"""
     payload = {
@@ -371,6 +388,7 @@ def compare(body: ComparisonRequest):
             "external": external,
             "engine_version": ENGINE_VERSION,
             "condition_version": CONDITION_VERSION,
+            "catalog_version": CATALOG_VERSION,
             "condition_definitions": CONDITIONS,
             "data_version": DATA_VERSION,
         }
@@ -398,6 +416,10 @@ def compare(body: ComparisonRequest):
                 )
                 db.add(run)
                 db.flush()
+                if candidate.get("rule"):
+                    track["condition_diagnostics"] = candidate_diagnostics(
+                        candidate, snapshot, account
+                    )
                 track.update(
                     status="success",
                     backtest_id=run.backtest_run_id,
@@ -469,6 +491,12 @@ def verify_comparison(comparison_id: int):
         ):
             try:
                 _, account, _ = execute_candidate(candidate, snapshot)
+                if "condition_diagnostics" in track:
+                    identical = (
+                        identical
+                        and candidate_diagnostics(candidate, snapshot, account)
+                        == track["condition_diagnostics"]
+                    )
                 identical = (
                     identical
                     and track["status"] == "success"

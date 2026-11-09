@@ -22,6 +22,7 @@ echarts.use([
 ]);
 import ChartReadout from "./ChartReadout";
 import type { Candle } from "../lib/api";
+import type { DailyAccount } from "../lib/backtests";
 import {
   MA_LINE_WIDTH,
   MA_WINDOWS,
@@ -32,10 +33,26 @@ import {
   readChartPalette,
 } from "../lib/chart";
 
+// 直接读取冻结的收盘账本；缺少字段时不推算，不将缺失与零仓位混淆。
+function positionReadout(row?: DailyAccount): Record<string, string> {
+  const quantity = row?.quantity;
+  const weight = row?.position_weight;
+  const amount = (value: string | number | undefined, digits: number, unit: string) =>
+    value == null || value === "" || !Number.isFinite(Number(value)) ? "缺失"
+      : `${Number(value).toLocaleString("zh-CN", { minimumFractionDigits: digits, maximumFractionDigits: digits })} ${unit}`;
+  return {
+    "收盘模拟仓位": weight == null || !Number.isFinite(weight) ? "缺失" : `${(weight * 100).toFixed(2)}%${quantity === 0 ? "（空仓）" : ""}`,
+    "持有份额": amount(quantity, 0, "份"),
+    "持仓市值": amount(row?.market_value, 2, "元"),
+    "剩余现金": amount(row?.cash, 2, "元"),
+  };
+}
+
 export default function KLine({
   rows,
   theme,
   holdings,
+  positions,
   indexPoints = false,
   trades = [],
   onTrade,
@@ -46,8 +63,10 @@ export default function KLine({
   rows: Omit<Candle, "amount">[];
   theme: string;
   holdings?: { trade_date: string; estimated_holding_pct: number | null }[];
+  positions?: DailyAccount[];
 }) {
   const element = useRef<HTMLDivElement>(null);
+  const positionMode = positions !== undefined && holdings === undefined;
   useEffect(() => {
     if (!element.current || (!rows.length && !holdings?.length)) return;
     const chart = echarts.init(element.current);
@@ -66,6 +85,7 @@ export default function KLine({
     const holdingByDate = new Map(
       holdingRows.map((r) => [r.trade_date, r.estimated_holding_pct]),
     );
+    const positionByDate = new Map((positions ?? []).map((row) => [row.trade_date, row]));
     const maByDate = new Map<string, Record<number, number>>();
     MA_WINDOWS.forEach((window) => {
       const values = movingAverage(
@@ -107,7 +127,7 @@ export default function KLine({
             `<span style="color:${tone(candle.close - candle.open)}">收 ${formatPrice(candle.close)}</span>` +
             `</div>`,
           `<div>涨跌幅 <span style="color:${tone(candle.change_pct)}">${percent(candle.change_pct)}</span>` +
-            `　成交量 ${formatCompact(candle.volume)}</div>`,
+            `${positionMode ? "" : `　成交量 ${formatCompact(candle.volume)}`}</div>`,
         );
       } else {
         lines.push(`<div style="color:${palette.muted}">该日无本地日 K</div>`);
@@ -130,6 +150,11 @@ export default function KLine({
           `<div style="margin-top:3px">国家队估算持仓比例 <span style="color:${palette.chart2}">${holding == null ? "—" : `${holding.toFixed(2)}%`}</span></div>`,
         );
       }
+      if (positionMode) {
+        lines.push(...Object.entries(positionReadout(positionByDate.get(day))).map(
+          ([label, value]) => `<div>${label} ${escapeHtml(value)}</div>`,
+        ));
+      }
       trades.filter((trade) => trade.trade_date === day).forEach((trade) => {
         lines.push(`<div>${trade.source === "simulation" ? "模拟" : "真实记录"}${trade.side === "buy" ? "买入" : "卖出"} ${escapeHtml(trade.quantity)} 份 @ ${escapeHtml(trade.price)} 元</div>`);
       });
@@ -143,7 +168,7 @@ export default function KLine({
         description:
           (comparison
             ? "本地日K与国家队估算持仓比例同图双轴对照，左轴价格、右轴比例，共享日期与缩放；缺失数据不补零。"
-            : (indexPoints ? "指数原始日K和成交量。" : "基金原始日K和成交量。") + "上涨红色，下跌绿色；均线按源收盘价计算，复权口径未确认；悬停查看同日数值。") +
+            : (positionMode ? "基金原始日K和每日收盘模拟仓位，仓位轴0%至100%，缺失不补零。" : indexPoints ? "指数原始日K和成交量。" : "基金原始日K和成交量。") + "上涨红色，下跌绿色；均线按源收盘价计算，复权口径未确认；悬停查看同日数值。") +
           "仅供研究，不构成投资建议。",
       },
       tooltip: {
@@ -202,17 +227,17 @@ export default function KLine({
           splitLine: { lineStyle: { color: palette.border, opacity: 0.45 } },
         },
         {
-          scale: !comparison,
+          scale: !comparison && !positionMode,
           gridIndex: comparison ? 0 : 1,
           position: comparison ? "right" : "left",
-          name: comparison ? "估算持仓比例（%）" : "成交量（源单位）",
+          name: comparison ? "估算持仓比例（%）" : positionMode ? "模拟仓位（%）" : "成交量（源单位）",
           min: 0,
-          max: comparison ? 100 : undefined,
+          max: comparison || positionMode ? 100 : undefined,
           axisLabel: {
             color: comparison ? palette.chart2 : palette.muted,
             fontFamily: palette.fontFamily,
             fontSize: 12,
-            formatter: comparison
+            formatter: comparison || positionMode
               ? "{value}%"
               : (value: number) => formatCompact(value),
           },
@@ -305,7 +330,18 @@ export default function KLine({
               itemStyle: { color: palette.chart2 },
               lineStyle: { width: 2, color: palette.chart2 },
             }
-          : {
+          : positionMode ? {
+              type: "bar",
+              name: "收盘模拟仓位",
+              xAxisIndex: 1,
+              yAxisIndex: 1,
+              barWidth: "70%",
+              itemStyle: { color: palette.muted, opacity: 0.7 },
+              data: dates.map((day) => {
+                const weight = positionByDate.get(day)?.position_weight;
+                return weight == null || !Number.isFinite(weight) ? null : weight * 100;
+              }),
+            } : {
               type: "bar",
               name: "成交量",
               xAxisIndex: 1,
@@ -331,9 +367,10 @@ export default function KLine({
       observer.disconnect();
       chart.dispose();
     };
-  }, [rows, theme, holdings, indexPoints, trades, onTrade]);
+  }, [rows, theme, holdings, positions, positionMode, indexPoints, trades, onTrade]);
   const candleByDate = new Map(rows.map(row => [row.date, row]));
   const holdingByDate = new Map((holdings ?? []).map(row => [row.trade_date, row.estimated_holding_pct]));
+  const positionByDate = new Map((positions ?? []).map((row) => [row.trade_date, row]));
   const maByDate = new Map<string, Record<string, string>>();
   MA_WINDOWS.forEach(window => movingAverage(rows.map(row => Number(row.close)), window).forEach((value, index) => {
     const values = maByDate.get(rows[index].date) ?? {};
@@ -343,6 +380,10 @@ export default function KLine({
   const readout = [...new Set([...candleByDate.keys(), ...holdingByDate.keys()])].sort().map(date => {
     const row = candleByDate.get(date);
     const values: Record<string, string> = { "开盘（元）": row ? String(row.open) : "—", "最高（元）": row ? String(row.high) : "—", "最低（元）": row ? String(row.low) : "—", "收盘（元）": row ? String(row.close) : "—", "成交量": row ? String(row.volume) : "—", ...maByDate.get(date) };
+    if (positionMode) {
+      delete values["成交量"];
+      Object.assign(values, positionReadout(positionByDate.get(date)));
+    }
     if (holdings) { const ratio = holdingByDate.get(date); values["国家队估算比例"] = ratio == null ? "—" : `${ratio}%`; }
     const records = trades.filter(item => item.trade_date === date);
     if (records.length) values["操作标记"] = records.map(item => `${item.source === "simulation" ? "模拟" : "真实记录"}${item.side === "buy" ? "买入" : "卖出"} ${item.quantity}份 @ ${item.price}`).join("；");
@@ -356,7 +397,7 @@ export default function KLine({
       aria-label={
         holdings
           ? "基金日K与国家队估算持仓比例同图双轴对照，共享日期与缩放，缺失不补零"
-          : `${indexPoints ? "指数" : "基金"}日K、MA5至MA60均线与成交量，可滚轮缩放，悬停查看同日数值`
+          : `${indexPoints ? "指数" : "基金"}日K、MA5至MA60均线与${positionMode ? "每日收盘模拟仓位" : "成交量"}，可滚轮缩放，悬停查看同日数值`
       }
     /><ChartReadout rows={readout} /></>
   );

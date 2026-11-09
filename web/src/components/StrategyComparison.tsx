@@ -53,6 +53,17 @@ export default function StrategyComparison({ result, theme }: { result: Comparis
       {["收益率", "最大回撤", "模拟盈亏（元）", "交易次数", "佣金／滑点成本（元）", "在场时间"].map((label, index) => <tr key={label}><th scope="row">{label}</th>{result.tracks.map((row) => <td key={row.key}>{row.account ? [percent(row.account.metrics.total_return), percent(row.account.metrics.max_drawdown), number(Number(row.account.metrics.final_equity) - Number(result.settings.initial_cash)), row.account.metrics.trade_count, `${number(row.account.metrics.commission)}／${number(row.account.metrics.slippage_cost)}`, percent(row.diagnostics?.time_in_market ?? null)][index] : index === 0 ? row.reason ?? "本次未能完成计算" : "—"}</td>)}</tr>)}
       <tr><th scope="row">模拟交易解释</th>{result.tracks.map((row) => <td key={row.key}>{row.account ? <button onClick={() => { setSelected(row.key); setTradeIndex(0); }} aria-pressed={track?.key === row.key}>查看买卖点</button> : "计算失败"}</td>)}</tr>
     </tbody></table></div>
+    {track?.condition_diagnostics && <details className="panel journey-inset">
+      <summary>{track.name} · 条件触发诊断</summary>
+      <p className="muted">决策日 {track.condition_diagnostics.decision_start}—{track.condition_diagnostics.decision_end}，共 {track.condition_diagnostics.days} 天；收盘判断后，在所选区间的下一交易日开盘执行。区间末日收盘信号不计入。</p>
+      <p>实际模拟买入 {track.condition_diagnostics.buy_trades} 次，卖出 {track.condition_diagnostics.sell_trades} 次。条件满足可连续发生；持仓中不重复买入，买卖同时满足时卖出优先。</p>
+      {(["buy", "sell"] as const).map((side) => {
+        const group = track.condition_diagnostics![side];
+        return <section key={side}><h3>{side === "buy" ? "买入" : "卖出"}组 · {group.mode === "all" ? "全部满足" : "任一满足"} {group.matched_days} 天 · 资料不全 {group.missing_days} 天</h3>
+          <table aria-label={`${side === "buy" ? "买入" : "卖出"}条件满足统计`}><thead><tr><th>条件</th><th>满足天数</th><th>有效天数</th><th>缺失天数</th></tr></thead><tbody>{group.conditions.map((item, index) => <tr key={index}><th scope="row">{index + 1}. {item.label}</th><td>{item.matched_days}</td><td>{item.valid_days}</td><td>{item.missing_days}</td></tr>)}</tbody></table>
+        </section>;
+      })}
+    </details>}
     <section className="panel">
       <div className="panel-header"><h2>资金曲线与回撤</h2><div className="journey-actions"><button aria-pressed={field === "nav"} onClick={() => setField("nav")}>研究净值</button><button aria-pressed={field === "drawdown"} onClick={() => setField("drawdown")}>回撤</button></div></div>
       <ResearchChart theme={theme} unit={field === "nav" ? "净值" : "%"} series={tracks.map((row) => ({ name: `${row.name} · 模拟`, points: row.account!.daily.map((day) => [day.trade_date, day[field] * (field === "nav" ? 1 : 100)]) }))} />
@@ -60,8 +71,9 @@ export default function StrategyComparison({ result, theme }: { result: Comparis
     </section>
     <section className="panel">
       <div className="panel-header"><h2>{track?.name ?? "策略"} · 模拟买卖点</h2><label className="switch"><input type="checkbox" checked={showActual} onChange={(e) => setShowActual(e.target.checked)} />叠加真实操作</label></div>
-      {candles.length ? <KLine rows={candles} theme={theme} onTrade={setTradeIndex} trades={[...(track?.account?.trades ?? []).map((row) => ({ ...row, quantity: String(row.quantity), source: "simulation" as const })), ...(showActual ? (actual?.markers ?? []).map((row) => ({ ...row, source: "actual" as const })) : [])]} /> : <div className="empty">本次比较未取得有效行情快照，无法绘制日 K</div>}
-      <ChartCaption title={`${code} · 日 K 与买卖点`} meta="财通证券原始日行情的本次冻结快照 · 复权口径未确认 · 模拟为三角标记，真实为图钉标记；真实标记日期为累计委托所属日，待核验" />
+      {candles.length ? <KLine rows={candles} theme={theme} positions={track?.account?.daily ?? []} onTrade={setTradeIndex} trades={[...(track?.account?.trades ?? []).map((row) => ({ ...row, quantity: String(row.quantity), source: "simulation" as const })), ...(showActual ? (actual?.markers ?? []).map((row) => ({ ...row, source: "actual" as const })) : [])]} /> : <div className="empty">本次比较未取得有效行情快照，无法绘制日 K</div>}
+      {track?.account && !track.account.daily.some((day) => day.position_weight != null && Number.isFinite(day.position_weight)) && <p className="muted" role="status">模拟仓位账本缺失，无法展示每日仓位。</p>}
+      <ChartCaption title={`${code} · 日 K、买卖点与模拟仓位`} meta="财通证券原始日行情的本次冻结快照 · 复权口径未确认 · 模拟为三角标记，真实为图钉标记；真实标记日期为累计委托所属日，待核验；副图为每日收盘模拟仓位＝持仓市值÷账户总资产（含保留现金与应收分红），缺失不补零；叠加真实操作不改变模拟仓位" />
       {track?.account?.trades.length ? <div className="journey-inset"><label>逐次交易解释 <select value={tradeIndex} onChange={(e) => setTradeIndex(Number(e.target.value))}>{track.account.trades.map((row, index) => <option key={index} value={index}>{row.trade_date} · {row.side === "buy" ? "买入" : "卖出"} · {row.quantity} 份</option>)}</select></label>{trade && <p>信号日 <span className="mono">{trade.signal_date ?? "区间首日参照"}</span> → 模拟执行 <span className="mono">{trade.trade_date}</span>；{trade.reason}；价格 {trade.price} 元，佣金 {trade.commission} 元。</p>}</div> : <p className="journey-inset muted">这条策略在所选区间没有模拟成交。</p>}
     </section>
     <details className="panel journey-inset">

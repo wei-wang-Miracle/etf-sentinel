@@ -14,6 +14,7 @@ export type DailyAccount = {
   cash: string;
   quantity: number;
   equity: string;
+  market_value?: string;
   nav: number;
   drawdown: number;
   position_weight: number;
