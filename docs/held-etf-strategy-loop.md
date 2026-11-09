@@ -1,6 +1,10 @@
-# 当前持仓ETF策略闭环
+# 当前持仓ETF策略闭环（已下线，历史记录）
 
-本文描述旧固定候选与组合闭环，通过“我的策略 → 历史实验与旧观察记录”保留。新主流程见[单ETF策略说明](single-etf-strategies.md)。
+> 本文所述固定候选、批次研究与采用观察版本的创建闭环已整体下线：页面、路由
+> 和旧创建接口删除，迁移0013清理旧观察链数据（`strategy_version_id`为空的
+> 观察、其信号与执行关联及无引用的旧批次）。共用表结构和回测引擎保留。
+> 盘前计划、委托匹配与执行核对仍由单ETF流程共用，见[单ETF策略说明](single-etf-strategies.md)。
+> 下文为历史口径记录，不再对应可用功能。
 
 **策略回测 → 当前持仓研究与观察**将因子、候选研究、观察版本、每日计划和
 真实执行核对放在同一条路径。研究对象只有可交易ETF，关联指数仅提供估值背景。
@@ -99,13 +103,13 @@
 
 | 接口 | 用途 |
 | --- | --- |
-| `GET /strategy-lab/catalog` | 当前正持仓、因子、覆盖与建议区间 |
-| `POST /strategy-lab/batches` | 冻结范围并运行全部候选 |
-| `GET /strategy-lab/batches`、`/{id}` | 批次摘要与完整冻结结果 |
-| `POST /strategy-lab/observations` | 明确采用保存候选 |
+| `GET /strategy-lab/catalog` | 当前正持仓、因子、覆盖与建议区间（已删除） |
+| `POST /strategy-lab/batches` | 冻结范围并运行全部候选（已删除） |
+| `GET /strategy-lab/batches`、`/{id}` | 批次摘要与完整冻结结果（已删除） |
+| `POST /strategy-lab/observations` | 明确采用保存候选（已删除） |
 | `GET /strategy-lab/observations` | 当前与历史观察版本 |
-| `POST /strategy-lab/observations/{id}/pause` | 暂停新计划 |
-| `GET /strategy-lab/observations/{id}/review` | 采用后当前数据规则重算 |
+| `POST /strategy-lab/observations/{id}/pause` | 暂停新计划（旧观察专用入口已删除） |
+| `GET /strategy-lab/observations/{id}/review` | 采用后当前数据规则重算（旧观察分支已删除） |
 | `POST /strategy-lab/signals/generate` | 幂等生成盘前计划 |
 | `GET /strategy-lab/signals` | 日计划与动态执行核对 |
 | `GET /strategy-lab/signals/{id}/candidates` | 累计委托匹配候选 |

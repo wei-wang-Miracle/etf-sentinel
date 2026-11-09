@@ -65,3 +65,15 @@
 .journey-confirmations { display: grid; gap: 12px; margin: 16px 0; }
 .journey-confirmations label { display: flex; gap: 8px; align-items: start; }
 @media (max-width: 720px) { .journey-saved-row > div { width: 100%; } }
+
+.journey-guide { padding: 18px; margin: 16px 0; }
+.journey-guide h2 { margin: 0 0 14px; font-size: 16px; }
+.journey-guide-steps { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; list-style: none; padding: 0; margin: 0 0 14px; counter-reset: guide-step; }
+.journey-guide-steps li { display: flex; flex-direction: column; gap: 6px; border-top: 2px solid var(--color-border-strong); padding-top: 10px; }
+.journey-guide-steps li::before { counter-increment: guide-step; content: counter(guide-step, decimal-leading-zero); font-family: var(--font-mono); font-size: 12px; color: var(--color-ink-muted); }
+.journey-guide-steps strong { font-size: 14px; }
+.journey-guide-steps span { font-size: 12px; color: var(--color-ink-muted); line-height: 1.7; }
+.journey-next-step { margin-top: 16px; }
+.journey-legacy-footer { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; border-top: 1px solid var(--color-border); margin-top: 24px; padding-top: 12px; font-size: 13px; }
+@media (max-width: 1000px) { .journey-guide-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 480px) { .journey-guide-steps { grid-template-columns: 1fr; } }

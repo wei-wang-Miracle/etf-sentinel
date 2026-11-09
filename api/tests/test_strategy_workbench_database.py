@@ -135,10 +135,23 @@ def test_snapshot_survives_revision_and_half_capital_includes_reserve():
         client.get(f"/strategies/comparisons/{comparison['id']}").json()["market_rows"]
         == comparison["market_rows"]
     )
+    from app.backtest import run_backtest
+    from app.backtest_routes import digest
+    from app.models import BacktestRun
+
     for track in comparison["tracks"]:
-        assert client.post(f"/backtests/{track['backtest_id']}/verify").json()[
-            "identical"
-        ]
+        with Session() as db:
+            item = db.get(BacktestRun, track["backtest_id"])
+            snapshot = item.input_snapshot
+            assert digest(snapshot) == item.input_sha256
+            assert (
+                run_backtest(
+                    snapshot["rows"],
+                    snapshot["actions"]["dividends"],
+                    snapshot["settings"],
+                )
+                == item.result_snapshot
+            )
 
 
 def test_failed_candidate_is_visible_and_does_not_prevent_other_results():
@@ -387,32 +400,6 @@ def test_dependency_preparation_crossing_open_cannot_publish_late_plan(monkeypat
     assert not client.get("/strategy-lab/signals").json()
     with Session() as db:
         assert any("开盘" in line["message"] for line in db.get(Run, run_id).logs)
-
-
-def test_new_observation_compatibility_batch_is_hidden_from_legacy_candidates():
-    version = save(compare())
-    enabled = client.post(
-        f"/strategies/{version['id']}/enable", json={"replace_active": False}
-    ).json()
-    observation = next(
-        row
-        for row in client.get("/strategy-lab/observations").json()
-        if row["id"] == enabled["observation_id"]
-    )
-    batch_id = observation["research_batch_id"]
-    assert all(
-        row["id"] != batch_id for row in client.get("/strategy-lab/batches").json()
-    )
-    assert client.get(f"/strategy-lab/batches/{batch_id}").status_code == 404
-    response = client.post(
-        "/strategy-lab/observations",
-        json={
-            "research_batch_id": batch_id,
-            "instrument_code": "510500",
-            "candidate_key": "ma20",
-        },
-    )
-    assert response.status_code == 422
 
 
 def test_signal_uses_one_snapshot_for_holding_set_and_sync_evidence(monkeypatch):

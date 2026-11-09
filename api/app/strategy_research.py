@@ -1,4 +1,4 @@
-"""当前持仓研究的固定候选、独立储备资金与风险取舍统计。"""
+"""策略研究账户的独立储备资金与风险统计。"""
 
 from copy import deepcopy
 from decimal import Decimal
@@ -7,43 +7,6 @@ from app.backtest import metrics, money
 
 RESEARCH_CASH = Decimal(50000)
 RESEARCH_VERSION = "1.0"
-CANDIDATES = [
-    {
-        "key": "hold",
-        "name": "买入持有",
-        "strategy_key": "hold",
-        "parameters": {},
-        "allocation": 100,
-    },
-    {
-        "key": "ma20",
-        "name": "20日均线",
-        "strategy_key": "ma_trend",
-        "parameters": {"window": 20},
-        "allocation": 100,
-    },
-    {
-        "key": "ma60",
-        "name": "60日均线",
-        "strategy_key": "ma_trend",
-        "parameters": {"window": 60},
-        "allocation": 100,
-    },
-    {
-        "key": "confirm",
-        "name": "60日趋势＋20日动量确认",
-        "strategy_key": "ma_momentum",
-        "parameters": {"window": 60, "momentum_window": 20},
-        "allocation": 100,
-    },
-    {
-        "key": "confirm_half",
-        "name": "趋势确认·半资金",
-        "strategy_key": "ma_momentum",
-        "parameters": {"window": 60, "momentum_window": 20},
-        "allocation": 50,
-    },
-]
 
 
 def with_reserve(account, reserve):
@@ -121,20 +84,3 @@ def diagnostics(account, initial=RESEARCH_CASH):
         if len(rounds) < 5
         else None,
     }
-
-
-def pareto_keys(tracks):
-    """只标记收益与回撤均不被其他候选支配的取舍，不代替用户选择。"""
-    return [
-        track["key"]
-        for track in tracks
-        if not any(
-            other["metrics"]["total_return"] >= track["metrics"]["total_return"]
-            and other["metrics"]["max_drawdown"] >= track["metrics"]["max_drawdown"]
-            and (
-                other["metrics"]["total_return"] > track["metrics"]["total_return"]
-                or other["metrics"]["max_drawdown"] > track["metrics"]["max_drawdown"]
-            )
-            for other in tracks
-        )
-    ]

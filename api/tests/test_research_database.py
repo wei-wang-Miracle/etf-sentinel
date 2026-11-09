@@ -185,8 +185,22 @@ def test_research_same_interval_and_snapshot_replay():
         == 1
     )
     assert data["settings"]["minimum_commission"] == "0"
+    from app.backtest import run_backtest
+    from app.backtest_routes import digest
+
     for run in data["experiment_ids"]:
-        assert client.post(f"/backtests/{run}/verify").json()["identical"]
+        with Session() as db:
+            item = db.get(BacktestRun, run)
+            snapshot = item.input_snapshot
+            assert digest(snapshot) == item.input_sha256
+            assert (
+                run_backtest(
+                    snapshot["rows"],
+                    snapshot["actions"]["dividends"],
+                    snapshot["settings"],
+                )
+                == item.result_snapshot
+            )
 
 
 def test_baselines_are_atomic_if_short_run_fails(monkeypatch):

@@ -5,7 +5,7 @@ import { useApiResource } from "../lib/useApiResource";
 import { executionNames, type Observation, type PlanSignal } from "../lib/strategyLab";
 import { journeyUrl, type SavedStrategy } from "../lib/strategyJourney";
 import { dataManagementUrl } from "../lib/navigation";
-import { ExecutionForm } from "./StrategyLab";
+import { ExecutionForm } from "./ExecutionForm";
 
 type ExtendedSignal = PlanSignal & { plan: PlanSignal["plan"] & {
   quantity_status?: string; new_trigger?: boolean; target_weight?: number;

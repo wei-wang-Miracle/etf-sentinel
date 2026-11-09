@@ -30,7 +30,7 @@
 | 功能 | 主归属 | 状态 | 依赖与边界 | 设计或实现入口 |
 | --- | --- | --- | --- | --- |
 | 策略条件指标说明 | 策略研究 | 已实现 | 十类指标宽屏在稳定侧区随焦点更新、窄屏主动展开，解释投资含义、数值解读、计算、来源和限制；区分通用定义与实际源口径，不改变计算与阈值 | [使用说明](single-etf-strategies.md#指标说明)、[编辑器](../web/src/components/StrategyEditor.tsx)、[说明内容](../web/src/lib/strategyIndicatorHelp.ts) |
-| 面向个人的单 ETF 策略流程 | 策略研究 | 已实现 | 三入口与单ETF流程；支持非持仓ETF，中文条件配置、回测比较、保存启用和每日信号；不做组合，不改写历史结果 | [单ETF流程设计稿](superpowers/specs/2026-11-07-single-etf-strategy-journey-design.md) |
+| 面向个人的单 ETF 策略流程 | 策略研究 | 已实现 | 三入口与单ETF流程；支持非持仓ETF，中文条件配置、回测比较、保存启用和每日信号；不做组合，不改写历史结果；落地五步指引与按状态下一步提示；旧单次回测与持仓候选创建已下线，共用引擎/信号保留 | [单ETF流程设计稿](superpowers/specs/2026-11-07-single-etf-strategy-journey-design.md)、[我的策略页](../web/src/pages/MyStrategies.tsx) |
 | 同 ETF 自定义策略对比 | 策略研究 | 已实现 | 属于单ETF流程，依赖策略版本、统一回测及真实复盘；统一区间、本金、成本与数据版本重算，保留原结果；真实收益可比时作参照，缺失不阻断策略比较，不凭历史收益推断策略归属 | [策略对比设计](superpowers/specs/2026-11-07-single-etf-strategy-journey-design.md#51-同一只-etf-的自定义策略对比) |
 | 前后端工程初始化 | 工程基础 | 已实现 | 已扩展业务页面、迁移及采集；Docker Hub 连接受阻，三容器启动未验证 | [前端](../web/src/App.tsx)、[API](../api/app/main.py)、[Compose](../compose.yaml)、[初始化清单](superpowers/plans/2026-11-05-initialize.md) |
 | 投研简报视觉融合 | 工程基础 | 已实现 | 暖纸亮色、宋体标题、朱红操作强调、连续指标条；保留暗色和业务语义色 | [设计契约](design-contract.md)、[主题变量](../web/src/styles/tokens.css) |
@@ -46,9 +46,9 @@
 | 行业恐贪概览与历史展示 | 投研分析 | 已实现 | 依赖行业恐贪入库；情绪着色、双轴合图，不直接生成信号 | [行业恐贪说明](industry-sentiment.md) |
 | 国家队18只ETF估算比例采集 | 数据基础 | 已实现 | 独立任务3，固定基准全量核验、增量写入；不保存源价格 | [国家队持仓说明](national-team.md) |
 | 国家队持仓与日K对照 | 投研分析 | 已实现 | 18只已纳入行情采集，复用同代码日K，缺失不补零；MA5/10/20/30/60与可追溯图注；不作为真实持仓或信号 | [国家队持仓页](../web/src/pages/NationalTeam.tsx) |
-| 统一策略注册与日频回测 | 策略研究 | 已实现 | 配置内ETF动态资格的持有、均线与动量确认规则；次日开盘、整手费用分红、同成本基准；买卖标记按执行日标注并同日同向合并；历史模拟非实际交易 | [策略与回测](backtesting.md)、[注册表](../api/app/strategies.py)、[引擎](../api/app/backtest.py)、[净值图](../web/src/components/BacktestChart.tsx) |
-| 当前持仓ETF策略闭环 | 策略研究 | 已实现 | 最新完整正持仓范围冻结、每只5万元、五候选开发验证、半资金持有参照；显式采用观察版本后盘前计划与人工执行核对，未自动采用策略 | [使用说明](held-etf-strategy-loop.md)、[研究与计划](../api/app/strategy_lab.py)、[设计](superpowers/specs/2026-11-06-held-etf-strategy-loop-design.md) |
-| 回测权益与不可变实验 | 数据基础 | 已实现 | 东方财富公开权益与交易日历校验；完整输入/结果快照入库及复算；权益本版手动更新 | [回测接口](../api/app/backtest_routes.py)、[迁移0006](../api/migrations/versions/0006_backtests.py) |
+| 统一策略注册与日频回测 | 策略研究 | 已实现 | 配置内ETF动态资格的持有、均线与动量确认规则；次日开盘、整手费用分红、同成本基准；买卖标记按执行日标注并同日同向合并；历史模拟非实际交易 | [策略与回测](backtesting.md)、[注册表](../api/app/strategies.py)、[引擎](../api/app/backtest.py)、[比较图](../web/src/components/StrategyComparison.tsx) |
+| 当前持仓ETF策略闭环 | 策略研究 | 已移除 | 旧五候选研究、批次与采用创建已下线（迁移0013清理旧观察链）；盘前计划与人工执行核对并入单ETF流程共用，未自动采用策略 | [单ETF说明](single-etf-strategies.md)、[信号与执行](../api/app/strategy_lab.py) |
+| 回测权益与不可变实验 | 数据基础 | 已实现 | 东方财富公开权益与交易日历校验；完整输入/结果快照入库供新流程引用；旧实验列表/复算入口已下线；权益本版手动更新 | [回测接口](../api/app/backtest_routes.py)、[迁移0006](../api/migrations/versions/0006_backtests.py) |
 | 配置内 ETF 持仓与成交同步展示 | 投资记录与复盘 | 已实现 | 同步配置内20只持仓/委托成交；1000行窗口、幂等、推导费用、非配置跳过；页面展示持仓和成交；不含收益复盘 | [同步](../api/app/account_sync.py)、[接口](../api/app/account_routes.py)、[页面](../web/src/pages/Review.tsx)、[迁移0008](../api/migrations/versions/0008_account_sync.py) |
 | 配置内 ETF 单标的收益复盘 | 投资记录与复盘 | 已实现 | 复用已实现同步；完整同步、权益、数量与T+1准入及显式依据确认后真实净盈亏/XIRR；统一资金的持有、MA20/MA60和现金单列，不输出不可比择时超额 | [设计](superpowers/specs/2026-11-06-configured-etf-review-design.md) |
 | 全账户复盘与现金基线 | 投资记录与复盘 | 待讨论 | 需要现金余额、配置外持仓、LOF/逆回购；当前不实施 | [设计](superpowers/specs/2026-11-06-real-account-review-design.md) |

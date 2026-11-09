@@ -18,7 +18,7 @@ function pageFromUrl() {
   const routes: Record<string, Record<string, string>> = {
     research: { page: "etfs", detail: "overview" },
     review: { page: "etfs", detail: "operations", code: query.get("code") ?? "510500" },
-    backtests: { page: "strategies", view: "legacy" },
+    backtests: { page: "strategies", view: "list" },
     compare: { page: "etfs", auxiliary: "compare" },
     instruments: { page: "data", manage: "instruments" },
     jobs: { page: "data", manage: "jobs" },

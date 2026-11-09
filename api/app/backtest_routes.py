@@ -1,4 +1,4 @@
-"""策略研究入口：数据质量门槛、不可变实验入库与快照复算。"""
+"""统一回测入口：数据质量门槛、权益源核验与不可变回测核算，供策略与复盘共用。"""
 
 import hashlib
 import json
@@ -154,16 +154,6 @@ def refresh_sources(instrument_code: str | None = None):
     return {"updated": codes}
 
 
-@router.post("")
-def create_backtest(body: BacktestRequest):
-    """校验同一读事务中的行情和权益，保存输入与结果，不更改历史实验。"""
-    with Session() as db:
-        db.connection(execution_options={"isolation_level": "REPEATABLE READ"})
-        result = execute_backtest(body, db)
-        db.commit()
-        return result
-
-
 def execute_backtest(body: BacktestRequest, db):
     """在调用方一致性事务内校验、计算并暂存不可变实验；由调用方提交。"""
     if body.start_date > body.end_date or body.end_date >= now().date():
@@ -244,60 +234,3 @@ def execute_backtest(body: BacktestRequest, db):
     db.add(run)
     db.flush()
     return describe(run, detail=True)
-
-
-@router.get("")
-def history(instrument_code: str | None = None):
-    """读取最近二十次实验；ETF筛选在数据库完成，避免批次结果挤掉其他对象。"""
-    if instrument_code is not None and (
-        len(instrument_code) != 6
-        or not instrument_code.isascii()
-        or not instrument_code.isdigit()
-    ):
-        raise HTTPException(422, "ETF代码须为六位数字")
-    statement = select(BacktestRun)
-    if instrument_code is not None:
-        statement = statement.where(BacktestRun.instrument_code == instrument_code)
-    with Session() as db:
-        return [
-            describe(r)
-            for r in db.scalars(
-                statement.order_by(BacktestRun.backtest_run_id.desc()).limit(20)
-            )
-        ]
-
-
-@router.get("/{run_id}")
-def get_backtest(run_id: int):
-    """展示已保存实验，行情源修订不会影响该结果。"""
-    with Session() as db:
-        run = db.get(BacktestRun, run_id)
-        if not run:
-            raise HTTPException(404, "回测记录不存在")
-        return describe(run, detail=True)
-
-
-@router.post("/{run_id}/verify")
-def verify_backtest(run_id: int):
-    """仅依据原输入快照复算，版本不符时明确拒绝，不偷换为最新数据。"""
-    with Session() as db:
-        run = db.get(BacktestRun, run_id)
-        if not run:
-            raise HTTPException(404, "回测记录不存在")
-        snapshot = run.input_snapshot
-        if (
-            snapshot["engine_version"] != ENGINE_VERSION
-            or snapshot["strategy_version"]
-            != get_strategy(run.strategy_key)["metadata"]["version"]
-            or snapshot["data_version"] != DATA_VERSION
-        ):
-            raise HTTPException(409, "实验版本与当前版本不同，需要对应版本代码复算")
-        if digest(snapshot) != run.input_sha256:
-            raise HTTPException(409, "输入快照摘要不一致")
-        result = run_backtest(
-            snapshot["rows"], snapshot["actions"]["dividends"], snapshot["settings"]
-        )
-        return {
-            "identical": result == run.result_snapshot,
-            "input_sha256": run.input_sha256,
-        }

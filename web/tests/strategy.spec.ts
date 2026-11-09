@@ -133,6 +133,45 @@ test("新策略沿用研究区间并提交相同回测日期", async ({ page }) 
   expect(submitted.end_date).toBe("2026-09-25");
 });
 
+test("未选 ETF 时展示完整流程指引与信号边界", async ({ page }) => {
+  await page.goto("/?page=strategies");
+  const guide = page.getByRole("region", { name: "策略流程指引" });
+  await expect(guide).toBeVisible();
+  for (const step of ["选择 ETF", "配置买卖条件", "回测验证", "保存命名版本", "启用每日信号"]) {
+    await expect(guide.getByText(step, { exact: true })).toBeVisible();
+  }
+  await expect(guide.getByText(/信号不等于成交/)).toBeVisible();
+  await expect(guide.getByText(/不自动下单/)).toBeVisible();
+});
+
+test("没有保存策略时提示先创建并先回测再保存", async ({ page }) => {
+  await page.goto("/?page=strategies&code=510500");
+  await expect(page.getByText(/创建第一个策略/)).toBeVisible();
+  await expect(page.getByText(/先回测，满意再保存/)).toBeVisible();
+});
+
+test("有保存未启用版本时提示启用后才产生每日信号", async ({ page }) => {
+  await page.route("**/api/strategies", (route) => json(route, [savedVersion]));
+  await page.goto("/?page=strategies&code=510500");
+  await expect(page.getByText(/启用一个版本，系统才会在每个交易日盘前生成信号/)).toBeVisible();
+});
+
+test("已有启用版本时不再显示下一步引导，直接展示信号摘要", async ({ page }) => {
+  await page.route("**/api/strategies", (route) => json(route, [{ ...savedVersion, active: true }]));
+  await page.goto("/?page=strategies&code=510500");
+  await expect(page.getByText(/创建第一个策略/)).toHaveCount(0);
+  await expect(page.getByText(/启用一个版本，系统才会/)).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "每日信号摘要" })).toBeVisible();
+});
+
+test("旧实验入口已移除，历史链接兼容落到策略列表", async ({ page }) => {
+  await page.goto("/?page=strategies&code=510500");
+  await expect(page.getByRole("link", { name: /历史实验记录/ })).toHaveCount(0);
+  await page.goto("/?page=backtests");
+  await expect(page).toHaveURL(/page=strategies/);
+  await expect(page.getByRole("button", { name: "单次回测与历史实验" })).toHaveCount(0);
+});
+
 test("已有草稿优先保留日期并说明与研究链接不同", async ({ page }) => {
   await page.route("**/api/strategies/drafts/510500", (route) => json(route, { name: "已有草稿", rule: savedVersion.rule, settings: savedVersion.settings }));
   await page.goto("/?page=strategies&code=510500&view=editor&start=2026-02-03&end=2026-09-25");

@@ -34,7 +34,7 @@
 | 跨 ETF 对比 | [Compare](../../web/src/pages/Compare.tsx) | ETF 指标比较、市场情绪背景，作为辅助入口 |
 | 我的策略 | [MyStrategies](../../web/src/pages/MyStrategies.tsx) | 版本列表、启停、编辑、信号 |
 | 条件与比较 | [StrategyEditor](../../web/src/components/StrategyEditor.tsx)、[StrategyComparison](../../web/src/components/StrategyComparison.tsx) | 草稿、统一比较、保存启用、快照复算 |
-| 历史实验 | [Backtests](../../web/src/pages/Backtests.tsx)、[StrategyLab](../../web/src/components/StrategyLab.tsx) | 历史实验及旧观察记录，仍需兼容 |
+| 历史实验 | Backtests、StrategyLab（源码已删除） | 旧单次回测与旧观察记录入口已在 init 阶段下线，旧链接映射到策略列表 |
 | 数据管理 | [DataManagement](../../web/src/pages/DataManagement.tsx)、[Jobs](../../web/src/pages/Jobs.tsx)、[Instruments](../../web/src/pages/Instruments.tsx) | 标的、账户权益、五个独立任务及运行记录 |
 | 旧分析 URL | [App](../../web/src/App.tsx) 的 `pageFromUrl` | 行情、恐贪、国家队、指数估值等旧入口映射到新结构 |
 

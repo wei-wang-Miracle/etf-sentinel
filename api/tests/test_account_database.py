@@ -202,14 +202,9 @@ def test_complete_snapshot_excludes_disappeared_positions_and_records_empty():
     holdings = client.get("/account/holdings").json()
     assert [r["instrument_code"] for r in holdings["items"]] == ["159205"]
     assert client.get("/research/universe").json()["held_codes"] == ["159205"]
-    assert [
-        r["instrument_code"]
-        for r in client.get("/strategy-lab/catalog").json()["items"]
-    ] == ["159205"]
     sync([])
     assert client.get("/account/holdings").json()["items"] == []
     assert client.get("/research/universe").json()["held_codes"] == []
-    assert client.get("/strategy-lab/catalog").json()["items"] == []
 
 
 def test_current_snapshot_is_consistent_during_same_day_sync():
