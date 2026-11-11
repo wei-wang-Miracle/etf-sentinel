@@ -1,5 +1,6 @@
 import { useState } from "react";
 import ChartCaption from "../components/ChartCaption";
+import Tabs from "../components/Tabs";
 import KLine from "../components/KLine";
 import ValuationChart from "../components/ValuationChart";
 import { type Candle } from "../lib/api";
@@ -54,19 +55,18 @@ export default function ResearchObject({ theme, code, summary, loading, error, r
   const latestMetric = summary?.summary.valuation?.metrics[metric];
   const change = summary?.summary.price.change_pct;
   const source = tab === "price" ? "财通证券日行情" : tab === "valuation" ? "韭圈估值／财通证券指数日行情" : tab === "funds" ? "韭圈固定基准估算／本地ETF日行情" : "韭圈行业恐贪与指数点位";
-  const unavailable = tab === "valuation" && !index ? "尚无关联指数" : tab === "funds" && summary && !summary.linked.national_team_tracked ? "未纳入国家队源目录，不补零" : tab === "sentiment" && summary && !category ? "尚无市场情绪类别" : "";
+  const nationalUnsupported = tab === "funds" && summary && !summary.linked.national_team_tracked;
+  const unavailable = tab === "valuation" && !index ? "尚无关联指数" : tab === "sentiment" && summary && !category ? "尚无市场情绪类别" : "";
   const hasPlot = tab === "price" ? candles.length > 0 : tab === "valuation" ? !!valuation?.series.length : tab === "funds" ? !!national?.holdings.length : !!sentiment?.length;
 
   return <section className="dossier-research" aria-label="ETF行情与背景">
-    <div className="research-controls">
-      <label>图表维度<select aria-label="图表维度" value={tab} onChange={(event) => update({ tab: event.target.value })}>{views.map((view) => <option key={view.value} value={view.value}>{view.label}</option>)}</select></label>
+    <Tabs label="图表维度" items={views} value={tab} onChange={(tab) => update({ tab })} toolbar={<div className="research-controls">
       {tab === "valuation" && <label>估值指标<select value={metric} onChange={(event) => update({ metric: event.target.value })}>{Object.entries(metrics).map(([key, item]) => <option key={key} value={key}>{item.name}</option>)}</select></label>}
       {tab === "sentiment" && <label>市场类别<select aria-label="市场类别" value={category?.category_key ?? ""} onChange={(event) => update({ category: event.target.value })}>{summary?.summary.sentiment.map((item) => <option key={item.category_key} value={item.category_key}>{item.category_name}</option>)}</select></label>}
       <div className="research-date-range"><label>起始日期<input aria-label="起始日期" type="date" value={start} onChange={(event) => update({ start: event.target.value })} /></label><label>截止日期<input aria-label="截止日期" type="date" value={end} max={dateAgo(1)} onChange={(event) => update({ end: event.target.value })} /></label></div>
-    </div>
+    </div>}>
     {query.legacy_index && <p className="notice">旧指数链接 {query.legacy_index} 已定位到关联 ETF，指数只提供因子。</p>}
     {error ? <div className="alert" role="alert">对象摘要暂不可用：{error}<button onClick={retry}>重试摘要</button></div> : loading ? <div className="empty skeleton-state" role="status">正在读取研究摘要…</div> : summary && <>
-      {summary.warnings.map(message => <p className="notice warning" key={message}>{message}</p>)}
       <dl className="research-metrics">
         {tab === "price" ? <>
           <div><dt>最新收盘（元）</dt><dd>{number(summary.summary.price.value, 3)}</dd><small>{summary.summary.price.as_of ?? "暂无行情"}</small></div>
@@ -86,7 +86,7 @@ export default function ResearchObject({ theme, code, summary, loading, error, r
       </dl>
       {tab === "valuation" && <p className="context-note">关联指数：{summary.summary.valuation?.index_name ?? index ?? "未映射"} <span className="mono">{index}</span>；同指数 ETF 共享估值证据，历史源可能修订，未证明原时点可得。</p>}
       <div className="dossier-chart">
-        {!validDates ? <div className="empty" role="alert">请选择有效的起止日期，起始日期不能晚于截止日期。</div> : unavailable ? <div className="empty"><p>{unavailable}</p><a href={dataManagementUrl("jobs", tasks[tab], code)}>检查对应数据任务</a></div>
+        {!validDates ? <div className="empty" role="alert">请选择有效的起止日期，起始日期不能晚于截止日期。</div> : nationalUnsupported ? <div className="empty"><h2>该 ETF 不在国家队数据源范围内</h2><p>数据源仅提供18只ETF，不包含 {code}；重新采集不会产生该标的数据。可在顶部切换至源支持的 ETF，如 510500 或 512100。</p></div> : unavailable ? <div className="empty"><p>{unavailable}</p><a href={dataManagementUrl("jobs", tasks[tab], code)}>检查对应数据任务</a></div>
           : plot.loading ? <div className="chart-loading skeleton-state" role="status">正在读取所选区间…</div> : plot.error ? <div className="empty" role="alert"><p>所选区间读取失败：{plot.error}</p><button onClick={plot.retry}>重试图表</button><a href={dataManagementUrl("jobs", tasks[tab], code)}>检查对应数据任务</a></div>
             : !hasPlot ? <div className="empty"><h2>所选区间暂无数据</h2><p>可以调整日期，或检查对应采集任务。</p><a href={dataManagementUrl("jobs", tasks[tab], code)}>检查对应数据任务</a></div> : <>
               {tab === "price" && <div className="chart-local-controls"><span className="muted">日 K · MA5 / 10 / 20 / 30 / 60</span><label><input type="checkbox" checked={showActual} onChange={(event) => setShowActual(event.target.checked)} />叠加真实操作</label></div>}
@@ -99,11 +99,13 @@ export default function ResearchObject({ theme, code, summary, loading, error, r
       </div>
       <ChartCaption title={`${summary.object.name} · ${code} · 日频`} meta={`${start} 至 ${end} · ${source}${tab === "price" || tab === "funds" ? " · 复权口径未确认" : ""}`} />
       <details className="research-evidence"><summary>数据来源与使用边界</summary>
+        {summary.warnings.map(message => <p key={message}>{message}</p>)}
         <p>最新摘要按各自源日期展示，不代表所选历史时点已知；图表仅展示所选日期区间。数据截止日期保留在各指标旁。</p>
         <p>行情来源：财通证券，原始日 K 复权口径未确认；个人记录为本地只读同步，未确认成交所属日前的标记仅用于核对。国家队为固定基准估算比例，零份额下为空；恐贪保留源类别和标签，不推断分类阈值。</p>
         <p>估值来源：韭圈；本地分位以截至各日十日历年有效样本统计，显示区间不改变回看窗口。修订历史不冒充原时点可得数据。</p>
         <a href={journeyUrl("etfs", code, { auxiliary: "compare", dimension: tab === "funds" ? "holdings" : tab === "price" ? "trend" : tab, start, end })}>进入跨 ETF 对比</a>
       </details>
     </>}
+    </Tabs>
   </section>;
 }

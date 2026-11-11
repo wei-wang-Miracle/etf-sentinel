@@ -32,6 +32,7 @@ export type SavedStrategy = {
   rule: Rule;
   settings: ResearchSettings;
   backtest_id: number;
+  comparison_id?: number | null;
   active: boolean;
   observation_id: number | null;
   created_at: string;

@@ -13,9 +13,9 @@ type ActualReview = {
   comparability: string;
 };
 
-export default function StrategyComparison({ result, theme }: { result: Comparison; theme: string }) {
+export default function StrategyComparison({ result, theme, initialBacktestId }: { result: Comparison; theme: string; initialBacktestId?: number }) {
   const [field, setField] = useState<"nav" | "drawdown">("nav");
-  const [selected, setSelected] = useState("");
+  const [selected, setSelected] = useState(() => result.tracks.find((row) => row.backtest_id === initialBacktestId)?.key ?? "");
   const [actual, setActual] = useState<ActualReview>();
   const [opening, setOpening] = useState(false), [dates, setDates] = useState(false);
   const [showActual, setShowActual] = useState(false);
@@ -28,7 +28,7 @@ export default function StrategyComparison({ result, theme }: { result: Comparis
   const trade = track?.account?.trades[tradeIndex];
   const code = result.instrument_code, { start_date: start, end_date: end } = result.settings;
   const candles: Omit<Candle, "amount">[] = (result.market_rows ?? []).filter((row) => row.trade_date >= start && row.trade_date <= end).map((row) => ({ date: row.trade_date, open: Number(row.open), high: Number(row.high), low: Number(row.low), close: Number(row.close), volume: Number(row.volume), change_pct: null, source_updated_at: row.source_updated_at, collected_at: row.collected_at }));
-  useEffect(() => { setOpening(false); setDates(false); setSelected(""); setTradeIndex(0); setVerification(""); }, [result.id]);
+  useEffect(() => { setOpening(false); setDates(false); setSelected(result.tracks.find((row) => row.backtest_id === initialBacktestId)?.key ?? ""); setTradeIndex(0); setVerification(""); }, [result.id, initialBacktestId]);
   useEffect(() => {
     const controller = new AbortController();
     setActual(undefined); setActualError("");

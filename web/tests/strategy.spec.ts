@@ -33,6 +33,108 @@ test("保存版本默认只读，修改需要明确进入新版", async ({ page 
   await expect(page.getByRole("button", { name: "基于此版本修改" })).toBeVisible();
 });
 
+test("策略与信号入口打开当前 ETF 的完整信号页并可返回", async ({ page }) => {
+  await page.goto("/?page=strategies&code=510500");
+  await page.getByRole("button", { name: "查看策略与信号", exact: true }).click();
+  await expect(page).toHaveURL(/page=etfs/);
+  await expect(page).toHaveURL(/detail=signals/);
+  await expect(page.getByLabel("当前 ETF")).toHaveValue("510500");
+  await expect(page.getByRole("region", { name: "每日信号与执行记录" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "管理策略", exact: true })).toHaveAttribute("href", /page=strategies.*code=510500/);
+  await page.goBack();
+  await expect(page.getByRole("heading", { name: "已保存的方法" })).toBeVisible();
+});
+
+test("已有版本直接查看冻结回测，再比较而无需创建或保存策略", async ({ page }) => {
+  const version = { ...savedVersion, comparison_id: comparison.id };
+  const snapshot = { ...comparison, tracks: comparison.tracks.map((row) => ({ ...row, backtest_id: savedVersion.backtest_id })) };
+  let saves = 0, draftWrites = 0;
+  let submitted: Record<string, unknown> = {};
+  await page.route("**/api/strategies**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    const method = route.request().method();
+    if (path === "/api/strategies") {
+      if (method === "POST") saves++;
+      return json(route, [version]);
+    }
+    if (path.includes("/drafts/") && method === "PUT") draftWrites++;
+    if (path === "/api/strategies/comparisons/5") return json(route, snapshot);
+    if (path === "/api/strategies/comparisons" && method === "POST") {
+      submitted = route.request().postDataJSON();
+      return json(route, comparison);
+    }
+    await route.fallback();
+  });
+  await page.goto("/?page=strategies&code=510500");
+  await page.getByRole("button", { name: "查看版本", exact: true }).click();
+  await expect(page.getByRole("table", { name: "策略指标对照" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "保存时的回测 · 只读快照", exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("table", { name: "策略指标对照" })).toBeVisible();
+  await page.getByRole("button", { name: "回测与比较此版本", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "回测并比较", exact: true })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "策略名称", exact: true })).toHaveCount(0);
+  await expect(page.getByLabel("开始日期")).toHaveValue(savedVersion.settings.start_date);
+  await page.getByLabel("初始研究资金（元）").fill("60000");
+  await page.getByRole("button", { name: "运行回测", exact: true }).click();
+  await expect(page.getByRole("table", { name: "策略指标对照" })).toBeVisible();
+  expect(submitted.version_ids).toEqual([savedVersion.id]);
+  expect(submitted.current).toBeUndefined();
+  expect(submitted.initial_cash).toBe("60000");
+  await expect(page.getByRole("button", { name: "继续：保存" })).toHaveCount(0);
+  await expect(page.getByText(/草稿已保存/)).toHaveCount(0);
+  await page.getByRole("button", { name: "返回版本详情", exact: true }).click();
+  await expect(page.getByText("已保存版本 · 只读")).toBeVisible();
+  expect(saves).toBe(0);
+  expect(draftWrites).toBe(0);
+});
+
+test("冻结回测读取失败可重试，仍可继续比较并默认选中本版本", async ({ page }) => {
+  const version = { ...savedVersion, comparison_id: comparison.id };
+  const other = { ...comparison.tracks[0], key: "other", name: "另一条方法", backtest_id: 99 };
+  const chosen = { ...comparison.tracks[0], key: "chosen", name: savedVersion.name, backtest_id: savedVersion.backtest_id };
+  let available = false;
+  await page.route("**/api/strategies", (route) => json(route, [version]));
+  await page.route("**/api/strategies/comparisons/5", (route) => {
+    return json(route, available ? { ...comparison, tracks: [other, chosen] } : { detail: "测试快照暂时不可用" }, available ? 200 : 503);
+  });
+  await page.goto("/?page=strategies&code=510500&view=version&edit=10");
+  await expect(page.getByRole("alert")).toContainText("测试快照暂时不可用");
+  await expect(page.getByRole("button", { name: "回测与比较此版本" })).toBeEnabled();
+  available = true;
+  await page.getByRole("button", { name: "重试回测" }).click();
+  await expect(page.getByRole("button", { name: "查看买卖点" }).nth(1)).toHaveAttribute("aria-pressed", "true");
+});
+
+test("版本快照缺失不阻断比较，比较不恢复或覆盖编辑草稿", async ({ page }) => {
+  for (const path of ["**/api/strategies", "**/api/strategies?*"]) {
+    await page.route(path, (route) => json(route, [savedVersion]));
+  }
+  const draft = { name: "保留的编辑草稿", rule: savedVersion.rule, settings: { ...savedVersion.settings, initial_cash: "88000" } };
+  await page.addInitScript((value) => localStorage.setItem("etf-strategy-draft:510500:10", JSON.stringify(value)), draft);
+  await page.goto("/?page=strategies&code=510500&view=version&edit=10");
+  await expect(page.getByText(/此版本暂无关联的比较快照/)).toBeVisible();
+  await page.getByRole("button", { name: "回测与比较此版本" }).click();
+  await expect(page.getByLabel("初始研究资金（元）")).toHaveValue(savedVersion.settings.initial_cash);
+  await page.getByLabel("初始研究资金（元）").fill("60000");
+  await page.getByRole("checkbox", { name: /测试趋势/ }).uncheck();
+  await expect(page.getByRole("button", { name: "运行回测", exact: true })).toBeDisabled();
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "回测并比较", exact: true })).toBeVisible();
+  expect(JSON.parse((await page.evaluate(() => localStorage.getItem("etf-strategy-draft:510500:10")))!)).toEqual(draft);
+});
+
+test("比较入口拒绝跨 ETF 版本，版本快照也不展示不匹配结果", async ({ page }) => {
+  await page.route("**/api/strategies", (route) => json(route, [{ ...savedVersion, comparison_id: comparison.id }]));
+  await page.route("**/api/strategies/comparisons/5", (route) => json(route, { ...comparison, instrument_code: "512100" }));
+  await page.goto("/?page=strategies&code=512100&view=compare&edit=10");
+  await expect(page.getByText("策略版本不存在或已不属于当前ETF，请重新选择。")).toBeVisible();
+  await expect(page.getByRole("button", { name: "运行回测", exact: true })).toHaveCount(0);
+  await page.goto("/?page=strategies&code=510500&view=version&edit=10");
+  await expect(page.getByText(/回测快照与当前版本不匹配/)).toBeVisible();
+  await expect(page.getByRole("table", { name: "策略指标对照" })).toHaveCount(0);
+});
+
 test("保存成功启用失败时只重试同一版本", async ({ page }) => {
   let saves = 0, enables = 0;
   await page.route("**/api/strategies", async (route) => {
