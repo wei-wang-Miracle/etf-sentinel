@@ -23,6 +23,7 @@ echarts.use([
 import ChartReadout from "./ChartReadout";
 import type { Candle } from "../lib/api";
 import type { DailyAccount } from "../lib/backtests";
+import type { TurningPoint } from "../lib/turningPoints";
 import {
   MA_LINE_WIDTH,
   MA_WINDOWS,
@@ -56,7 +57,11 @@ export default function KLine({
   indexPoints = false,
   trades = [],
   onTrade,
+  turningPoints,
+  historyRows,
 }: {
+  turningPoints?: TurningPoint[];
+  historyRows?: Omit<Candle, "amount">[];
   indexPoints?: boolean;
   trades?: { trade_date: string; side: string; quantity: string; price: string; source?: "simulation" | "actual" }[];
   onTrade?: (index: number) => void;
@@ -66,7 +71,9 @@ export default function KLine({
   positions?: DailyAccount[];
 }) {
   const element = useRef<HTMLDivElement>(null);
+  const savedZoom = useRef<{ dates: string[]; start: number; end: number } | null>(null);
   const positionMode = positions !== undefined && holdings === undefined;
+  const maRows = historyRows ?? rows;
   useEffect(() => {
     if (!element.current || (!rows.length && !holdings?.length)) return;
     const chart = echarts.init(element.current);
@@ -82,17 +89,21 @@ export default function KLine({
         ].sort()
       : rows.map((r) => r.date);
     const candleByDate = new Map(rows.map((r) => [r.date, r]));
+    const previousZoom = savedZoom.current;
+    const zoom = previousZoom && previousZoom.dates.length === dates.length && dates.every((date, i) => date === previousZoom.dates[i])
+      ? { start: previousZoom.start, end: previousZoom.end } : {};
     const holdingByDate = new Map(
       holdingRows.map((r) => [r.trade_date, r.estimated_holding_pct]),
     );
     const positionByDate = new Map((positions ?? []).map((row) => [row.trade_date, row]));
+    const turningByDate = new Map((turningPoints ?? []).map(point => [point.date, point]));
     const maByDate = new Map<string, Record<number, number>>();
     MA_WINDOWS.forEach((window) => {
       const values = movingAverage(
-        rows.map((r) => r.close),
+        maRows.map((r) => r.close),
         window,
       );
-      rows.forEach((row, index) => {
+      maRows.forEach((row, index) => {
         const value = values[index];
         if (value == null) return;
         const entry = maByDate.get(row.date) ?? {};
@@ -158,6 +169,12 @@ export default function KLine({
       trades.filter((trade) => trade.trade_date === day).forEach((trade) => {
         lines.push(`<div>${trade.source === "simulation" ? "模拟" : "真实记录"}${trade.side === "buy" ? "买入" : "卖出"} ${escapeHtml(trade.quantity)} 份 @ ${escapeHtml(trade.price)} 元</div>`);
       });
+      const point = turningByDate.get(day);
+      if (point) {
+        lines.push(`<div>结构状态：${escapeHtml(point.state)} · 数据截止：${escapeHtml(day)}</div>`);
+        if (point.slope5 != null) lines.push(`<div>归一化斜率 5日 ${point.slope5.toFixed(3)} / 20日 ${point.slope20?.toFixed(3)} / 60日 ${point.slope60?.toFixed(3)}</div>`);
+        if (point.signal) lines.push(`<div>${escapeHtml(point.signal.reason)}；失效参考价 ${formatPrice(point.signal.invalidation)}（收盘${point.signal.kind === "bottom" ? "跌破" : "突破"}）</div>`);
+      }
       return lines.join("");
     };
     chart.setOption({
@@ -251,9 +268,10 @@ export default function KLine({
         },
       ],
       dataZoom: [
-        { type: "inside", xAxisIndex: comparison ? [0] : [0, 1] },
+        { type: "inside", xAxisIndex: comparison ? [0] : [0, 1], ...zoom },
         {
           type: "slider",
+          ...zoom,
           xAxisIndex: comparison ? [0] : [0, 1],
           bottom: 4,
           height: 16,
@@ -268,7 +286,7 @@ export default function KLine({
       series: [
         {
           type: "candlestick",
-          markPoint: { symbolSize: 30, data: trades.map((trade, tradeIndex) => ({
+          markPoint: { symbolSize: 30, data: [...trades.map((trade, tradeIndex) => ({
             name: `${trade.source === "simulation" ? "模拟" : "实际（委托日）"}${trade.side === "buy" ? "买入" : "卖出"}`,
             coord: [trade.trade_date, Number(trade.price)], value: `${trade.source === "simulation" ? "模" : "实"}${trade.side === "buy" ? "买" : "卖"}`,
             symbol: trade.source === "simulation" ? "triangle" : "pin",
@@ -276,7 +294,18 @@ export default function KLine({
             tradeIndex: trade.source === "simulation" ? tradeIndex : null,
             itemStyle: { color: trade.side === "buy" ? palette.up : palette.down },
             label: { color: palette.surface, fontSize: 12 },
-          })) },
+          })), ...(turningPoints ?? []).flatMap(point => {
+            const signal = point.signal, candle = candleByDate.get(point.date);
+            if (!signal || !candle) return [];
+            const bottom = signal.kind === "bottom";
+            return [{ name: bottom ? "底部确认" : "顶部确认", value: bottom ? "底确" : "顶确",
+              coord: [point.date, bottom ? candle.low : candle.high], symbol: "triangle", symbolSize: 14,
+              symbolRotate: bottom ? 0 : 180, symbolOffset: [0, bottom ? 10 : -10],
+              itemStyle: { color: bottom ? palette.chart3 : palette.chart4 },
+              label: { show: true, position: bottom ? "bottom" : "top", color: bottom ? palette.chart3 : palette.chart4, fontSize: 12 },
+              tooltip: { formatter: () => `${bottom ? "底部确认" : "顶部确认"} · ${escapeHtml(point.date)}<br/>${escapeHtml(signal.reason)}<br/>失效参考价 ${formatPrice(signal.invalidation)} · ${escapeHtml(signal.version)}` },
+            }];
+          })] },
           name: "日K · 开/收/低/高",
           data: dates.map((day) => {
             const r = candleByDate.get(day);
@@ -364,19 +393,22 @@ export default function KLine({
     const observer = new ResizeObserver(() => chart.resize());
     observer.observe(element.current);
     return () => {
+      const current = (chart.getOption().dataZoom as { start: number; end: number }[])[0];
+      savedZoom.current = { dates, start: current.start, end: current.end };
       observer.disconnect();
       chart.dispose();
     };
-  }, [rows, theme, holdings, positions, positionMode, indexPoints, trades, onTrade]);
+  }, [rows, theme, holdings, positions, positionMode, indexPoints, trades, onTrade, turningPoints, maRows]);
   const candleByDate = new Map(rows.map(row => [row.date, row]));
   const holdingByDate = new Map((holdings ?? []).map(row => [row.trade_date, row.estimated_holding_pct]));
   const positionByDate = new Map((positions ?? []).map((row) => [row.trade_date, row]));
   const maByDate = new Map<string, Record<string, string>>();
-  MA_WINDOWS.forEach(window => movingAverage(rows.map(row => Number(row.close)), window).forEach((value, index) => {
-    const values = maByDate.get(rows[index].date) ?? {};
+  MA_WINDOWS.forEach(window => movingAverage(maRows.map(row => Number(row.close)), window).forEach((value, index) => {
+    const values = maByDate.get(maRows[index].date) ?? {};
     values[`MA${window}`] = value == null ? "—" : formatPrice(value);
-    maByDate.set(rows[index].date, values);
+    maByDate.set(maRows[index].date, values);
   }));
+  const turningByDate = new Map((turningPoints ?? []).map(point => [point.date, point]));
   const readout = [...new Set([...candleByDate.keys(), ...holdingByDate.keys()])].sort().map(date => {
     const row = candleByDate.get(date);
     const values: Record<string, string> = { "开盘（元）": row ? String(row.open) : "—", "最高（元）": row ? String(row.high) : "—", "最低（元）": row ? String(row.low) : "—", "收盘（元）": row ? String(row.close) : "—", "成交量": row ? String(row.volume) : "—", ...maByDate.get(date) };
@@ -387,6 +419,17 @@ export default function KLine({
     if (holdings) { const ratio = holdingByDate.get(date); values["国家队估算比例"] = ratio == null ? "—" : `${ratio}%`; }
     const records = trades.filter(item => item.trade_date === date);
     if (records.length) values["操作标记"] = records.map(item => `${item.source === "simulation" ? "模拟" : "真实记录"}${item.side === "buy" ? "买入" : "卖出"} ${item.quantity}份 @ ${item.price}`).join("；");
+    const point = turningByDate.get(date);
+    if (point) {
+      values["结构状态"] = point.state;
+      values["指标数据截止"] = date;
+      if (point.slope5 != null) values["归一化斜率（5／20／60日）"] = `${point.slope5.toFixed(3)} / ${point.slope20?.toFixed(3)} / ${point.slope60?.toFixed(3)}`;
+      if (point.signal) {
+        values["确认依据"] = point.signal.reason;
+        values["失效参考价"] = `${formatPrice(point.signal.invalidation)}（收盘${point.signal.kind === "bottom" ? "跌破" : "突破"}）`;
+        values["顶底规则版本"] = point.signal.version;
+      }
+    }
     return { date, values };
   });
   return (

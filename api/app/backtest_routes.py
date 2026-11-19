@@ -89,35 +89,44 @@ def describe(run, *, detail=False):
     return result
 
 
+def backtest_instruments(*, algorithm_warmup=None):
+    """读取本地覆盖；共享算法默认区间从最近折算后预热，并受核验截止限制。"""
+    today = now().date()
+    instruments = []
+    with Session() as db:
+        for code in db.scalars(select(Instrument.code).order_by(Instrument.code)):
+            instrument = db.get(Instrument, code)
+            dates = list(db.scalars(select(Candle.date).where(Candle.code == code).order_by(Candle.date)))
+            source = db.get(BacktestSource, code)
+            default_start = dates[60] if len(dates) > 60 else None
+            extra = {}
+            if algorithm_warmup is not None:
+                verified = [day for day in dates if source and day < today and day <= source.checked_through_date]
+                split = max((date.fromisoformat(event["effective_date"])
+                             for event in source.corporate_actions["splits"]
+                             if verified and event["effective_date"] <= str(verified[-1])), default=None) if source else None
+                usable = [day for day in verified if split is None or day > split]
+                default_start = usable[algorithm_warmup] if len(usable) > algorithm_warmup else None
+                extra["default_end"] = usable[-1] if usable else None
+            instruments.append({
+                "instrument_code": code,
+                "instrument_name": instrument.name,
+                "count": len(dates),
+                "first_date": dates[0] if dates else None,
+                "last_date": dates[-1] if dates else None,
+                "default_start": default_start,
+                "source_checked_through": source.checked_through_date if source else None,
+                **extra,
+            })
+    return instruments
+
+
 @router.get("/catalog")
 def catalog():
     """注册表与本地数据覆盖，不在页面加载时请求外部来源。"""
-    with Session() as db:
-        instruments = []
-        for code in db.scalars(select(Instrument.code).order_by(Instrument.code)):
-            instrument = db.get(Instrument, code)
-            dates = list(
-                db.scalars(
-                    select(Candle.date).where(Candle.code == code).order_by(Candle.date)
-                )
-            )
-            source = db.get(BacktestSource, code)
-            instruments.append(
-                {
-                    "instrument_code": code,
-                    "instrument_name": instrument.name if instrument else code,
-                    "count": len(dates),
-                    "first_date": dates[0] if dates else None,
-                    "last_date": dates[-1] if dates else None,
-                    "default_start": dates[60] if len(dates) > 60 else None,
-                    "source_checked_through": source.checked_through_date
-                    if source
-                    else None,
-                }
-            )
     return {
         "strategies": strategy_catalog(),
-        "instruments": instruments,
+        "instruments": backtest_instruments(),
         "engine_version": ENGINE_VERSION,
     }
 

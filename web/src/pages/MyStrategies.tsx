@@ -1,46 +1,128 @@
-import { useCallback, useEffect, useState } from "react";
-import { api, stamp } from "../lib/api";
+import { useEffect, useState } from "react";
+import { api } from "../lib/api";
 import type { AccountHoldings } from "../lib/account";
 import { useResearchQuery } from "../lib/research";
-import { activationMessage, journeyUrl, type JourneyCatalog, type SavedStrategy } from "../lib/strategyJourney";
-import StrategyEditor from "../components/StrategyEditor";
+import { activationMessage, journeyUrl, templateKey, type JourneyCatalog, type SavedStrategy } from "../lib/strategyJourney";
+import { useApiResource } from "../lib/useApiResource";
+import AlgorithmBacktest from "../components/AlgorithmBacktest";
+import AlgorithmGuide from "../components/AlgorithmGuide";
 import StrategyVersion from "../components/StrategyVersion";
-import DailySignals from "../components/DailySignals";
+import "../styles/strategy-journey.css";
 
 export default function MyStrategies({ theme }: { theme: string }) {
-  const [query, update] = useResearchQuery({ code: "", edit: "", view: "list" });
-  const [catalog, setCatalog] = useState<JourneyCatalog>();
-  const [versions, setVersions] = useState<SavedStrategy[]>([]);
-  const [error, setError] = useState(""), [notice, setNotice] = useState("");
-  const [busy, setBusy] = useState(false), [loading, setLoading] = useState(true);
-  const [pending, setPending] = useState<SavedStrategy>();
-  const refresh = useCallback(async () => {
-    const [data, rows] = await Promise.all([api<JourneyCatalog>("/strategies/catalog"), api<SavedStrategy[]>("/strategies")]);
-    setCatalog(data); setVersions(rows);
-  }, []);
-  useEffect(() => { let cancelled = false; refresh().catch((e) => { if (!cancelled) setError(e.message); }).finally(() => { if (!cancelled) setLoading(false); }); return () => { cancelled = true; }; }, [refresh]);
+  const [query, update] = useResearchQuery({ code: "", edit: "", view: "list", algorithm: "", start: "", end: "" });
+  const catalog = useApiResource<JourneyCatalog>("/strategies/catalog");
+  const versions = useApiResource<SavedStrategy[]>("/strategies");
+  const [changed, setChanged] = useState<SavedStrategy[]>([]);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState(false);
+  const rows = [...changed, ...(versions.data ?? []).filter((row) => !changed.some((item) => item.id === row.id))];
+  const isDetail = query.view === "version";
+  const isGuide = query.view === "algorithm";
+  const isBacktest = ["backtest", "editor", "compare"].includes(query.view);
+  const binding = isDetail || isBacktest ? rows.find((row) => String(row.id) === query.edit) : undefined;
+  const code = binding?.instrument_code ?? (catalog.data?.instruments.some((item) => item.instrument_code === query.code) ? query.code : "");
+  const replacement = binding && rows.find((row) => row.id !== binding.id && row.instrument_code === code && row.active);
+  const legacy = rows.filter((row) => !row.algorithm_template_id);
+  const loading = (!catalog.data && catalog.loading) || (!versions.data && versions.loading && !binding && isDetail);
+  const loadError = catalog.error || (!isBacktest && !isGuide ? versions.error : "");
+  const fromBinding = isBacktest && binding?.algorithm_template_id ? binding : undefined;
+  const algorithm = fromBinding ? templateKey(fromBinding.template) : query.algorithm;
+  const guideTemplate = catalog.data?.templates.find((item) => item.id === query.algorithm || templateKey(item) === query.algorithm);
+  const range = { start: query.start || fromBinding?.settings.start_date || "", end: query.end || fromBinding?.settings.end_date || "" };
+
+  useEffect(() => { setPending(false); setNotice(""); setError(""); }, [query.edit, query.view, code]);
+
   async function toggle(row: SavedStrategy) {
-    setBusy(true); setError(""); setNotice("");
+    setBusy(true);
+    setError("");
+    setNotice("");
     try {
-      const value = await api<SavedStrategy>(`/strategies/${row.id}/${row.active ? "pause" : "enable"}`, "POST", row.active ? undefined : { replace_active: true });
+      const value = await api<SavedStrategy>(`/strategies/${row.id}/${row.active ? "pause" : "enable"}`, "POST", row.active ? undefined : { replace_active: !!replacement });
       const positions = row.active ? undefined : await api<AccountHoldings>("/account/holdings").catch(() => undefined);
-      setPending(undefined); setNotice(`${row.name} · 第 ${row.version} 版已${row.active ? "暂停，历史记录保留。" : `启用。${activationMessage(value, positions)}`}`); await refresh();
-    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+      setChanged((items) => [value, ...items.filter((item) => item.id !== value.id && (item.id !== replacement?.id || row.active)),
+        ...(!row.active && replacement ? [{ ...replacement, active: false }] : [])]);
+      setPending(false);
+      setNotice(`${row.name}${row.active ? "已暂停，历史信号仍可查看。" : `已启用。${activationMessage(value, positions)}`}`);
+      versions.retry();
+    } catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
   }
-  const edit = versions.find((row) => String(row.id) === query.edit);
-  const code = (query.view === "editor" && edit ? edit.instrument_code : catalog?.instruments.some((row) => row.instrument_code === query.code) ? query.code : "");
-  const codeVersions = versions.filter((row) => row.instrument_code === code);
-  const hasActive = codeVersions.some((row) => row.active);
-  useEffect(() => { setPending(undefined); setNotice(""); }, [code]);
-  return <div className={query.view === "editor" && code ? "strategy-create-page" : undefined}>
-    <header className="page-header"><div><h1>{query.view === "editor" ? edit ? "基于版本修改" : "创建策略" : query.view === "compare" ? "已有策略回测比较" : "我的策略"}</h1><p>保存不同方法，在同一只 ETF 上比较，再决定是否每日运行</p></div></header>
-    {error && <p className="alert" role="alert">{error}<button onClick={() => void refresh().then(() => setError("")).catch((e) => setError(e.message))}>重试</button></p>}{notice && <p className="notice" role="status">{notice}</p>}
-    <div className="journey-actions journey-page-controls"><label>当前 ETF <select aria-label="当前 ETF" value={code} disabled={busy || loading || query.view === "editor"} onChange={(e) => update({ code: e.target.value, edit: "", view: "list" })}><option value="">选择 ETF</option>{catalog?.instruments.map((row) => <option key={row.instrument_code} value={row.instrument_code}>{row.instrument_code} · {row.instrument_name}</option>)}</select></label>{query.view === "list" && <button disabled={!code || loading} className="primary" onClick={() => update({ view: "editor", edit: "", code, stage: "rules" })}>创建新策略</button>}<button disabled={!code || loading} onClick={() => query.view === "list" ? update({ page: "etfs", detail: "signals", code, edit: "", auxiliary: "" }) : update({ view: "list", edit: "" })}>{query.view === "list" ? "查看策略与信号" : "返回版本列表"}</button>{query.view === "compare" && <button onClick={() => update({ view: "version" })}>返回版本详情</button>}</div>
-    {loading ? <div className="empty" role="status">正在读取已保存策略…</div> : !code ? <><div className="empty"><p>先选择一只 ETF</p><a href={journeyUrl("data")}>配置标的</a></div><section className="panel journey-guide" role="region" aria-label="策略流程指引"><h2>策略研究怎么走</h2><ol className="journey-guide-steps"><li><strong>选择 ETF</strong><span>持仓或全部配置内 ETF 均可研究</span></li><li><strong>配置买卖条件</strong><span>中文指标自由组合，也可从趋势模板开始</span></li><li><strong>回测验证</strong><span>与一直持有、已保存版本在同一假设下比较</span></li><li><strong>保存命名版本</strong><span>回测满意再保存，历史版本不被覆盖</span></li><li><strong>启用每日信号</strong><span>启用后每个交易日 08:30 生成盘前计划</span></li></ol><p className="muted">回测是历史模拟；信号不等于成交，不自动下单。</p></section></> : query.view === "version" ? !edit || edit.instrument_code !== code ? <div className="notice warning">策略版本不存在或已不属于当前ETF，请重新选择。</div> : <StrategyVersion key={edit.id} version={edit} catalog={catalog} theme={theme} onCompare={() => update({ view: "compare", stage: "compare" })} onEdit={() => update({ view: "editor", code: edit.instrument_code, edit: String(edit.id), stage: "rules" })} /> : query.view === "compare" ? !edit || edit.instrument_code !== code ? <div className="notice warning">策略版本不存在或已不属于当前ETF，请重新选择。</div> : <StrategyEditor key={`compare:${edit.id}`} code={code} initial={edit} theme={theme} savedOnly onSaved={() => {}} /> : query.view === "editor" ? query.edit && (!edit || edit.instrument_code !== code) ? <div className="notice warning">策略版本不存在或已不属于当前ETF，请重新选择。</div> : <StrategyEditor key={`${code}:${edit?.id ?? "new"}`} code={code} initial={edit} theme={theme} onSaved={() => void refresh().catch((e) => setError(e.message))} /> : <>
-      {!hasActive && <p className="notice journey-next-step">{codeVersions.length ? "回测满意后，启用一个版本，系统才会在每个交易日盘前生成信号。" : "还没有保存策略。创建第一个策略：配置条件后先回测，满意再保存。"}</p>}
-      <section className="panel journey-inset"><h2>已保存的方法</h2><p className="muted">一个 ETF 可保存多种策略及历史版本，同一时间只启用一条。</p><div className="journey-saved-list">{versions.filter((row) => row.instrument_code === code).map((row) => <article key={row.id} className="journey-saved-row"><div><h3>{row.name} <span className="muted">第 {row.version} 版</span></h3><p className="muted">{stamp(row.created_at)} · {row.rule.allocation === 50 ? "半资金" : "全部资金"} · {row.active ? "正在每日运行" : "未启用"}</p></div><div className="journey-actions"><button disabled={busy} onClick={() => update({ view: "version", edit: String(row.id), code: row.instrument_code })}>查看版本</button><button disabled={busy} onClick={() => row.active ? void toggle(row) : setPending(row)}>{row.active ? "暂停" : "启用这个版本"}</button></div></article>)}</div></section>
-      {pending && pending.instrument_code === code && <section className="panel journey-inset" role="region" aria-label="确认启用策略"><h2>{catalog?.instruments.find((row) => row.instrument_code === pending.instrument_code)?.instrument_name} {pending.instrument_code} · 确认启用“{pending.name}”第 {pending.version} 版</h2><p>{versions.some((row) => row.active && row.instrument_code === pending.instrument_code) ? `这将替换 ${versions.find((row) => row.active && row.instrument_code === pending.instrument_code)?.name} 第 ${versions.find((row) => row.active && row.instrument_code === pending.instrument_code)?.version} 版，保留历史信号和执行记录。` : "从下一适用交易日开始准备计划，不补写过去的信号。"}下一适用日期、就绪状态和下次运行待服务端核验；不补历史、不自动下单。启用不代表真实账户已经买入或卖出。</p><div className="journey-actions"><button className="primary" disabled={busy} onClick={() => void toggle(pending)}>确认启用</button><button disabled={busy} onClick={() => setPending(undefined)}>取消</button></div></section>}
-      <DailySignals key={`${code}:${versions.filter((row) => row.active && row.instrument_code === code).map((row) => row.id).join(",")}`} code={code} compact />
-    </>}
+
+  function openBacktest(selected = "") {
+    update({ view: "backtest", edit: "", code, algorithm: selected, start: "", end: "" });
+  }
+
+  return <div className="algorithm-workspace">
+    <header className="page-header"><div>
+      <h1>{isDetail ? "算法绑定详情" : isGuide ? "算法说明" : isBacktest ? "算法回测" : "策略算法库"}</h1>
+      <p>{isDetail ? "查看回测记录并决定是否启用每日信号。" : isGuide ? "查看当前算法的指标定义、市场含义和买卖判断口径。" : isBacktest ? "在同一只 ETF 上比较算法，检查买卖点，再决定是否绑定。" : "一套算法可用于多只 ETF；回测成功后，可以为具体标的保存绑定。"}</p>
+    </div></header>
+    <div className="journey-actions journey-page-controls">
+      {(isDetail || isBacktest || isGuide) && <button onClick={() => update({ view: "list", edit: "", start: "", end: "", algorithm: "" })}>返回算法库</button>}
+      {!isDetail && !isBacktest && !isGuide && <button className="primary" disabled={!catalog.data?.templates.length} onClick={() => openBacktest()}>开始算法对比</button>}
+      {code && <a className="button-link" href={journeyUrl("etfs", code, { detail: "signals" })}>查看每日信号</a>}
+    </div>
+    {loadError && <p className="notice warning" role="alert">{loadError} <button onClick={() => { catalog.retry(); versions.retry(); }}>重试</button></p>}
+    {error && <p className="notice warning" role="alert">{error}</p>}
+    {notice && <p className="notice" role="status">{notice}</p>}
+    {loading ? <p className="empty" role="status">正在读取算法和绑定…</p>
+      : isBacktest && catalog.data ? <AlgorithmBacktest key={`${code}:${algorithm}:${range.start}:${range.end}`} catalog={catalog.data} code={code} algorithm={algorithm} range={range} theme={theme}
+        onCode={(next) => update({ code: next, edit: "", algorithm, start: "", end: "" })}
+        onSaved={(value) => { setChanged((items) => [value, ...items.filter((item) => item.id !== value.id)]); versions.retry(); }} />
+      : isDetail ? binding ? <>
+        <StrategyVersion key={binding.id} version={binding} theme={theme}>
+        <section className="panel journey-inset" aria-label="管理每日信号">
+          <h2>每日信号</h2>
+          <p>{binding.active ? "这个绑定正在生成每日信号。" : binding.algorithm_template_id ? "已保存回测。显式启用后，从下一适用交易日开始生成信号。" : "历史逐 ETF 规则保留作复盘，启用信号请回测并保存共享算法。"}</p>
+          <div className="journey-actions">
+            {binding.algorithm_template_id && <button onClick={() => update({ view: "backtest", algorithm: templateKey(binding.template), start: binding.settings.start_date, end: binding.settings.end_date, edit: "", code })}>重新回测算法</button>}
+            {binding.active ? <button disabled={busy} onClick={() => void toggle(binding)}>暂停信号</button>
+              : binding.algorithm_template_id && !pending && <button className="primary" disabled={busy} onClick={() => setPending(true)}>启用每日信号</button>}
+          </div>
+          {pending && <div className="notice" role="region" aria-label="确认启用算法">
+            <p>{replacement ? `将替换 ${code} 当前启用的「${replacement.name}」，历史信号会保留。` : `将为 ${code} 启用「${binding.name}」。`}计划需要核验数据和仓位，不自动下单。</p>
+            <div className="journey-actions"><button className="primary" disabled={busy} onClick={() => void toggle(binding)}>确认启用</button><button disabled={busy} onClick={() => setPending(false)}>取消</button></div>
+          </div>}
+        </section>
+        </StrategyVersion>
+      </> : !loadError && <p className="notice warning">找不到这个算法绑定。</p>
+      : isGuide ? guideTemplate && catalog.data ? <AlgorithmGuide template={guideTemplate} templates={catalog.data.templates} code={code} />
+        : !loadError && <p className="notice warning">找不到这套算法的说明。</p>
+      : catalog.data && <>
+        <div className="algorithm-library" aria-label="算法模板">
+          {catalog.data.templates.map((item) => {
+            const linked = rows.filter((row) => row.algorithm_template_id === item.id);
+            const byEtf = new Map<string, SavedStrategy[]>();
+            for (const row of linked.sort((a, b) => b.id - a.id)) {
+              const records = byEtf.get(row.instrument_code) ?? [];
+              records.push(row);
+              byEtf.set(row.instrument_code, records);
+            }
+            const latest = [...byEtf.values()];
+            return <section key={templateKey(item)} className="panel journey-inset algorithm-card">
+              <header><div><h2>{item.name}</h2><span className="muted">实验算法</span></div>
+                <button onClick={() => openBacktest(templateKey(item))} aria-label={`回测${item.name}`}>回测这套算法</button></header>
+              <p>{item.description}</p>
+              <a href={journeyUrl("strategies", code || undefined, { view: "algorithm", algorithm: item.id })}>算法说明</a>
+              <div className="algorithm-bindings"><h3>已绑定 {latest.length} 只 ETF</h3>
+                {latest.map(([first, ...older]) => <div className="algorithm-binding" key={first.strategy_id}>
+                  <span><span className="mono">{first.instrument_code}</span> · {catalog.data?.instruments.find((row) => row.instrument_code === first.instrument_code)?.instrument_name ?? "ETF"}</span>
+                  <a href={journeyUrl("strategies", first.instrument_code, { view: "version", edit: String(first.id) })}>{first.active ? "查看已启用绑定" : "查看最新绑定"}</a>
+                  {older.length > 0 && <details><summary>更多回测记录（{older.length}）</summary>{older.map((row) => <p key={row.id}><a href={journeyUrl("strategies", row.instrument_code, { view: "version", edit: String(row.id) })}>回测记录 #{row.id}{row.active ? " · 已启用" : ""}</a></p>)}</details>}
+                </div>)}
+                {latest.length === 0 && <p className="muted">{versions.loading ? "正在读取绑定…" : "回测成功后可保存绑定。"}</p>}
+              </div>
+            </section>;
+          })}
+          {!catalog.data.templates.length && <p className="empty">暂无可回测的算法。</p>}
+        </div>
+        {!!legacy.length && <details className="panel journey-inset"><summary>历史逐 ETF 策略（{legacy.length}）</summary>
+          {legacy.map((row) => <div className="journey-saved-row" key={row.id}><span>{row.instrument_code} · {row.name}{row.active ? " · 已启用" : ""}</span><a href={journeyUrl("strategies", row.instrument_code, { view: "version", edit: String(row.id) })}>查看历史回测</a></div>)}
+        </details>}
+        <p className="muted">先看收益、回撤、交易笔数与买卖原因，再修订算法并用相同区间重测。实验回测不证明未来胜率。</p>
+      </>}
   </div>;
 }

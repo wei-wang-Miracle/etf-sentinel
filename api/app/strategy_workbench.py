@@ -1,4 +1,4 @@
-"""单ETF中文策略草稿、不可变版本与统一比较接口，不代替真实交易。"""
+"""共享算法比较、ETF绑定和盘前信号启用接口。"""
 
 from copy import deepcopy
 from datetime import UTC, date
@@ -7,12 +7,18 @@ from decimal import Decimal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt
 from sqlalchemy import func, select, text
-from sqlalchemy.dialects.postgresql import insert
 
-from app.backtest import ENGINE_VERSION, metrics, money, run_backtest
+from app.algorithm_templates import (
+    SHARED_WARMUP_BARS,
+    TEMPLATE_VERSION,
+    TURNING_VERSION,
+    is_shared_template,
+    template_catalog,
+    template_snapshot,
+)
+from app.backtest import ENGINE_VERSION, run_backtest
 from app.backtest_data import DATA_VERSION
-from app.backtest_routes import catalog as backtest_catalog
-from app.backtest_routes import digest
+from app.backtest_routes import backtest_instruments, digest
 from app.collection import now
 from app.db import Session
 from app.models import (
@@ -20,26 +26,15 @@ from app.models import (
     Instrument,
     SavedStrategy,
     SavedStrategyVersion,
-    SentimentCategory,
     StrategyComparison,
-    StrategyDraft,
     StrategyObservation,
     StrategyResearchBatch,
 )
 from app.strategies import get_strategy
-from app.strategy_conditions import (
-    CATALOG_VERSION,
-    CONDITION_VERSION,
-    CONDITIONS,
-    condition_diagnostics,
-    evidence_type,
-    normalize_rule,
-    prepare_conditions,
-)
-from app.strategy_inputs import condition_coverage, external_snapshot, market_snapshot
-from app.strategy_research import RESEARCH_VERSION, diagnostics
+from app.strategy_inputs import external_snapshot, market_snapshot
+from app.strategy_research import diagnostics
 
-router = APIRouter(prefix="/strategies", tags=["单ETF策略流程"])
+router = APIRouter(prefix="/strategies", tags=["算法策略流程"])
 
 
 class CommonSettings(BaseModel):
@@ -68,37 +63,30 @@ class CommonSettings(BaseModel):
     slippage_bps: Decimal = Field(default=Decimal(5), ge=0, le=100)
 
 
-class CurrentRule(BaseModel):
-    """尚未保存的命名配置，由条件引擎进一步检查业务结构。"""
+class TemplateSelection(BaseModel):
+    """仅接收算法标识和不可变版本。"""
 
     model_config = ConfigDict(extra="forbid")
-    name: str = Field(min_length=1, max_length=100)
-    rule: dict
+    id: str = Field(min_length=1, max_length=64)
+    version: str = Field(min_length=1, max_length=32)
 
 
-class ComparisonRequest(CommonSettings):
-    """同ETF具体版本与可选当前草稿的统一重算请求。"""
+class ComparisonRequest(BaseModel):
+    """在统一ETF、区间和固定成本下比较所选算法。"""
 
-    current: CurrentRule | None = None
-    version_ids: list[StrictInt] = Field(default_factory=list, max_length=100)
+    model_config = ConfigDict(extra="forbid")
+    instrument_code: str = Field(pattern=r"^[0-9]{6}$")
+    start_date: date
+    end_date: date
+    templates: list[TemplateSelection] = Field(min_length=1, max_length=12)
 
 
 class SaveRequest(BaseModel):
-    """只从成功比较轨道保存版本，不接受客户端伪造回测结果。"""
+    """从成功比较直接绑定算法，ETF和规则均由原始比较确定。"""
 
     model_config = ConfigDict(extra="forbid")
-    name: str = Field(min_length=1, max_length=100)
-    instrument_code: str = Field(pattern=r"^[0-9]{6}$")
     comparison_id: StrictInt
     track_key: str
-    strategy_id: StrictInt | None = None
-
-
-class DraftRequest(CurrentRule):
-    """可恢复编辑草稿；settings保留输入中间态，不用于直接启用。"""
-
-    settings: dict
-    strategy_id: StrictInt | None = None
 
 
 class EnableRequest(BaseModel):
@@ -114,109 +102,31 @@ def _require_instrument(db, code):
         raise HTTPException(404, "ETF不在配置范围内")
 
 
-def _validate(rule):
-    """将条件校验转换为可读接口输入错误。"""
-    try:
-        return normalize_rule(rule)
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from None
-
-
 @router.get("/catalog")
 def catalog():
-    """提供条件元数据与ETF行情覆盖，页面加载不访问外部来源。"""
-    original = backtest_catalog()
-    with Session() as db:
-        categories = [
-            {"key": c.category_key, "name": c.category_name}
-            for c in db.scalars(
-                select(SentimentCategory).order_by(SentimentCategory.category_key)
-            )
-        ]
+    """提供ETF覆盖与服务端冻结的算法模板目录。"""
+    instruments = backtest_instruments(algorithm_warmup=SHARED_WARMUP_BARS)
+    codes = [row["instrument_code"] for row in instruments]
     return {
-        "instruments": original["instruments"],
-        "conditions": CONDITIONS,
-        "sentiment_categories": categories,
+        "instruments": instruments,
+        "templates": template_catalog(codes),
         "engine_version": ENGINE_VERSION,
-        "condition_version": CONDITION_VERSION,
-        "catalog_version": CATALOG_VERSION,
+        "template_version": TEMPLATE_VERSION,
     }
 
 
-@router.get("/coverage")
-def coverage(instrument_code: str):
-    """返回三态条件覆盖，具体回测仍逐日核验。"""
-    with Session() as db:
-        _require_instrument(db, instrument_code)
-        return condition_coverage(db, instrument_code)
-
-
-@router.get("/drafts/{instrument_code}")
-def get_draft(instrument_code: str):
-    """读取当前ETF草稿；没有草稿返回空，不借用其他ETF内容。"""
-    with Session() as db:
-        _require_instrument(db, instrument_code)
-        draft = db.get(StrategyDraft, instrument_code)
-        return draft.draft_snapshot if draft else None
-
-
-@router.put("/drafts/{instrument_code}")
-def put_draft(instrument_code: str, body: DraftRequest):
-    """保存编辑内容，与不可变版本和启用规则隔离。"""
-    with Session() as db:
-        _require_instrument(db, instrument_code)
-        snapshot = body.model_dump(mode="json")
-        if body.strategy_id is not None:
-            saved = db.get(SavedStrategy, body.strategy_id)
-            if not saved or saved.instrument_code != instrument_code:
-                raise HTTPException(422, "草稿原策略与ETF不一致")
-        if body.settings.get("instrument_code", instrument_code) != instrument_code:
-            raise HTTPException(422, "草稿设置与ETF不一致")
-        statement = insert(StrategyDraft).values(
-            instrument_code=instrument_code, updated_at=now(), draft_snapshot=snapshot
-        )
-        db.execute(
-            statement.on_conflict_do_update(
-                index_elements=["instrument_code"],
-                set_={
-                    "updated_at": statement.excluded.updated_at,
-                    "draft_snapshot": statement.excluded.draft_snapshot,
-                },
-            )
-        )
-        db.commit()
-        return snapshot
-
-
-def _reserve(account, reserve, initial):
-    """按完整本金加入零息储备，不向交易子账户补资或每日再平衡。"""
-    result, peak = deepcopy(account), initial
-    for row in result["daily"]:
-        equity = money(Decimal(row["equity"]) + reserve)
-        peak = max(peak, equity)
-        row.update(
-            cash=str(money(Decimal(row["cash"]) + reserve)),
-            equity=str(equity),
-            nav=float(equity / initial),
-            drawdown=float(equity / peak - 1),
-            position_weight=float(Decimal(row["market_value"]) / equity),
-        )
-    result["metrics"] = metrics(result["daily"], result["trades"], initial)
-    return result
-
-
 def execute_candidate(candidate, snapshot):
-    """从冻结输入运行一条候选；失败由调用方保留，不污染其他候选。
+    """从冻结输入运行一条模板或买入持有轨道。
 
     Args:
-        candidate: 命名规则或持有参照及投入比例。
+        candidate: 命名模板或持有参照。
         snapshot: 统一市场、权益、外部因子、日期与成本。
 
     Returns:
         原引擎结果、包含完整本金的比较账户、独立回测输入快照。
 
     Raises:
-        ValueError: 行情、预热、外部条件或版本无效。
+        ValueError: 行情、预热、估值数据或模板版本无效。
     """
     market, common = snapshot["market"], snapshot["settings"]
     if "error" in market:
@@ -235,23 +145,27 @@ def execute_candidate(candidate, snapshot):
     if begin is None or begin < 1:
         raise ValueError("区间没有完整交易日或缺少前一交易日预热")
     initial = Decimal(common["initial_cash"])
-    allocated = money(initial * Decimal(candidate["allocation"]) / 100)
+    allocated = initial
+    template = candidate.get("template")
+    if template and is_shared_template(template["id"], template["version"]) and begin < SHARED_WARMUP_BARS:
+        raise ValueError(f"回测开始前需要至少{SHARED_WARMUP_BARS}个有效交易日预热，请调晚开始日期")
     settings = {
         **common,
         "initial_cash": str(allocated),
-        "strategy_key": "custom_conditions" if candidate.get("rule") else "hold",
+        "strategy_key": "algorithm_template" if candidate.get("template") else "hold",
         "parameters": {
-            "rule": candidate["rule"],
+            "template": candidate["template"],
             "external": snapshot["external"],
             "decision_start": rows[begin - 1]["trade_date"],
+            "slippage_bps": common["slippage_bps"],
         }
-        if candidate.get("rule")
+        if candidate.get("template")
         else {},
     }
-    if candidate.get("rule"):
-        signals = prepare_conditions(
-            rows, market["actions"]["dividends"], settings["parameters"]
-        )
+    if candidate.get("template"):
+        from app.algorithm_templates import prepare_template
+
+        signals = prepare_template(rows, market["actions"]["dividends"], settings["parameters"])
         missing = next(
             (
                 (row, point)
@@ -265,20 +179,15 @@ def execute_candidate(candidate, snapshot):
         if missing:
             row, point = missing
             names = [
-                c["label"]
-                for side in ("buy", "sell")
-                for c in point["indicators"][side]
-                if c["satisfied"] is None
+                key
+                for key, value in point["indicators"].get("buy", {}).items()
+                if value is None
             ]
             raise ValueError(
-                f"{row['trade_date']}条件数据或预热不足：{'、'.join(dict.fromkeys(names))}"
+                f"{row['trade_date']}模板因子数据或预热不足：{'、'.join(dict.fromkeys(names))}"
             )
     result = run_backtest(rows, market["actions"]["dividends"], settings)
-    account = (
-        _reserve(result["strategy"], initial - allocated, initial)
-        if allocated != initial
-        else result["strategy"]
-    )
+    account = result["strategy"]
     run_input = {
         **market,
         "settings": settings,
@@ -291,17 +200,8 @@ def execute_candidate(candidate, snapshot):
 
 
 def candidate_diagnostics(candidate: dict, snapshot: dict, account: dict) -> dict:
-    """在比较结果保存独立诊断，不改变旧回测账户及其复算摘要。"""
-    rows = snapshot["market"]["rows"]
-    signals = prepare_conditions(
-        rows,
-        snapshot["market"]["actions"]["dividends"],
-        {
-            "rule": candidate["rule"],
-            "external": snapshot["external"],
-        },
-    )
-    return condition_diagnostics(candidate["rule"], rows, signals, account)
+    """说明模拟账户完整平仓轮次与期末未平仓轮次。"""
+    return diagnostics(account, Decimal(snapshot["settings"]["initial_cash"]))
 
 
 def comparison_payload(row, detail=True):
@@ -328,68 +228,56 @@ def comparison_payload(row, detail=True):
 
 @router.post("/comparisons")
 def compare(body: ComparisonRequest):
-    """统一条件重算所选版本和当前草稿，保存成功及失败对象。
-
-    输入由同一REPEATABLE READ事务冻结；重算不覆盖原版本、原实验或启用状态。
-    """
+    """以同一事务内的行情和权益比较算法，回测不建立绑定。"""
     if body.start_date > body.end_date or body.end_date >= now().date():
         raise HTTPException(422, "起止日期无效，截止日须早于今天")
-    if not body.current and not body.version_ids:
-        raise HTTPException(422, "请选择至少一条策略或当前配置")
+    selections = dict.fromkeys((item.id, item.version) for item in body.templates)
+    candidates = []
+    for template_id, version in selections:
+        if not is_shared_template(template_id, version):
+            raise HTTPException(422, "所选算法版本不存在或仅供历史复盘")
+        template = template_snapshot(template_id, version)
+        name = template["name"]
+        if sum(other_id == template_id for other_id, _ in selections) > 1:
+            name = f"{name} · {version}"
+        candidates.append({
+            "key": f"template:{template_id}:{version}", "name": name,
+            "template": template, "allocation": 100,
+        })
+    candidates.append({"key": "hold", "name": "一直持有", "allocation": 100})
+    settings = CommonSettings(**body.model_dump(exclude={"templates"})).model_dump(mode="json")
     with Session() as db:
         db.connection(execution_options={"isolation_level": "REPEATABLE READ"})
         _require_instrument(db, body.instrument_code)
-        candidates = []
-        if body.current:
-            current_rule = _validate(body.current.rule)
-            if not body.current.name.strip():
-                raise HTTPException(422, "策略名称不可为空")
-            candidates.append(
-                {
-                    "key": "current",
-                    "name": body.current.name.strip(),
-                    "rule": current_rule,
-                    "allocation": current_rule["allocation"],
-                }
-            )
-        for version_id in dict.fromkeys(body.version_ids):
-            version = db.get(SavedStrategyVersion, version_id)
-            if (
-                not version
-                or db.get(SavedStrategy, version.strategy_id).instrument_code
-                != body.instrument_code
-            ):
-                raise HTTPException(422, "所选策略版本不存在或不属于同一只ETF")
-            candidates.append(
-                {
-                    "key": f"version:{version_id}",
-                    "name": f"{version.strategy_name} · V{version.version_number}",
-                    "version_id": version_id,
-                    "rule": version.configuration["rule"],
-                    "allocation": version.configuration["rule"]["allocation"],
-                }
-            )
-        candidates.append({"key": "hold", "name": "一直持有", "allocation": 100})
-        if any(c["allocation"] == 50 for c in candidates):
-            candidates.append(
-                {"key": "hold_half", "name": "半资金持有", "allocation": 50}
-            )
-        settings = body.model_dump(mode="json", exclude={"current", "version_ids"})
         try:
-            market = market_snapshot(db, body.instrument_code, body.end_date)
+            market = market_snapshot(
+                db,
+                body.instrument_code,
+                body.end_date,
+                interval_start=body.start_date,
+            )
         except ValueError as exc:
             market = {"error": str(exc)}
-        rules = [c["rule"] for c in candidates if c.get("rule")]
-        external = external_snapshot(db, body.instrument_code, rules, body.end_date)
+        valuation_metrics = {
+            candidate["template"]["rule"]["value_metric"]
+            for candidate in candidates
+            if candidate.get("template")
+            and candidate["template"]["rule"]["value_metric"] != "none"
+        }
+        external = external_snapshot(
+            db,
+            body.instrument_code,
+            valuation_metrics,
+            body.end_date,
+        )
         snapshot = {
             "settings": settings,
             "candidates": candidates,
             "market": market,
             "external": external,
             "engine_version": ENGINE_VERSION,
-            "condition_version": CONDITION_VERSION,
-            "catalog_version": CATALOG_VERSION,
-            "condition_definitions": CONDITIONS,
+            "template_version": TEMPLATE_VERSION,
+            "turning_version": TURNING_VERSION,
             "data_version": DATA_VERSION,
         }
         tracks = []
@@ -398,10 +286,10 @@ def compare(body: ComparisonRequest):
                 "key": candidate["key"],
                 "name": candidate["name"],
                 "version_id": candidate.get("version_id"),
-                "rule": candidate.get("rule"),
+                "template": candidate.get("template"),
                 "allocation": candidate["allocation"],
-                "evidence_type": evidence_type(candidate["rule"])
-                if candidate.get("rule")
+                "evidence_type": "revised"
+                if candidate.get("template", {}).get("rule", {}).get("value_metric", "none") != "none"
                 else "historical",
             }
             try:
@@ -416,15 +304,11 @@ def compare(body: ComparisonRequest):
                 )
                 db.add(run)
                 db.flush()
-                if candidate.get("rule"):
-                    track["condition_diagnostics"] = candidate_diagnostics(
-                        candidate, snapshot, account
-                    )
                 track.update(
                     status="success",
                     backtest_id=run.backtest_run_id,
                     account=account,
-                    diagnostics=diagnostics(account, Decimal(settings["initial_cash"])),
+                    diagnostics=candidate_diagnostics(candidate, snapshot, account),
                 )
             except ValueError as exc:
                 track.update(status="failed", reason=str(exc))
@@ -478,12 +362,13 @@ def verify_comparison(comparison_id: int):
         snapshot = row.input_snapshot
         if (
             snapshot["engine_version"] != ENGINE_VERSION
-            or snapshot["condition_version"] != CONDITION_VERSION
+            or snapshot["template_version"] != TEMPLATE_VERSION
+            or snapshot["turning_version"] != TURNING_VERSION
             or snapshot["data_version"] != DATA_VERSION
             or digest(snapshot) != row.input_sha256
         ):
             raise HTTPException(
-                409, "比较输入摘要或引擎／条件／数据版本不一致，需要对应代码复算"
+                409, "比较输入摘要或引擎／模板／数据版本不一致，需要对应代码复算"
             )
         identical = True
         for candidate, track in zip(
@@ -491,12 +376,10 @@ def verify_comparison(comparison_id: int):
         ):
             try:
                 _, account, _ = execute_candidate(candidate, snapshot)
-                if "condition_diagnostics" in track:
-                    identical = (
-                        identical
-                        and candidate_diagnostics(candidate, snapshot, account)
-                        == track["condition_diagnostics"]
-                    )
+                if track["status"] == "success":
+                    identical = identical and candidate_diagnostics(
+                        candidate, snapshot, account
+                    ) == track["diagnostics"]
                 identical = (
                     identical
                     and track["status"] == "success"
@@ -523,6 +406,7 @@ def version_payload(db, version):
     return {
         "id": version.strategy_version_id,
         "strategy_id": version.strategy_id,
+        "algorithm_template_id": strategy.algorithm_template_id,
         "name": version.strategy_name,
         "version": version.version_number,
         "instrument_code": strategy.instrument_code,
@@ -551,66 +435,52 @@ def versions(instrument_code: str | None = None):
 
 @router.post("")
 def save_version(body: SaveRequest):
-    """从有效回测保存不可变版本，串行编号且不改变观察状态。"""
-    if not body.name.strip():
-        raise HTTPException(422, "策略名称不可为空")
+    """保存算法与ETF绑定及原回测，重复保存同一结果返回原记录。"""
     with Session() as db:
-        _require_instrument(db, body.instrument_code)
-        db.execute(
-            text("SELECT pg_advisory_xact_lock(:key)"),
-            {"key": 810000000 + int(body.instrument_code)},
-        )
         comparison = db.get(StrategyComparison, body.comparison_id)
+        if not comparison or digest(comparison.input_snapshot) != comparison.input_sha256:
+            raise HTTPException(422, "比较记录不存在或输入摘要异常")
+        track = next((t for t in comparison.result_snapshot["tracks"] if t["key"] == body.track_key), None)
+        if not track or track["status"] != "success" or not track.get("template"):
+            raise HTTPException(422, "只能保存成功的算法回测，持有参照或失败结果不可绑定")
+        template = track["template"]
+        template_id = template["id"]
+        if not is_shared_template(template_id, template["version"]):
+            raise HTTPException(422, "历史逐ETF规则只供复盘，请回测共享算法")
+        run = db.get(BacktestRun, track["backtest_id"])
         if (
-            not comparison
-            or comparison.instrument_code != body.instrument_code
-            or digest(comparison.input_snapshot) != comparison.input_sha256
+            not run
+            or run.instrument_code != comparison.instrument_code
+            or digest(run.input_snapshot) != run.input_sha256
+            or run.input_snapshot["settings"]["parameters"]["template"] != template
+            or template_snapshot(template_id, template["version"]) != template
         ):
-            raise HTTPException(422, "比较记录不存在、ETF不一致或输入摘要异常")
-        track = next(
-            (
-                t
-                for t in comparison.result_snapshot["tracks"]
-                if t["key"] == body.track_key
-            ),
-            None,
-        )
-        if not track or track["status"] != "success" or not track.get("rule"):
-            raise HTTPException(
-                422, "只能保存成功回测的自定义策略，参照或失败结果不可保存"
-            )
-        if body.strategy_id is not None:
-            strategy = db.get(SavedStrategy, body.strategy_id)
-            if not strategy or strategy.instrument_code != body.instrument_code:
-                raise HTTPException(422, "原策略不存在或绑定其他ETF")
-        else:
-            strategy = SavedStrategy(
-                instrument_code=body.instrument_code, created_at=now()
-            )
+            raise HTTPException(409, "算法回测快照不一致，请重新回测")
+        code = comparison.instrument_code
+        db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": 810000000 + int(code)})
+        strategy = db.scalar(select(SavedStrategy).where(
+            SavedStrategy.instrument_code == code, SavedStrategy.algorithm_template_id == template_id,
+        ))
+        if strategy is None:
+            strategy = SavedStrategy(instrument_code=code, algorithm_template_id=template_id, created_at=now())
             db.add(strategy)
             db.flush()
-        number = (
-            db.scalar(
-                select(func.max(SavedStrategyVersion.version_number)).where(
-                    SavedStrategyVersion.strategy_id == strategy.strategy_id
-                )
-            )
-            or 0
-        ) + 1
+        existing = db.scalar(select(SavedStrategyVersion).where(
+            SavedStrategyVersion.strategy_id == strategy.strategy_id,
+            SavedStrategyVersion.backtest_run_id == run.backtest_run_id,
+        ))
+        if existing is not None:
+            return version_payload(db, existing)
+        number = (db.scalar(select(func.max(SavedStrategyVersion.version_number)).where(
+            SavedStrategyVersion.strategy_id == strategy.strategy_id,
+        )) or 0) + 1
         version = SavedStrategyVersion(
-            strategy_id=strategy.strategy_id,
-            version_number=number,
-            strategy_name=body.name.strip(),
-            created_at=now(),
-            configuration={
-                "rule": deepcopy(track["rule"]),
-                "settings": deepcopy(comparison.input_snapshot["settings"]),
-            },
-            backtest_run_id=track["backtest_id"],
-            comparison_id=comparison.comparison_id,
+            strategy_id=strategy.strategy_id, version_number=number,
+            strategy_name=template["name"], created_at=now(),
+            configuration={"template": deepcopy(template), "settings": deepcopy(comparison.input_snapshot["settings"])},
+            backtest_run_id=run.backtest_run_id, comparison_id=comparison.comparison_id,
         )
         db.add(version)
-        db.flush()
         db.commit()
         return version_payload(db, version)
 
@@ -645,6 +515,8 @@ def enable(version_id: int, body: EnableRequest):
             observation = active[0]
             db.commit()
         else:
+            if strategy.algorithm_template_id is None:
+                raise HTTPException(422, "历史逐ETF规则只供复盘，请先保存共享算法")
             if active and not body.replace_active:
                 raise HTTPException(409, "这只ETF已有运行策略，确认替换后再启用")
             run = db.get(BacktestRun, version.backtest_run_id)
@@ -652,7 +524,7 @@ def enable(version_id: int, body: EnableRequest):
                 not run
                 or digest(run.input_snapshot) != run.input_sha256
                 or run.input_snapshot["engine_version"] != ENGINE_VERSION
-                or run.input_snapshot["strategy_version"] != CONDITION_VERSION
+                or run.input_snapshot["strategy_version"] != TEMPLATE_VERSION
             ):
                 raise HTTPException(409, "原回测版本或输入不一致，请重新回测并保存新版")
             for old in active:
@@ -663,7 +535,7 @@ def enable(version_id: int, body: EnableRequest):
                 "kind": "single_etf",
                 "strategy_version_id": version_id,
                 "settings": configuration["settings"],
-                "rule": configuration["rule"],
+                "template": configuration["template"],
                 "engine_version": ENGINE_VERSION,
             }
             batch = StrategyResearchBatch(
@@ -677,6 +549,13 @@ def enable(version_id: int, body: EnableRequest):
             )
             db.add(batch)
             db.flush()
+            from app.models import Candle
+
+            model_start = db.scalar(
+                select(func.max(Candle.date)).where(Candle.code == strategy.instrument_code)
+            )
+            if model_start is None:
+                raise HTTPException(409, "本地行情为空，无法初始化模型持仓状态")
             observation = StrategyObservation(
                 research_batch_id=batch.research_batch_id,
                 strategy_version_id=version_id,
@@ -686,21 +565,20 @@ def enable(version_id: int, body: EnableRequest):
                 rule_snapshot={
                     "key": f"saved:{version_id}",
                     "name": version.strategy_name,
-                    "strategy_key": "custom_conditions",
+                    "strategy_key": "algorithm_template",
                     "parameters": {
-                        "rule": configuration["rule"],
-                        "decision_start": run.input_snapshot["settings"]["parameters"][
-                            "decision_start"
-                        ],
+                        "template": configuration["template"],
+                        "decision_start": str(model_start),
+                        "slippage_bps": configuration["settings"]["slippage_bps"],
                     },
-                    "allocation": configuration["rule"]["allocation"],
                     "initial_cash": configuration["settings"]["initial_cash"],
                     "costs": {
                         key: configuration["settings"][key]
                         for key in ("commission_rate", "minimum_commission", "slippage_bps")
                     },
-                    "strategy_version": CONDITION_VERSION,
-                    "research_version": RESEARCH_VERSION,
+                    "strategy_version": TEMPLATE_VERSION,
+                    "algorithm_version": configuration["template"]["algorithm_version"],
+                    "turning_version": configuration["template"]["turning_version"],
                     "engine_version": ENGINE_VERSION,
                 },
             )

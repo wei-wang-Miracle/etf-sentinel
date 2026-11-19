@@ -101,10 +101,24 @@ REGISTRY = {
 
 def get_strategy(key):
     """查找注册策略；未知规则不能进入统一引擎。"""
-    if key == "custom_conditions" and key not in REGISTRY:
-        from app.strategy_conditions import CONDITION_VERSION, prepare_conditions
+    if key == "algorithm_template" and key not in REGISTRY:
+        from app.algorithm_templates import (
+            TEMPLATE_VERSION,
+            prepare_template,
+            validate_template_parameters,
+        )
 
-        REGISTRY[key] = {"metadata": {"key": key, "name": "中文条件策略", "version": CONDITION_VERSION, "description": "按显式买卖条件、组内全部或任一判断", "parameters": []}, "prepare": prepare_conditions}
+        REGISTRY[key] = {
+            "metadata": {
+                "key": key,
+                "name": "ETF多因子择时（实验）",
+                "version": TEMPLATE_VERSION,
+                "description": "使用不可编辑的ETF专属多因子模板",
+                "parameters": [],
+            },
+            "prepare": prepare_template,
+            "validate": validate_template_parameters,
+        }
     if key not in REGISTRY:
         raise ValueError("策略未注册")
     return REGISTRY[key]
@@ -112,17 +126,13 @@ def get_strategy(key):
 
 def strategy_catalog():
     """向统一页面提供已注册策略的中文名称、参数和版本。"""
-    return [entry["metadata"] for key, entry in REGISTRY.items() if key != "custom_conditions"]
+    return [entry["metadata"] for entry in REGISTRY.values()]
 
 
 def validate_parameters(key, parameters):
     """按注册参数约束校验，拒绝未知字段或越界值。"""
-    if key == "custom_conditions":
-        from app.strategy_conditions import validate_rule
-
-        if set(parameters) - {"rule", "external", "decision_start"} or "rule" not in parameters:
-            raise ValueError("自定义策略参数无效")
-        validate_rule(parameters["rule"])
+    if key == "algorithm_template":
+        get_strategy(key)["validate"](parameters)
         return
     definitions = get_strategy(key)["metadata"]["parameters"]
     if set(parameters) != {p["key"] for p in definitions}:

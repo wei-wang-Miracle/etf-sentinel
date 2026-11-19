@@ -4,7 +4,11 @@ from copy import deepcopy
 
 import pytest
 
-from app.backtest_data import parse_actions, validate_market
+from app.backtest_data import (
+    parse_actions,
+    post_split_rows,
+    validate_market,
+)
 
 
 def test_explicit_empty_action_tables_are_valid():
@@ -33,6 +37,13 @@ def test_cash_dividend_is_per_share_and_split_history_is_retained():
     assert actions["splits"][0]["effective_date"] == "2022-08-26"
     with pytest.raises(ValueError, match="权益"):
         parse_actions("<html>访问失败</html>")
+
+
+def test_same_day_record_and_ex_dividend_date_are_supported():
+    html = HTML.replace("2026-01-15</td><td>2026-01-16", "2026-01-15</td><td>2026-01-15")
+    actions = parse_actions(html)
+    assert actions["dividends"][0]["record_date"] == "2026-01-15"
+    assert actions["dividends"][0]["ex_date"] == "2026-01-15"
 
 
 def market():
@@ -68,6 +79,18 @@ def test_known_dividend_and_rounding_tolerance_pass_but_splits_block():
     bad["splits"] = [{"effective_date": "2026-01-15", "ratio": "1:2"}]
     with pytest.raises(ValueError, match="折算"):
         validate_market(rows, bad)
+
+
+def test_split_before_requested_interval_is_removed_before_validation():
+    rows = [
+        {"trade_date": day, "close": "1", "adjusted_close": "1"}
+        for day in ("2024-09-19", "2024-09-20", "2024-09-23")
+    ]
+    actions = [{"effective_date": "2024-09-20", "ratio": "1:0.4998"}]
+
+    filtered = post_split_rows(rows, actions, "2024-11-13")
+
+    assert [row["trade_date"] for row in filtered] == ["2024-09-23"]
 
 
 def test_zero_volume_and_invalid_prices_are_refused_as_unsupported_input():

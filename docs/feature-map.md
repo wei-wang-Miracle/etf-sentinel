@@ -2,7 +2,7 @@
 
 本文是 ETF Sentinel 功能归属和状态的统一入口，由开发代理随每次功能变更维护。
 平台定位与使用方式见 [README](../README.md)，协作规则见 [AGENTS](../AGENTS.md)。
-当前已实现首期标的配置、历史日行情采集、日 K、行业恐贪、国家队持仓和配置内 ETF 实盘持仓/成交同步展示，已实现动态资格的均线规则、统一回测与单ETF复盘，已有观察版本的盘前日计划和真实累计成交人工核对，不提供自动交易。
+当前已实现首期标的配置、历史日行情采集、日 K、行业恐贪、国家队持仓和配置内 ETF 实盘持仓/成交同步展示，已实现动态资格的均线规则、共享算法比较、ETF绑定与单ETF复盘，启用的算法绑定可生成盘前日计划并人工核对真实累计成交，不提供自动交易。
 
 ## 业务域边界
 
@@ -30,12 +30,12 @@
 | 功能 | 主归属 | 状态 | 依赖与边界 | 设计或实现入口 |
 | --- | --- | --- | --- | --- |
 | 研究图表维度与信息层级 | 投研分析 | 已实现 | 四维度横向标签、键盘切换、URL 恢复与按需加载；常规口径收于图后折叠说明，实际错误和缺失保留可见；国家队源不支持的 ETF 解释覆盖限制，不引导无效采集 | [研究对象](../web/src/pages/ResearchObject.tsx)、[使用说明](research-workbench.md#研究对象)、[浏览器回归](../web/tests/research.spec.ts) |
-| 策略条件指标说明 | 策略研究 | 已实现 | 左侧指标栏统一打开说明弹层，切换查看十七类指标含义、解读、计算、来源及限制；覆盖与缺失原因集中展示，条件卡片只保留必要状态；关闭后返回焦点，不改变计算与阈值 | [使用说明](single-etf-strategies.md#指标说明)、[配置台](../web/src/components/StrategyFactorBuilder.tsx)、[说明内容](../web/src/lib/strategyIndicatorHelp.ts) |
+| 策略条件指标说明 | 策略研究 | 已移除 | 我的策略不再向用户提供指标条件配置或覆盖诊断面板；固定算法的指标定义与规则说明仍可从算法入口查看 | [共享算法策略](single-etf-strategies.md)、[说明页](../web/src/components/AlgorithmGuide.tsx) |
 | 模拟买卖点与每日仓位副图 | 策略研究 | 已实现 | 复用所选策略冻结账本，0%至100%收盘仓位中性色柱，与日 K、买卖点、缩放联动；半资金按完整账户计算，缺失不补零，真实标记不改变模拟仓位；其他行情保留成交量 | [仓位设计](superpowers/specs/2026-11-09-strategy-position-chart-design.md)、[比较图](../web/src/components/StrategyComparison.tsx)、[图表验证](../web/tests/position-chart.spec.ts) |
-| 指标来源分类与日 K 微观条件 | 策略研究 | 已实现 | 四来源十七类指标；新增双均线、均线方向、穿越、均量比和区间突破，历史／盘前共用因果计算；比较保存逐条件及整组满足天数、模拟成交次数，兼容旧快照 | [指标设计](superpowers/specs/2026-11-09-strategy-micro-factors-design.md)、[计算引擎](../api/app/strategy_conditions.py) |
-| 创建策略因子拖拽配置 | 策略研究 | 已实现 | 默认完整指标库，拖拽复制或点击加入买入／卖出组；桌面一屏并排配置、长条件组内滚动，窄屏点击添加；沿用每组全部／任一满足、1至20条和原草稿／比较格式 | [配置台设计](superpowers/specs/2026-11-09-strategy-factor-builder-design.md)、[配置台](../web/src/components/StrategyFactorBuilder.tsx)、[浏览器验证](../web/tests/factor-builder.spec.ts) |
-| 面向个人的单 ETF 策略流程 | 策略研究 | 已实现 | 三入口与单ETF流程；支持非持仓ETF，中文条件配置、回测比较、保存启用和每日信号；不做组合，不改写历史结果；落地五步指引与按状态下一步提示；旧单次回测与持仓候选创建已下线，共用引擎/信号保留 | [单ETF流程设计稿](superpowers/specs/2026-11-07-single-etf-strategy-journey-design.md)、[我的策略页](../web/src/pages/MyStrategies.tsx) |
-| 同 ETF 自定义策略对比 | 策略研究 | 已实现 | 属于单ETF流程，依赖策略版本、统一回测及真实复盘；版本详情读取保存时快照，可直接选择已保存版本调整区间、本金和成本重算，无需创建策略、不写编辑草稿，保留原结果和启用状态；策略列表与每日信号之间可往返；真实收益可比时作参照，缺失不阻断策略比较，不凭历史收益推断策略归属 | [策略对比设计](superpowers/specs/2026-11-07-single-etf-strategy-journey-design.md#51-同一只-etf-的自定义策略对比)、[版本详情](../web/src/components/StrategyVersion.tsx)、[操作回归](../web/tests/strategy.spec.ts) |
+| 指标来源分类与日 K 微观条件 | 策略研究 | 已移除 | 旧自定义策略的条件配置与逐条件诊断已不属于当前用户流程，相关保存记录由迁移0014清理；固定模板内部因子不开放编辑 | [共享算法策略](single-etf-strategies.md) |
+| 创建策略因子拖拽配置 | 策略研究 | 已移除 | 因子拖拽配置页面、专属说明和用户条件草稿流程已删除；用户通过算法回测、保存绑定并显式启用后生成信号 | [共享算法策略](single-etf-strategies.md) |
+| 面向个人的单 ETF 策略流程 | 策略研究 | 已实现 | 支持非持仓 ETF，选择当前算法、查看详细说明、比较回测、保存独立回测记录、显式启用和查看每日信号；只允许调整研究区间，不支持组合或内部参数编辑 | [算法规则说明](single-etf-strategies.md)、[当前算法说明页](../web/src/components/AlgorithmGuide.tsx)、[我的策略页](../web/src/pages/MyStrategies.tsx) |
+| 同 ETF 共享算法比较 | 策略研究 | 已实现 | 对比当前共享算法与持有参照；历史记录保留内部规则快照用于复核，用户不选择历史算法版本；保存只接受成功的模板回测，启用仍需明确操作 | [算法规则说明](single-etf-strategies.md)、[比较页](../web/src/components/StrategyComparison.tsx)、[绑定详情](../web/src/components/StrategyVersion.tsx)、[操作回归](../web/tests/strategy.spec.ts) |
 | 前后端工程初始化 | 工程基础 | 已实现 | 已扩展业务页面、迁移及采集；Docker Hub 连接受阻，三容器启动未验证 | [前端](../web/src/App.tsx)、[API](../api/app/main.py)、[Compose](../compose.yaml)、[初始化清单](superpowers/plans/2026-11-05-initialize.md) |
 | 投研简报视觉融合 | 工程基础 | 已实现 | 暖纸亮色、宋体标题、朱红操作强调、连续指标条；保留暗色和业务语义色 | [设计契约](design-contract.md)、[主题变量](../web/src/styles/tokens.css) |
 | ETF 研究案卷重设计 | 工程基础 | 已实现 | 协作投研、策略、信号、复盘及数据域；对象与日期连续、单对象标题、三阶段策略、只读快照、适用与历史信号、双主题及键盘读数；不改变投资或任务规则 | [总设计](../DESIGN.md)、[实施验收](design/frontend-validation.md) |
@@ -45,6 +45,9 @@
 | 20只 ETF 统一标的配置 | 数据基础 | 已实现 | 原五只与国家队18只去重，采集开关、起点、覆盖范围 | [配置页](../web/src/pages/Instruments.tsx)、[功能说明](daily-data.md) |
 | 定时历史日行情采集入库 | 数据基础 | 已实现 | PostgreSQL、ChatBI；回补、增量、互斥和区间重试 | [采集](../api/app/collection.py)、[调度](../api/app/jobs.py)、[迁移](../api/migrations/versions/0001_daily_data.py) |
 | 日 K 与成交量展示 | 投研分析 | 已实现 | 依赖本地行情；MA5/10/20/30/60、同色成交量、可追溯图注；不提供实时或推断复权 | [行情页](../web/src/pages/Market.tsx)、[图表](../web/src/components/KLine.tsx) |
+| ETF分类斜率与结构顶底确认 | 投研分析 | 已实现 | 按20只ETF跟踪指数分为六类，在K线上仅标底部／顶部确认；各类使用独立历史拟合参数。50轮后总体58.1%（61/105），近期观察不足以证明80%。服务端复用对应因果事件版本作为多因子模板的结构票；图表确认点不等于实际交易 | [指标说明](turning-points.md)、[50轮分类检验](turning-points-validation.md)、[分类和参数](../web/src/lib/turningCategories.ts)、[计算](../web/src/lib/turningPoints.ts)、[图表](../web/src/components/EtfTurningChart.tsx) |
+| 共享算法库与ETF绑定 | 策略研究 | 已实现 | 固定算法跨ETF共用；同ETF统一比较多个算法及持有参照；回测成功后可保存算法与ETF的绑定，显式启用独立进行 | [共享算法策略](single-etf-strategies.md)、[工作台](../web/src/pages/MyStrategies.tsx) |
+| 逐ETF多因子历史研究 | 策略研究 | 已实现 | 旧实验50轮拟合总体88.8%（166/187），已观察区间64.3%（27/42）；只作历史证据，不是新算法指标或未来胜率。原冻结记录可复盘 | [历史报告](multifactor-research-validation.md)、[算法](../api/app/multifactor_research.py) |
 | A股图表规范与可追溯图注 | 投研分析 | 已实现 | 跨行情、国家队、回测、恐贪；红涨绿跌、均线、执行日买卖标记、图注与免责声明；复权口径未确认时不冒充前复权 | [设计契约](design-contract.md#klinechart)、[图注](../web/src/components/ChartCaption.tsx)、[图表工具](../web/src/lib/chart.ts) |
 | 行业恐贪历史采集 | 数据基础 | 已实现 | 独立数据源与任务；首次五年，后续增量 | [行业恐贪说明](industry-sentiment.md) |
 | 行业恐贪概览与历史展示 | 投研分析 | 已实现 | 依赖行业恐贪入库；情绪着色、双轴合图，不直接生成信号 | [行业恐贪说明](industry-sentiment.md) |
@@ -58,8 +61,8 @@
 | 全账户复盘与现金基线 | 投资记录与复盘 | 待讨论 | 需要现金余额、配置外持仓、LOF/逆回购；当前不实施 | [设计](superpowers/specs/2026-11-06-real-account-review-design.md) |
 
 | 8个关联指数五类估值及指数日K采集 | 数据基础 | 已实现 | 20ETF映射去重、任务4、增量写入、修订证据、失败恢复 | [指数估值说明](index-valuations.md)、[采集](../api/app/index_collection.py) |
-| 指数估值与走势对照 | 投研分析 | 已实现 | 中文图表优先、来源分位与本地十日历年回看分位分开；单ETF自定义条件支持修订历史研究，不声称原时点已知 | [估值页](../web/src/pages/IndexValuations.tsx)、[设计](superpowers/specs/2026-11-06-index-valuation-design.md) |
-| 研究对象详情合并 | 投研分析 | 已实现 | ETF唯一主体、旧指数URL映射关联ETF、分区懒加载、五估值、情绪背景、国家队、个人摘要、研究入口与URL迁移；自定义策略条件见单ETF策略说明 | [设计](superpowers/specs/2026-11-06-research-object-design.md)、[页面](../web/src/pages/ResearchObject.tsx) |
+| 指数估值与走势对照 | 投研分析 | 已实现 | 中文图表优先、来源分位与本地十日历年回看分位分开；修订历史不声称原时点已知，共享算法初版不使用估值分位 | [估值页](../web/src/pages/IndexValuations.tsx)、[设计](superpowers/specs/2026-11-06-index-valuation-design.md) |
+| 研究对象详情合并 | 投研分析 | 已实现 | ETF唯一主体、旧指数URL映射关联ETF、分区懒加载、五估值、情绪背景、国家队、个人摘要、研究入口与URL迁移；策略只能通过固定模板生成，不开放条件配置 | [设计](superpowers/specs/2026-11-06-research-object-design.md)、[页面](../web/src/pages/ResearchObject.tsx) |
 | 横向同维度对比 | 投研分析 | 已实现 | 当前持仓默认／全部配置切换，ETF关联估值、资金与趋势；情绪单列背景；同日排名、共享指数提示、六线图、热力图与URL | [设计](superpowers/specs/2026-11-06-cross-comparison-design.md)、[页面](../web/src/pages/Compare.tsx) |
 
 分析页采用紧凑筛选与图表优先布局，移除底部数据明细表；配置与日志保留。

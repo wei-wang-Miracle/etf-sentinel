@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import KLine from "../components/KLine";
+import EtfTurningChart from "../components/EtfTurningChart";
 import ChartCaption from "../components/ChartCaption";
 import { api, type Candle, type Instrument } from "../lib/api";
 import { chartStamp } from "../lib/chart";
@@ -30,7 +30,7 @@ export default function Market({
   const [code, setCode] = useState("510500");
   const [start, setStart] = useState(daysAgo(365));
   const [end, setEnd] = useState(daysAgo(1));
-  const [rows, setRows] = useState<Candle[]>([]);
+  const [history, setHistory] = useState<Candle[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [retry, setRetry] = useState(0);
@@ -48,9 +48,9 @@ export default function Market({
       setLoading(false);
       return;
     }
-    api<Candle[]>(`/candles/${code}?start=${start}&end=${end}`)
+    api<Candle[]>(`/candles/${code}?start=1990-01-01&end=${end}`)
       .then((data) => {
-        if (active) setRows(data);
+        if (active) setHistory(data);
       })
       .catch((e) => {
         if (active) setError(e.message);
@@ -63,6 +63,7 @@ export default function Market({
     };
   }, [code, start, end, retry]);
   const item = instruments.find((i) => i.code === code);
+  const rows = history.filter(row => row.date >= start && row.date <= end);
   const last = rows.at(-1);
   const changeClass =
     last?.change_pct == null
@@ -188,7 +189,7 @@ export default function Market({
               title={`${code} · 日线 · 复权口径未确认`}
               meta={`${start} ~ ${end} · 均线 MA5/10/20/30/60（按源收盘计算） · 来源：${item?.source === "ChatBI" ? "财通证券历史日行情（ChatBI）" : item?.source ?? "财通证券历史日行情"} · 生成：${chartStamp()}`}
             />
-            <KLine rows={rows} theme={theme} />
+            <EtfTurningChart history={history} start={start} end={end} theme={theme} instrumentCode={code} />
           </>
         )}
         <div className="panel-footer">

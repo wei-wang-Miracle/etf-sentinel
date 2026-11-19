@@ -23,7 +23,6 @@ const snapshot = { ...comparison, tracks: [half, full] };
 async function openComparison(page: Page, value: unknown = snapshot) {
   await page.route("**/api/strategies/comparisons", (route) => json(route, value));
   await page.goto("/?page=strategies&code=510500&view=editor");
-  await page.getByRole("button", { name: "下一步：回测比较", exact: true }).click();
   await page.getByRole("button", { name: "运行回测", exact: true }).click();
   await expect(page.getByRole("heading", { name: "半资金测试 · 模拟买卖点", exact: true })).toBeVisible();
 }

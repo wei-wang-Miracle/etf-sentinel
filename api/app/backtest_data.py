@@ -77,7 +77,7 @@ def parse_actions(html):
                     raise ValueError("权益分红表结构不匹配")
                 record, ex, pay = (date.fromisoformat(row[i]) for i in (1, 2, 4))
                 match = re.fullmatch(r"每10份派现金([\d.]+)元", row[3])
-                if not match or not record < ex <= pay:
+                if not match or not record <= ex <= pay:
                     raise ValueError("权益日期或分红单位不符合预期")
                 cash = Decimal(match[1]) / 10
                 if not cash.is_finite() or cash <= 0:
@@ -146,6 +146,23 @@ def trading_days(start, end):
     except ValueError:
         raise ValueError("交易日期超出当前日历覆盖，请升级并核实日历") from None
     return days, f"上海交易日历/交易所日历库{calendars.__version__}"
+
+
+def post_split_rows(rows, splits, interval_start):
+    """排除研究区间开始前的折算行情，并从折算后重新预热。
+
+    研究区间内的折算仍由 ``validate_market`` 拒绝；这里只处理已经发生在
+    区间开始前的事件，避免把不参与交易的折算前行情送入质量校验。
+    """
+    prior = [
+        event["effective_date"]
+        for event in splits
+        if event["effective_date"] < str(interval_start)
+    ]
+    if not prior:
+        return rows
+    cutoff = max(prior)
+    return [row for row in rows if row["trade_date"] > cutoff]
 
 
 def validate_market(rows, actions):

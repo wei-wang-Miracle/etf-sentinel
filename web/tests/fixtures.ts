@@ -8,36 +8,22 @@ export const instruments = ["510500", "512100"].map((code, index) => ({
 }));
 export const catalog = {
   instruments: instruments.map((item) => ({ instrument_code: item.code, instrument_name: item.name,
-    first_date: item.first_date, last_date: item.last_date, default_start: "2025-01-02", source_checked_through: "2026-11-06" })),
-  conditions: [
-    { key: "trend", label: "含分红走势相对均线", display_label: "均线乖离率", unit: "%", window: true, description: "含分红走势相对均线的偏离", evidence_type: "historical" },
-    { key: "momentum", label: "含分红走势动量", unit: "%", window: true, description: "回看区间变化", evidence_type: "historical" },
-    { key: "volatility", label: "过去N日年化波动率", unit: "%", window: true, description: "价格起伏幅度", evidence_type: "historical" },
-    { key: "ma_spread", label: "双均线乖离率", unit: "%", window: true, description: "测试日K衍生指标", evidence_type: "historical" },
-    { key: "ma_slope", label: "均线变化率", unit: "%", window: true, description: "测试日K衍生指标", evidence_type: "historical" },
-    { key: "price_cross", label: "价格穿越均线", unit: "事件", window: true, description: "测试日K衍生指标", evidence_type: "historical" },
-    { key: "ma_cross", label: "双均线交叉", unit: "事件", window: true, description: "测试日K衍生指标", evidence_type: "historical" },
-    { key: "volume_ratio", label: "日成交量相对均量", unit: "倍", window: true, description: "测试日K衍生指标", evidence_type: "historical" },
-    { key: "volume_ma_ratio", label: "短长均量比", unit: "倍", window: true, description: "测试日K衍生指标", evidence_type: "historical" },
-    { key: "breakout", label: "收盘区间突破", unit: "事件", window: true, description: "测试日K衍生指标", evidence_type: "historical" },
-    { key: "pe_percentile", label: "市盈率本地分位", unit: "%", window: false, description: "本地十年分位", evidence_type: "revised" },
-    { key: "pb_percentile", label: "指数PB本地历史分位", unit: "%", window: false, description: "本地十年分位", evidence_type: "revised" },
-    { key: "dividend_yield", label: "指数股息率", unit: "%", window: false, description: "源股息率", evidence_type: "revised" },
-    { key: "roe", label: "指数净资产收益率", unit: "%", window: false, description: "源ROE", evidence_type: "revised" },
-    { key: "risk_premium", label: "指数股债风险溢价", unit: "百分点", window: false, description: "源风险溢价", evidence_type: "revised" },
-    { key: "national_team_change", label: "国家队估算比例变化", unit: "百分点", window: true, description: "估算比例变化", evidence_type: "revised" },
-    { key: "sentiment", label: "指定类别恐贪分数", unit: "分", window: false, description: "指定市场背景", evidence_type: "revised" },
-  ],
-  sentiment_categories: [{ key: "wide", name: "测试宽基" }],
+    first_date: item.first_date, last_date: item.last_date, default_start: "2025-01-02", default_end: item.last_date, source_checked_through: "2026-11-06" })),
+  templates: [["range_breakout", "箱体突破"], ["bottom_confirmation", "底部确认"]].map(([id, name]) => ({
+    id, version: "1.0.0", name, status: "experimental", description: `${name}的测试规则`,
+    supported_instruments: ["510500", "512100"], note: "回测不代表未来收益。",
+  })),
 };
-export const rule = {
-  buy: { mode: "all", conditions: [{ indicator: "trend", window: 60, operator: "gt", threshold: "0" }] },
-  sell: { mode: "any", conditions: [{ indicator: "trend", window: 60, operator: "lte", threshold: "0" }] }, allocation: 100,
+export const template = {
+  id: "range_breakout", version: "1.0.0", name: "箱体突破", status: "experimental",
+  rule: { family: "breakout", fast: 5, slow: 60, buy_votes: 3, value_max: 80 },
+  algorithm_version: "multifactor-v1", turning_version: "slope-structure-paired-v3",
+  note: "回测不代表未来收益。",
 };
 export const settings = { instrument_code: "510500", start_date: "2025-01-02", end_date: "2026-11-06",
   initial_cash: "50000", commission_rate: "0.0001", minimum_commission: "0", slippage_bps: "5" };
-export const savedVersion = { id: 10, strategy_id: 1, name: "测试趋势", version: 1, instrument_code: "510500",
-  rule, settings, backtest_id: 1, active: false, observation_id: 11, created_at: "2026-11-06T08:00:00Z" };
+export const savedVersion = { id: 10, strategy_id: 1, algorithm_template_id: "range_breakout", name: "箱体突破", version: 1, instrument_code: "510500",
+  template, settings, backtest_id: 1, comparison_id: 5, active: false, observation_id: 11, created_at: "2026-11-06T08:00:00Z" };
 export const holdings = { as_of: "2026-11-06", items: instruments.map((item) => ({
   instrument_code: item.code, instrument_name: item.name, current_amount: 1000, enable_amount: 1000,
   market_value: 5000, cost_price: 4, latest_close_date: "2026-11-06",
@@ -50,17 +36,16 @@ export const candles = Array.from({ length: 80 }, (_, index) => {
 });
 export const comparison = {
   id: 5, instrument_code: "510500", created_at: "2026-11-06T08:00:00Z", settings,
-  input_sha256: "test-input-snapshot", complete: true,
+  input_sha256: "test-input-snapshot", complete: true, data_cutoff: "2026-11-06",
+  note: "测试模板回测结果，不代表未来表现。",
   market_rows: candles.map(({ date, ...rest }) => ({ ...rest, trade_date: date })),
-  tracks: [{ condition_diagnostics: { decision_start: "2025-01-01", decision_end: "2026-11-05", days: 80, buy_trades: 0, sell_trades: 0,
-    buy: { mode: "all", matched_days: 8, missing_days: 0, conditions: [{ label: "均线乖离率", matched_days: 8, valid_days: 80, missing_days: 0 }] },
-    sell: { mode: "any", matched_days: 5, missing_days: 0, conditions: [{ label: "均线乖离率", matched_days: 5, valid_days: 80, missing_days: 0 }] },
-  }, key: "current", name: "当前草稿", status: "success", evidence_type: "historical", account: {
+  tracks: [{ key: "template:range_breakout:1.0.0", backtest_id: 1, name: template.name, status: "success", template, allocation: 100, account: {
     daily: candles.map((row, index) => ({ trade_date: row.date, nav: 1 + index / 1000, drawdown: 0,
       cash: "0", quantity: 10000, equity: "51000", position_weight: 1, reason: "测试", execution_note: "", dividend_receivable: "0" })),
     trades: [], metrics: { total_return: 0.05, max_drawdown: -0.03, final_equity: "52500", trade_count: 2,
       commission: "5", slippage_cost: "10", turnover: 1, annual_return: 0.03, annual_volatility: 0.1 },
-  }, diagnostics: { time_in_market: 0.8, completed_rounds: 1, open_rounds: 0 } }],
+  }, diagnostics: { time_in_market: 0.8, completed_rounds: 1, open_rounds: 0,
+    rounds: [{ entry_date: "2025-02-03", exit_date: "2025-03-03", pnl: "250.00" }] } }],
 };
 export function summary(code = "510500") {
   return { object: { type: "etf", code, name: instruments.find((item) => item.code === code)?.name },
@@ -83,12 +68,12 @@ export async function mockApi(page: Page) {
     if (path.startsWith("/account/review/")) return json(route, { actual: { status: "not_applicable", reasons: ["测试：尚无可核算的真实成交"] },
       markers: [], start: settings.start_date, end: settings.end_date, quality: { issues: [] }, comparability: "测试数据不代表真实收益" });
     if (path === "/strategies/catalog") return json(route, catalog);
-    if (path === "/strategies/coverage") return json(route, { conditions: catalog.conditions.map((item) => ({ key: item.key,
-      status: item.evidence_type, first_date: "2024-01-02", last_date: "2026-11-06" })) });
-    if (path.startsWith("/strategies/drafts/")) return json(route, null);
     if (path === "/strategies/comparisons") return json(route, request.method() === "POST" ? comparison : []);
     if (path === "/strategies") return json(route, request.method() === "POST" ? savedVersion : []);
     if (/\/strategies\/\d+\/enable/.test(path)) return json(route, { ...savedVersion, active: true });
+    if (/\/strategies\/\d+\/pause/.test(path)) return json(route, { ...savedVersion, active: false });
+    if (/\/strategies\/comparisons\/\d+$/.test(path)) return json(route, comparison);
+    if (/\/strategies\/comparisons\/\d+\/verify$/.test(path)) return json(route, { identical: true });
     if (path === "/strategy-lab/signals" || path === "/strategy-lab/observations") return json(route, []);
     if (path.endsWith("/job") || path === "/job") return json(route, job);
     if (path === "/research/universe") return json(route, { items: instruments.map((item) => ({ ...item, held: true })), default_code: "510500" });

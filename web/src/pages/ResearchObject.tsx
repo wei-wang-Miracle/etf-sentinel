@@ -2,6 +2,7 @@ import { useState } from "react";
 import ChartCaption from "../components/ChartCaption";
 import Tabs from "../components/Tabs";
 import KLine from "../components/KLine";
+import EtfTurningChart from "../components/EtfTurningChart";
 import ValuationChart from "../components/ValuationChart";
 import { type Candle } from "../lib/api";
 import type { ValuationPoint } from "./IndexValuations";
@@ -42,13 +43,14 @@ export default function ResearchObject({ theme, code, summary, loading, error, r
   const index = summary?.linked.index_code;
   const category = summary?.summary.sentiment.find((item) => item.category_key === query.category) ?? summary?.summary.sentiment[0];
   const range = `start=${start}&end=${end}`;
-  const path = !summary || !validDates ? null : tab === "price" ? `/candles/${code}?${range}`
+  const path = !summary || !validDates ? null : tab === "price" ? `/candles/${code}?start=1990-01-01&end=${end}`
     : tab === "valuation" ? index ? `/index-valuations/series/${index}?${range}&metric=${metric}` : null
       : tab === "funds" ? summary.linked.national_team_tracked ? `/national-team/series/${code}?${range}` : null
         : category ? `/sentiment/series/${category.category_key}?${range}` : null;
   const plot = useApiResource<Candle[] | ValuationData | NationalData | SentimentDaily[]>(path);
   const actual = useApiResource<ReviewMarkers>(tab === "price" && showActual && validDates ? `/account/review/${code}?${range}` : null);
-  const candles = tab === "price" ? (plot.data as Candle[] | undefined) ?? [] : tab === "funds" ? (plot.data as NationalData | undefined)?.candles ?? [] : [];
+  const history = tab === "price" ? (plot.data as Candle[] | undefined) ?? [] : [];
+  const candles = tab === "price" ? history.filter(row => row.date >= start && row.date <= end) : tab === "funds" ? (plot.data as NationalData | undefined)?.candles ?? [] : [];
   const valuation = tab === "valuation" ? plot.data as ValuationData | undefined : undefined;
   const national = tab === "funds" ? plot.data as NationalData | undefined : undefined;
   const sentiment = tab === "sentiment" ? plot.data as SentimentDaily[] | undefined : undefined;
@@ -89,9 +91,8 @@ export default function ResearchObject({ theme, code, summary, loading, error, r
         {!validDates ? <div className="empty" role="alert">请选择有效的起止日期，起始日期不能晚于截止日期。</div> : nationalUnsupported ? <div className="empty"><h2>该 ETF 不在国家队数据源范围内</h2><p>数据源仅提供18只ETF，不包含 {code}；重新采集不会产生该标的数据。可在顶部切换至源支持的 ETF，如 510500 或 512100。</p></div> : unavailable ? <div className="empty"><p>{unavailable}</p><a href={dataManagementUrl("jobs", tasks[tab], code)}>检查对应数据任务</a></div>
           : plot.loading ? <div className="chart-loading skeleton-state" role="status">正在读取所选区间…</div> : plot.error ? <div className="empty" role="alert"><p>所选区间读取失败：{plot.error}</p><button onClick={plot.retry}>重试图表</button><a href={dataManagementUrl("jobs", tasks[tab], code)}>检查对应数据任务</a></div>
             : !hasPlot ? <div className="empty"><h2>所选区间暂无数据</h2><p>可以调整日期，或检查对应采集任务。</p><a href={dataManagementUrl("jobs", tasks[tab], code)}>检查对应数据任务</a></div> : <>
-              {tab === "price" && <div className="chart-local-controls"><span className="muted">日 K · MA5 / 10 / 20 / 30 / 60</span><label><input type="checkbox" checked={showActual} onChange={(event) => setShowActual(event.target.checked)} />叠加真实操作</label></div>}
               {actual.error && <p className="notice warning">真实操作标记暂不可用，行情仍可查看。<button onClick={actual.retry}>重试标记</button></p>}
-              {tab === "price" ? <KLine rows={candles} theme={theme} trades={showActual ? actual.data?.markers : []} />
+              {tab === "price" ? <EtfTurningChart history={history} start={start} end={end} theme={theme} instrumentCode={code} trades={showActual ? actual.data?.markers : []} controls={<label><input type="checkbox" checked={showActual} onChange={event => setShowActual(event.target.checked)} />叠加真实操作</label>} />
                 : tab === "valuation" ? <ValuationChart rows={valuation!.series} candles={valuation!.candles} title={metrics[metric].name} unit={metrics[metric].unit} theme={theme} />
                   : tab === "funds" ? <><KLine rows={candles} holdings={national!.holdings} theme={theme} />{!candles.length && <p className="notice warning">区间缺少本地日 K，仅展示估算比例，不伪造 ETF 价格。</p>}</>
                     : <SentimentTrend rows={sentiment!} theme={theme} />}

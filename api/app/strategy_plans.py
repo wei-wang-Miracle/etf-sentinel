@@ -1,15 +1,15 @@
-"""自定义单ETF策略的盘前证据与参考份额，沿用任务5和人工成交核对。"""
+"""单ETF算法模板的盘前证据与参考份额，沿用任务5和人工成交核对。"""
 
 from decimal import ROUND_CEILING, Decimal
 
 from sqlalchemy import select
 
 from app.account_state import latest_holdings
+from app.algorithm_templates import TEMPLATE_VERSION, prepare_template
 from app.backtest import ENGINE_VERSION
 from app.backtest_routes import digest
 from app.db import Session
 from app.models import AccountSyncRun, StrategyObservation, StrategySignal
-from app.strategy_conditions import CONDITION_VERSION, prepare_conditions
 from app.strategy_inputs import external_snapshot, market_snapshot
 
 
@@ -27,20 +27,28 @@ def make_saved_plan(db, observation, at, cutoff, execution):
         计划与完整输入证据；计划并非订单，未知仓位不能伪装零仓。
 
     Raises:
-        ValueError: 版本、行情、权益或条件输入不满足计算要求。
+        ValueError: 版本、行情、权益或估值输入不满足计算要求。
     """
     rule = observation.rule_snapshot
-    if (
-        rule["engine_version"] != ENGINE_VERSION
-        or rule["strategy_version"] != CONDITION_VERSION
-    ):
-        raise ValueError("策略或引擎版本变化，请重新回测并保存新版")
-    market = market_snapshot(db, observation.instrument_code, cutoff, at)
+    if rule["engine_version"] != ENGINE_VERSION or rule["strategy_version"] != TEMPLATE_VERSION:
+        raise ValueError("算法模板或引擎版本变化，请重新回测并保存新版")
+    market = market_snapshot(
+        db,
+        observation.instrument_code,
+        cutoff,
+        at,
+        interval_start=rule["parameters"].get("decision_start"),
+    )
+    value_metric = rule["parameters"]["template"]["rule"]["value_metric"]
     external = external_snapshot(
-        db, observation.instrument_code, [rule["parameters"]["rule"]], cutoff, at
+        db,
+        observation.instrument_code,
+        [value_metric] if value_metric != "none" else [],
+        cutoff,
+        at,
     )
     parameters = {**rule["parameters"], "external": external}
-    prepared = prepare_conditions(
+    prepared = prepare_template(
         market["rows"], market["actions"]["dividends"], parameters
     )
     point = prepared[-1]
@@ -49,7 +57,7 @@ def make_saved_plan(db, observation, at, cutoff, execution):
         for row, p in zip(market["rows"], prepared, strict=True)
         if row["trade_date"] >= parameters.get("decision_start", str(cutoff))
     ):
-        raise ValueError("当前规则条件数据缺失、过期或预热不足；不沿用旧方向")
+        raise ValueError("算法模板数据缺失、过期或预热不足；不沿用旧方向")
     if market["rows"][-1]["trade_date"] != str(cutoff):
         raise ValueError("上一完整交易日行情缺失或迟到")
     decision = point["decision"]
@@ -81,7 +89,7 @@ def make_saved_plan(db, observation, at, cutoff, execution):
     actual = (holding.current_amount if holding else Decimal(0)) if fresh else None
     available = (holding.enable_amount if holding else Decimal(0)) if fresh else None
     initial = Decimal(rule["initial_cash"])
-    capital = initial * Decimal(rule["allocation"]) / 100
+    capital = initial
     reference = Decimal(market["rows"][-1]["close"])
     price = (
         reference
@@ -163,11 +171,10 @@ def make_saved_plan(db, observation, at, cutoff, execution):
         "action": action,
         "rule_target": decision.target,
         "new_trigger": not prior
-        or prior.plan_snapshot["target_weight"]
-        != decision.target * rule["allocation"] / 100,
-        "target_weight": decision.target * rule["allocation"] / 100,
+        or prior.plan_snapshot["target_weight"] != decision.target,
+        "target_weight": decision.target,
         "target_quantity": target,
-        "position_basis": "持续持有沿用本轮参考份额，不每日调仓或动用储备补仓"
+        "position_basis": "持续持有沿用本轮参考份额，不每日调仓；模型参考成本不等于真实持仓成本"
         if continuing
         else "按研究预算和决策收盘估算参考整手，非真实现金路径或订单",
         "initial_cash": str(initial),
@@ -180,11 +187,13 @@ def make_saved_plan(db, observation, at, cutoff, execution):
         "planned_quantity": str(executable),
         "reason": decision.reason,
         "conditions": {
-            "buy": point["indicators"]["buy"],
-            "sell": point["indicators"]["sell"],
+            side: [
+                {"label": key, "satisfied": value, "value": value}
+                for key, value in point["indicators"][side].items()
+            ]
+            for side in ("buy", "sell")
         },
         "indicators": point["indicators"],
-        "factors": {},
         "funding_check_required": action == "buy",
         "availability_limited": executable < requested,
         "warnings": warnings,
@@ -193,7 +202,7 @@ def make_saved_plan(db, observation, at, cutoff, execution):
 
 
 def prepare_signal_dependencies():
-    """任务5独立补齐已启用自定义策略权益和账户，失败返回安全原因。
+    """任务5独立补齐已启用模板的权益和账户，失败返回安全原因。
 
     仅写本地采集结果；外部行情和账户接口只读，日志不包含凭据。
     """
@@ -257,7 +266,12 @@ def review_saved_observation(db, observation, at):
         from datetime import timedelta
 
         market = market_snapshot(
-            db, observation.instrument_code, at.date() - timedelta(days=1)
+            db,
+            observation.instrument_code,
+            at.date() - timedelta(days=1),
+            interval_start=observation.rule_snapshot["parameters"].get(
+                "decision_start"
+            ),
         )
         after = [r for r in market["rows"] if r["trade_date"] > str(adopted.date())]
         if not after:
@@ -267,11 +281,8 @@ def review_saved_observation(db, observation, at):
                 "reason": "采用后尚无完整交易日，等待观察积累",
             }
         rule = observation.rule_snapshot
-        if (
-            rule["engine_version"] != ENGINE_VERSION
-            or rule["strategy_version"] != CONDITION_VERSION
-        ):
-            return {**base, "status": "blocked", "reason": "观察规则版本与当前代码不符"}
+        if rule["engine_version"] != ENGINE_VERSION or rule["strategy_version"] != TEMPLATE_VERSION:
+            return {**base, "status": "blocked", "reason": "观察模板版本与当前代码不符"}
         settings = {
             "instrument_code": observation.instrument_code,
             "start_date": after[0]["trade_date"],
@@ -279,15 +290,20 @@ def review_saved_observation(db, observation, at):
             "initial_cash": rule["initial_cash"],
             **rule["costs"],
         }
+        value_metric = rule["parameters"]["template"]["rule"]["value_metric"]
+        external = external_snapshot(
+            db,
+            observation.instrument_code,
+            [value_metric] if value_metric != "none" else [],
+            at.date(),
+        )
         snapshot = {
             "settings": settings,
             "market": market,
-            "external": external_snapshot(
-                db, observation.instrument_code, [rule["parameters"]["rule"]], at.date()
-            ),
+            "external": external,
         }
         _, strategy, _ = execute_candidate(
-            {"rule": rule["parameters"]["rule"], "allocation": rule["allocation"]},
+            {"template": rule["parameters"]["template"], "allocation": 100},
             snapshot,
         )
         _, benchmark, _ = execute_candidate({"allocation": 100}, snapshot)

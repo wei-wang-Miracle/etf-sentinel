@@ -6,7 +6,7 @@ from decimal import Decimal
 from app.backtest import metrics, money
 
 RESEARCH_CASH = Decimal(50000)
-RESEARCH_VERSION = "1.0"
+RESEARCH_VERSION = "1.1"
 
 
 def with_reserve(account, reserve):
@@ -53,7 +53,7 @@ def diagnostics(account, initial=RESEARCH_CASH):
                     for event in account["dividends"]
                     if event["kind"] == "receivable"
                     and opening["trade_date"]
-                    < event["trade_date"]
+                    <= event["trade_date"]
                     <= trade["trade_date"]
                 ),
                 Decimal(0),

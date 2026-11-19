@@ -8,7 +8,7 @@ from statistics import pstdev
 
 from app.strategies import Decision, get_strategy, validate_parameters
 
-ENGINE_VERSION = "1.2"
+ENGINE_VERSION = "1.3"
 CENT = Decimal("0.01")
 TICK = Decimal("0.001")
 ZERO = Decimal(0)
@@ -79,7 +79,7 @@ def simulate(rows, dividends, settings, signals, begin, *, benchmark=False):
             break
         for event in dividends:
             key = event["ex_date"]
-            if day == key:
+            if day == key and event["record_date"] < key:
                 amount = money(
                     Decimal(entitlements.get(key, 0)) * Decimal(event["cash_per_share"])
                 )
@@ -154,6 +154,15 @@ def simulate(rows, dividends, settings, signals, begin, *, benchmark=False):
         for event in dividends:
             if event["record_date"] == day:
                 entitlements[event["ex_date"]] = quantity
+                if event["ex_date"] == day:
+                    # 同日登记与除息的权益按本日收盘份额确认，不能开盘前记零。
+                    amount = money(Decimal(quantity) * Decimal(event["cash_per_share"]))
+                    receivables[day] = amount
+                    if amount:
+                        events.append(
+                            {"trade_date": day, "kind": "receivable",
+                             "amount": str(amount), "pay_date": event["pay_date"]}
+                        )
         # 源仅提供发放日期，按当日收盘到账，不提前用于当日开盘订单。
         for event in dividends:
             key = event["ex_date"]

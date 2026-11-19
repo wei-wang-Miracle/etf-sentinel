@@ -117,6 +117,33 @@ def test_ex_date_buy_does_not_receive_dividend_and_benchmark_uses_same_costs():
     )
 
 
+def test_same_day_record_and_ex_date_use_closing_position():
+    """同日登记与除息按登记日收盘份额记权益，不用不存在的前日登记。"""
+    from app.backtest import simulate
+    from app.strategies import Decision
+    from app.strategy_research import diagnostics
+
+    rows = bars([10, 10, 10, 10, 10])
+    events = [{"record_date": "2026-01-03", "ex_date": "2026-01-03",
+               "pay_date": "2026-01-05", "cash_per_share": "0.1"}]
+    settings = config(end_date="2026-01-05")
+    decisions = [{"decision": Decision(target, "合成测试"), "indicators": {}}
+                 for target in [0, 1, 0, 0, 0]]
+    account = simulate(rows, events, settings, decisions, 2)
+    assert account["daily"][0]["quantity"] == 1000
+    assert D(account["daily"][0]["dividend_receivable"]) == D(100)
+    assert D(account["daily"][-1]["equity"]) == D(10100)
+    assert diagnostics(account)["rounds"][0]["pnl"] == "100.00"
+
+    # 登记日开盘卖出后收盘零仓，不再享有当天登记的权益。
+    decisions = [{"decision": Decision(target, "合成测试"), "indicators": {}}
+                 for target in [1, 0, 0, 0, 0]]
+    account = simulate(rows, events, settings, decisions, 1)
+    assert account["daily"][1]["quantity"] == 0
+    assert D(account["daily"][-1]["equity"]) == D(10000)
+    assert account["dividends"] == []
+
+
 def test_insufficient_warmup_rejected_and_last_day_no_forced_liquidation():
     with pytest.raises(ValueError, match="预热"):
         run_backtest(bars([10, 11, 12]), [], config(parameters={"window": 3}))

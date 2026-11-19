@@ -31,7 +31,7 @@ export default function MyEtfs({ theme }: { theme: string }) {
   const name = summary.data?.object.name || instruments.data?.find((row) => row.code === code)?.name || code;
   const dates = { ...(query.start ? { start: query.start } : {}), ...(query.end ? { end: query.end } : {}) };
   const listUrl = journeyUrl("etfs", undefined, { scope, search: query.search, ...dates });
-  const strategyUrl = journeyUrl("strategies", code, { view: "editor", ...dates });
+  const strategyUrl = journeyUrl("strategies", code, { view: "backtest", ...dates });
 
   if (code) return <div className="etf-dossier">
     <header className="object-header">
@@ -39,7 +39,7 @@ export default function MyEtfs({ theme }: { theme: string }) {
       <div className="object-actions"><label className="object-selector">切换 ETF<select aria-label="当前 ETF" value={legacyIndex ? "" : code} onChange={(event) => update({ code: event.target.value, object: `etf:${event.target.value}`, legacy_index: "", edit: "" })}>
         {!instruments.data?.some((item) => item.code === code) && <option value={legacyIndex ? "" : code}>{legacyIndex ? "正在定位关联 ETF" : code}</option>}
         {instruments.data?.map((item) => <option key={item.code} value={item.code}>{item.code} · {item.name}</option>)}
-      </select></label>{detail === "signals" && <a className="button-link" href={journeyUrl("strategies", code, dates)}>管理策略</a>}<a className="button-link primary" href={strategyUrl}>创建策略</a></div>
+      </select></label>{detail === "signals" && <a className="button-link" href={journeyUrl("strategies", code, dates)}>管理策略</a>}<a className="button-link primary" href={strategyUrl}>回测算法</a></div>
       <div className="evidence-strip"><span>{!positionsKnown ? holdings.loading ? "持仓读取中" : holdings.error ? "持仓状态未取得" : "尚未同步持仓" : held.has(code) ? "当前持仓" : "当前未持仓"}</span><span>行情截至 <span className="mono">{summary.data?.summary.price.as_of ?? "—"}</span></span><span>持仓快照 <span className="mono">{holdings.error ? "未取得" : holdings.data?.as_of ?? "—"}</span></span><span>历史日频 · 非实时</span></div>
     </header>
     {legacyIndex ? <p className="empty" role="status">{summary.error || "正在定位指数关联的 ETF…"}</p> : <Tabs label="ETF详情" items={details} value={detail} onChange={(detail) => update({ detail })}>
@@ -67,7 +67,7 @@ export default function MyEtfs({ theme }: { theme: string }) {
                 {list.map((row) => { const active = versions.data?.find((version) => version.active && version.instrument_code === row.code); return <article key={row.code} className="journey-etf-row">
                   <a className="etf-name" href={journeyUrl("etfs", row.code, { scope, search: query.search, detail: "overview", tab: "price", ...dates })}><strong>{row.name}</strong><span className="mono">{row.code}</span></a>
                   <span className="holding-label">{!positionsKnown ? holdings.loading ? "持仓读取中" : holdings.error ? "持仓状态未取得" : "尚未同步" : held.has(row.code) ? "当前持仓" : "当前未持仓"}</span>
-                  <span>{versions.loading ? "策略读取中" : versions.error ? "策略状态未取得" : active ? <a href={journeyUrl("etfs", row.code, { detail: "signals" })}>{active.name} · 第{active.version}版</a> : "未启用策略"}</span>
+                  <span>{versions.loading ? "策略读取中" : versions.error ? "策略状态未取得" : active ? <a href={journeyUrl("etfs", row.code, { detail: "signals" })}>{active.name}</a> : "未启用策略"}</span>
                   <span className="mono">{row.last_date ?? "暂无行情"}</span>
                 </article>; })}
                 {!list.length && !instruments.error && <div className="empty"><h3>没有匹配的 ETF</h3><p>请调整代码或名称。</p><button onClick={() => update({ search: "" })}>清除搜索</button></div>}

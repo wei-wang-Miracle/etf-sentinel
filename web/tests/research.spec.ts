@@ -141,17 +141,29 @@ test("策略状态刷新失败时旧计划不继续列为适用", async ({ page 
 });
 
 
-test("每日信号依据展示事件方向与均线窗口，数值条件保留单位", async ({ page }) => {
+test("每日信号按算法因子标签、满足状态和当时数值展示", async ({ page }) => {
   await page.route("**/api/strategy-lab/signals", (route) => json(route, [{ id: 21, instrument_code: "510500", observation_id: 11,
     execution_date: "2020-01-02", generated_at: "2020-01-01T00:00:00Z", data_cutoff: "2019-12-31", skip_note: null,
     plan: { action: "buy", quantity_status: "unknown", actual_quantity: null, reason: "微观条件依据", warnings: [],
       conditions: { buy: [
-        { indicator: "ma_cross", label: "双均线交叉", window: 5, long_window: 20, operator: "cross_down", threshold: "0", satisfied: true, value: "1", unit: "事件" },
-        { indicator: "volume_ratio", label: "日成交量相对均量", window: 5, operator: "gt", threshold: "1.2", satisfied: true, value: "1.5", unit: "倍" },
+        { label: "双均线交叉", satisfied: true, value: "1" },
+        { label: "日成交量相对均量", satisfied: true, value: "1.5" },
       ], sell: [] } }, execution: { status: "pending", links: [] } }]));
   await page.goto("/?page=etfs&code=510500&detail=signals");
   await page.getByRole("button", { name: "历史记录", exact: true }).click();
-  await page.getByText("逐条条件与当时数值", { exact: true }).click();
-  await expect(page.getByText("双均线交叉（短5／长20日）下穿：满足；事件发生", { exact: true })).toBeVisible();
-  await expect(page.getByText("日成交量相对均量（5个交易日）高于1.2倍：满足；当时数值 1.5倍", { exact: true })).toBeVisible();
+  await page.getByText("算法因子状态与当时数值", { exact: true }).click();
+  await expect(page.getByText("双均线交叉：满足；当时数值 1", { exact: true })).toBeVisible();
+  await expect(page.getByText("日成交量相对均量：满足；当时数值 1.5", { exact: true })).toBeVisible();
+});
+
+test("每日信号显示算法名称，不显示算法版本号", async ({ page }) => {
+  await page.route("**/api/strategies", (route) => json(route, [{ ...savedVersion, active: true }]));
+  await page.route("**/api/strategy-lab/observations", (route) => json(route, []));
+  await page.route("**/api/strategy-lab/signals", (route) => json(route, [{ id: 91, instrument_code: "510500", observation_id: 11,
+    execution_date: "2099-01-02", generated_at: "2026-11-06T00:00:00Z", data_cutoff: "2099-01-01", skip_note: null,
+    plan: { action: "wait", quantity_status: "unknown", actual_quantity: null, reason: "测试信号", warnings: [], indicators: { template_version: "1.0.0" } },
+    execution: { status: "pending", links: [] } }]));
+  await page.goto("/?page=etfs&code=510500&detail=signals");
+  await expect(page.locator(".signal-version")).toHaveText("箱体突破 · 箱体突破");
+  await expect(page.getByText(/第\d+版|1\.0\.0|算法模板版本/)).toHaveCount(0);
 });
