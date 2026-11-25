@@ -13,6 +13,11 @@ export type ResearchSettings = {
 };
 
 export type TemplateRule = Record<string, string | number | boolean | null>;
+export type TurningProfile = {
+  group: string;
+  group_name: string;
+  parameters: Record<string, number>;
+};
 export type TemplateDefinition = {
   id: string;
   version: string;
@@ -20,13 +25,16 @@ export type TemplateDefinition = {
   status: string;
   description: string;
   supported_instruments: string[];
+  rules_by_instrument?: Record<string, TemplateRule>;
+  turning_profiles_by_instrument?: Record<string, TurningProfile>;
   note: string;
 };
-export type TemplateSnapshot = Omit<TemplateDefinition, "description" | "supported_instruments"> & {
+export type TemplateSnapshot = Omit<TemplateDefinition, "description" | "supported_instruments" | "rules_by_instrument" | "turning_profiles_by_instrument"> & {
   instrument_code?: string;
   group?: string;
   description?: string;
   rule: TemplateRule;
+  turning: TurningProfile;
   algorithm_version: string;
   turning_version: string;
 };

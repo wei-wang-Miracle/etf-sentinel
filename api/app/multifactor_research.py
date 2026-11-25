@@ -61,12 +61,13 @@ def build_factors(rows, dividends, turning, external=None):
     return result
 
 
-def prepare_signals(rows, dividends, factors, rule, decision_start, *, slippage_bps=5):
+def prepare_signals(rows, dividends, factors, rule, decision_start, *, slippage_bps=5, exit_policy=None):
     """升序计算五项等权入场票和三项风险票，卖出优先于买入。
 
     当日开盘只执行昨日目标；收盘风险以实际模拟开盘含滑点价格及已登记
     分红权益为依据。任何退出先成为最终空仓信号，下一开盘才卖出。
     估值缺失阻止入场，但不阻止已有仓位退出。不按事后盈亏筛选信号。
+    离线研究可传入退出函数，复用同一模拟持仓、分红和开盘执行口径。
     """
     target, holding, entry_index, entry_price = 0, False, 0, Decimal(0)
     credited, peak, last_exit = 0., 0., -10000
@@ -122,17 +123,20 @@ def prepare_signals(rows, dividends, factors, rule, decision_start, *, slippage_
             sell_score = sum(sell.values())
             reason = "汇总入场不足，继续等待"
             if holding:
-                exits = []
-                if holding_return <= -rule["stop_loss"]:
-                    exits.append("止损")
-                if holding_return >= rule["take_profit"]:
-                    exits.append("止盈")
-                if peak - holding_return >= rule["trailing"]:
-                    exits.append("移动退出")
-                if i - entry_index + 1 >= rule["max_holding"]:
-                    exits.append("持有期限")
-                if sell_score >= rule["sell_votes"]:
-                    exits.append(f"风险汇总{sell_score}票")
+                if exit_policy is not None:
+                    exits = exit_policy(i, entry_index, entry_price, holding_return, peak, f)
+                else:
+                    exits = []
+                    if holding_return <= -rule["stop_loss"]:
+                        exits.append("止损")
+                    if holding_return >= rule["take_profit"]:
+                        exits.append("止盈")
+                    if peak - holding_return >= rule["trailing"]:
+                        exits.append("移动退出")
+                    if i - entry_index + 1 >= rule["max_holding"]:
+                        exits.append("持有期限")
+                    if sell_score >= rule["sell_votes"]:
+                        exits.append(f"风险汇总{sell_score}票")
                 target = int(not exits)
                 reason = "汇总卖出：" + "、".join(exits) if exits else "继续持有，退出条件未满足"
             elif value_ready and value_pass and structure and buy_score >= rule["buy_votes"] and sell_score < rule["sell_votes"] and i - last_exit > rule["cooldown"]:

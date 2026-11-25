@@ -77,7 +77,7 @@ function TaskPanel({ task }: { task: string }) {
       <header className="page-header">
         <div>
           <h2>定时任务</h2>
-          <p>历史回补与每日增量，采集进度按区间保存</p>
+          <p>{task === "etf" ? "基金行情回补与权益资料批量核验" : "历史回补与每日增量，采集进度按区间保存"}</p>
         </div>
         <button
           className="primary"
@@ -107,7 +107,7 @@ function TaskPanel({ task }: { task: string }) {
         <div className="panel-header">
           <h2>{task === "strategy-signals" ? "观察策略日计划" : task === "index-valuations"
             ? "指数估值与指数日K采集"
-            : task === "national-team" ? "国家队持仓比例采集" : task === "sentiment" ? "行业恐贪采集" : "基金日行情采集"}</h2>
+            : task === "national-team" ? "国家队持仓比例采集" : task === "sentiment" ? "行业恐贪采集" : "基金日行情与权益资料核验"}</h2>
           <span
             className={`badge ${running ? "info" : job?.enabled ? "success" : "neutral"}`}
           >
@@ -159,7 +159,7 @@ function TaskPanel({ task }: { task: string }) {
             ? "采集源页面18只基金的估算持仓比例，固定2026-01-01基准，全历史核验，仅新增或修订的数据写入本地库；不重复采集源价格。"
             : task === "sentiment"
             ? "首次回填五年，后续增量入库并重查最近七日修订。源最小下载窗口为一年，停采较久时扩大窗口。"
-            : "采集截至昨日的日行情。首次按月回补，后续重查最近七日并补齐失败区间。"}{" "}
+            : "行情采集截至昨日：启用标的首次按月回补，后续重查最近七日并补齐失败区间；随后核验全部配置 ETF 的分红与折算资料（包括停用行情采集的标的）。行情和权益逐项记录，权益失败不撤销已入库行情。"}{" "}
           同一任务禁止重复触发。
         </div>
       </section>
@@ -176,7 +176,7 @@ function TaskPanel({ task }: { task: string }) {
                 <th>触发方式</th>
                 <th>开始时间</th>
                 <th>结束时间</th>
-                <th>处理区间</th>
+                <th>处理记录</th>
                 <th>状态</th>
                 <th>操作</th>
               </tr>
@@ -189,8 +189,8 @@ function TaskPanel({ task }: { task: string }) {
                   <td className="mono">{stamp(run.started_at)}</td>
                   <td className="mono">{stamp(run.ended_at)}</td>
                   <td>
-                    {run.logs.length} 段 /{" "}
-                    {run.logs.filter((l) => l.status === "failed").length} 失败
+                    {run.logs.length} 条 /{" "}
+                    {run.logs.filter((l) => l.status === "failed").length} 条失败
                   </td>
                   <td>
                     <span className={`badge ${run.status}`}>
@@ -213,14 +213,14 @@ function TaskPanel({ task }: { task: string }) {
         </div>
         {job && !job.runs.length && (
           <div className="empty">
-            还没有运行记录。配置完成后，点击“立即采集”回补历史行情。
+            还没有运行记录。配置完成后，点击“立即采集”更新行情并核验权益资料。
           </div>
         )}
       </section>
       {detail && (
         <section className="panel">
           <div className="panel-header">
-            <h2>运行 #{detail.id} · 区间日志</h2>
+            <h2>运行 #{detail.id} · 处理明细</h2>
             <button onClick={() => setSelected(null)}>关闭日志</button>
           </div>
           <div className="logs" aria-live="polite">
@@ -235,9 +235,10 @@ function TaskPanel({ task }: { task: string }) {
                   {log.status === "failed" ? "失败" : "成功"}
                 </span>
                 <span>
-                  {log.code ?? "系统"} {log.start} ～ {log.end}
+                  {log.kind === "equity" ? "权益资料" : "日行情"} · {log.code ?? "系统"}
+                  {log.kind !== "equity" && log.start && ` ${log.start} ～ ${log.end}`}
                 </span>
-                <span>{log.count ?? 0} 条</span>
+                <span>{log.kind === "equity" ? "" : `${log.count ?? 0} 条`}</span>
                 <span>{log.message}</span>
               </div>
             ))}

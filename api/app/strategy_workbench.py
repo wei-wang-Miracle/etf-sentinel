@@ -13,6 +13,7 @@ from app.algorithm_templates import (
     TEMPLATE_VERSION,
     TURNING_VERSION,
     is_shared_template,
+    supports_template,
     template_catalog,
     template_snapshot,
 )
@@ -234,9 +235,9 @@ def compare(body: ComparisonRequest):
     selections = dict.fromkeys((item.id, item.version) for item in body.templates)
     candidates = []
     for template_id, version in selections:
-        if not is_shared_template(template_id, version):
-            raise HTTPException(422, "所选算法版本不存在或仅供历史复盘")
-        template = template_snapshot(template_id, version)
+        if not supports_template(template_id, version, body.instrument_code):
+            raise HTTPException(422, "所选算法不可用或未覆盖这只ETF")
+        template = template_snapshot(template_id, version, body.instrument_code)
         name = template["name"]
         if sum(other_id == template_id for other_id, _ in selections) > 1:
             name = f"{name} · {version}"
@@ -445,18 +446,18 @@ def save_version(body: SaveRequest):
             raise HTTPException(422, "只能保存成功的算法回测，持有参照或失败结果不可绑定")
         template = track["template"]
         template_id = template["id"]
-        if not is_shared_template(template_id, template["version"]):
-            raise HTTPException(422, "历史逐ETF规则只供复盘，请回测共享算法")
+        code = comparison.instrument_code
+        if not supports_template(template_id, template["version"], code):
+            raise HTTPException(422, "所选算法不可用或未覆盖这只ETF")
         run = db.get(BacktestRun, track["backtest_id"])
         if (
             not run
             or run.instrument_code != comparison.instrument_code
             or digest(run.input_snapshot) != run.input_sha256
             or run.input_snapshot["settings"]["parameters"]["template"] != template
-            or template_snapshot(template_id, template["version"]) != template
+            or template_snapshot(template_id, template["version"], code) != template
         ):
             raise HTTPException(409, "算法回测快照不一致，请重新回测")
-        code = comparison.instrument_code
         db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": 810000000 + int(code)})
         strategy = db.scalar(select(SavedStrategy).where(
             SavedStrategy.instrument_code == code, SavedStrategy.algorithm_template_id == template_id,
@@ -516,7 +517,7 @@ def enable(version_id: int, body: EnableRequest):
             db.commit()
         else:
             if strategy.algorithm_template_id is None:
-                raise HTTPException(422, "历史逐ETF规则只供复盘，请先保存共享算法")
+                raise HTTPException(422, "历史绑定只供复盘，请重新回测并保存算法")
             if active and not body.replace_active:
                 raise HTTPException(409, "这只ETF已有运行策略，确认替换后再启用")
             run = db.get(BacktestRun, version.backtest_run_id)

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import EtfTurningChart from "../components/EtfTurningChart";
+import EtfTurningChart, { type TurningChartDisplay } from "../components/EtfTurningChart";
 import ChartCaption from "../components/ChartCaption";
 import { api, type Candle, type Instrument } from "../lib/api";
 import { chartStamp } from "../lib/chart";
@@ -34,6 +34,7 @@ export default function Market({
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [retry, setRetry] = useState(0);
+  const [turningDisplay, setTurningDisplay] = useState<TurningChartDisplay>({ showBottom: true, showTop: true });
   useEffect(() => {
     api<Instrument[]>("/instruments")
       .then(setInstruments)
@@ -186,16 +187,17 @@ export default function Market({
               </div>
             </div>
             <ChartCaption
-              title={`${code} · 日线 · 复权口径未确认`}
-              meta={`${start} ~ ${end} · 均线 MA5/10/20/30/60（按源收盘计算） · 来源：${item?.source === "ChatBI" ? "财通证券历史日行情（ChatBI）" : item?.source ?? "财通证券历史日行情"} · 生成：${chartStamp()}`}
+              title={`${code} · 日线 · 前复权展示`}
+              meta={`${start} ~ ${end} · 均线 MA5/10/20/30/60（按前复权收盘计算） · 顶底确认使用因果复权价格 · 来源：${item?.source === "ChatBI" ? "财通证券历史日行情（ChatBI）" : item?.source ?? "财通证券历史日行情"} · 生成：${chartStamp()}`}
             />
-            <EtfTurningChart history={history} start={start} end={end} theme={theme} instrumentCode={code} />
+            <EtfTurningChart history={history} start={start} end={end} theme={theme} instrumentCode={code}
+              display={turningDisplay} onDisplayChange={setTurningDisplay} />
           </>
         )}
         <div className="panel-footer">
           来源：财通证券历史日行情　·　最新入库行情日：
           <span className="mono">{item?.last_date ?? "—"}</span>
-          　·　成交量额保留源数值，单位待数据源确认；未推断复权口径。
+          　·　成交量额保留源数值，单位待数据源确认；价格图使用前复权 OHLC。
         </div>
       </section>
     </>

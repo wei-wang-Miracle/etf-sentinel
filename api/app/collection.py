@@ -13,7 +13,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 from app.chatbi_config import MARKET_ACCESS_CODE, SOURCE_URL
 from app.db import Session
-from app.models import Candle, Instrument, Run, Window
+from app.models import BacktestSource, Candle, Instrument, Run, Window
 
 TZ = ZoneInfo("Asia/Shanghai")
 
@@ -127,15 +127,20 @@ def fetch_rows(code, start, end, *, api_path="daily_ohlcv_etf"):
             raise ValueError("数据源返回格式错误") from None
 
 
-def collect(run_id, fetch=fetch_rows):
-    """按区间提交，失败不推进水位，后续运行可恢复缺口。"""
+def collect(run_id, fetch=fetch_rows, fetch_equity=None):
+    """采集启用标的行情，并逐只核验全部配置标的权益。"""
+    if fetch_equity is None:
+        from app.backtest_data import fetch_actions
+
+        fetch_equity = fetch_actions
     cutoff = now().date() - timedelta(days=1)
     failures = successes = 0
     with Session() as db:
         run = db.get(Run, run_id)
-        instruments = db.scalars(
-            select(Instrument).where(Instrument.enabled.is_(True))
+        configured_instruments = db.scalars(
+            select(Instrument).order_by(Instrument.code)
         ).all()
+        instruments = [item for item in configured_instruments if item.enabled]
         for instrument in instruments:
             for start, end in month_ranges(instrument.start_date, cutoff):
                 previous = db.get(Window, (instrument.code, start))
@@ -180,6 +185,7 @@ def collect(run_id, fetch=fetch_rows):
                         db.add(Window(code=instrument.code, start=start, end=end))
                     successes += 1
                     entry = {
+                        "kind": "market",
                         "code": instrument.code,
                         "start": str(query_start),
                         "end": str(end),
@@ -195,6 +201,7 @@ def collect(run_id, fetch=fetch_rows):
                         db.delete(failed_window)
                     failures += 1
                     entry = {
+                        "kind": "market",
                         "code": instrument.code,
                         "start": str(query_start),
                         "end": str(end),
@@ -206,6 +213,49 @@ def collect(run_id, fetch=fetch_rows):
                     }
                 run.logs = [*run.logs, entry]
                 db.commit()
+
+        for instrument in configured_instruments:
+            try:
+                source = fetch_equity(instrument.code)
+            except ValueError as exc:
+                failures += 1
+                entry = {
+                    "kind": "equity",
+                    "code": instrument.code,
+                    "status": "failed",
+                    "message": str(exc),
+                }
+            else:
+                actions = source["actions"]
+                values = {
+                    "instrument_code": instrument.code,
+                    "corporate_actions": actions,
+                    "checked_through_date": source["collected_at"].date(),
+                    "source_url": source["source_url"],
+                    "source_html": source["source_html"],
+                    "source_sha256": source["source_sha256"],
+                    "collected_at": source["collected_at"],
+                }
+                statement = insert(BacktestSource).values(**values)
+                db.execute(
+                    statement.on_conflict_do_update(
+                        index_elements=["instrument_code"],
+                        set_={k: v for k, v in values.items() if k != "instrument_code"},
+                    )
+                )
+                successes += 1
+                entry = {
+                    "kind": "equity",
+                    "code": instrument.code,
+                    "status": "success",
+                    "message": (
+                        f"已核验：现金分红 {len(actions['dividends'])} 项，"
+                        f"份额折算 {len(actions['splits'])} 项"
+                    ),
+                }
+            run.logs = [*run.logs, entry]
+            db.commit()
+
         run.status = ("partial" if successes else "failed") if failures else "success"
         run.ended_at = now()
         db.commit()

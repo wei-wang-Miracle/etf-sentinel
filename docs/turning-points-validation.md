@@ -1,6 +1,6 @@
 # ETF顶底分类与50轮配对模拟
 
-本报告记录2026-11-18开始的新一轮50次研究循环。目标是用底部确认次日开盘买入、顶部确认次日开盘卖出，尝试让每一类ETF的已完成交易净胜率达到80%。结果未达标；本报告不把历史拟合写成未来胜率。
+本报告记录2026-11-18开始的历史50轮研究循环。目标是用底部确认次日开盘买入、顶部确认次日开盘卖出，尝试让每一类ETF的已完成交易净胜率达到80%。结果未达标；本报告不把历史拟合写成未来胜率。该研究用于确定当前统一顶底因子的参数模板，不再作为一套独立前端算法运行。
 
 ## 数据与口径
 
@@ -61,7 +61,7 @@
 
 历史来源会修订，基金间共享跟踪指数和行情阶段，交易观察非独立。确认参数是在已反复观察的本地历史上拟合，近期区间不能称为盲测或真正样本外验证。交易模拟不包含税费、未核权益和实际成交冲击，也不是交易指令。
 
-复算入口为[`fit-turning-points.mjs`](../web/scripts/fit-turning-points.mjs)与[`turning_simulator.py`](../web/scripts/turning_simulator.py)。冻结行情摘要为`1cf433076b834db34db86a8d2d6e73823fc57593a030f3ff15a3377be46cba64`，规则与账本摘要、逐轮参数和完整结果保存在本地研究目录。
+该历史研究的原始轮次文件保留在本地研究目录。现行复算入口为服务端[`turning_events`](../api/app/algorithm_templates.py)和[`export_turning_factors.py`](../scripts/export_turning_factors.py)，使用统一因子引擎生成新的冻结输入；旧前端研究运行器已退役，不能与现行结果混合比较。
 
 ## 工程验证
 
@@ -73,7 +73,7 @@
 本地复算冻结参数（不会增加轮数）可在项目根目录执行：
 
 ```bash
-node web/scripts/fit-turning-points.mjs .local/turning-research/2026-11-18-rerun 50 --finalize
+api/.venv/bin/python scripts/export_turning_factors.py .local/turning-research/<新研究目录>
 ```
 
 该命令依赖本机冻结目录、前端TypeScript依赖及后端虚拟环境；生成物不提交Git。

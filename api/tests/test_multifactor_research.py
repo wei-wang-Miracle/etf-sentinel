@@ -90,3 +90,20 @@ def test_dividend_drop_does_not_trigger_false_price_stop():
     changed = deepcopy(rows)
     changed[-1]["close"] = "1"
     assert signals[:-1] == prepare_signals(changed, dividends, build_factors(changed, dividends, {}), rule, 60)[:-1]
+
+
+def test_research_exit_policy_does_not_override_existing_entries():
+    rows = market([10 + i * .01 for i in range(80)])
+    rule = {**DEFAULT_RULE, "family": "breakout", "max_holding": 30}
+    factors = build_factors(rows, [], {})
+    base = prepare_signals(rows, [], factors, rule, 60)
+
+    def exit_policy(i, entry_index, entry_price, holding_return, peak, factor):
+        return ["研究时间止损"] if i == entry_index + 1 else []
+
+    trial = prepare_signals(rows, [], factors, rule, 60, exit_policy=exit_policy)
+    assert trial[:61] == base[:61]
+    assert trial[61]["decision"].target == 1
+    assert trial[62]["decision"].target == 0
+    assert trial[62]["decision"].reason == "汇总卖出：研究时间止损"
+    assert base[62]["decision"].target == 1

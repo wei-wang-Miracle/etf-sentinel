@@ -32,6 +32,13 @@ test("算法库显示简述并能打开当前算法的详细说明", async ({ pa
   await expect(page.getByRole("heading", { name: "迭代与复核" })).toBeVisible();
 });
 
+test("算法说明展示当前 ETF 绑定的统一顶底参数模板", async ({ page }) => {
+  await page.goto("/?page=strategies&code=510500&view=algorithm&algorithm=range_breakout");
+  await expect(page.getByRole("heading", { name: "统一顶底确认因子", exact: true })).toBeVisible();
+  await expect(page.locator(".algorithm-guide")).toContainText("中盘");
+  await expect(page.locator(".algorithm-guide")).toContainText("同一因果事件引擎");
+});
+
 test("三套算法说明分别解释各自的入场结构", async ({ page }) => {
   await page.route("**/api/strategies/catalog", (route) => json(route, { ...catalog, templates: [...catalog.templates, {
     id: "hybrid_reversal", version: "1.0.0", name: "复合反转", status: "experimental",
@@ -45,6 +52,38 @@ test("三套算法说明分别解释各自的入场结构", async ({ page }) => 
   await page.setViewportSize({ width: 390, height: 844 });
   await expect.poll(() => page.locator("body").evaluate((node) => node.scrollWidth)).toBeLessThanOrEqual(390);
   await expect.poll(() => page.locator(".algorithm-guide-table").evaluate((node) => node.scrollWidth)).toBeLessThanOrEqual(await page.locator(".algorithm-guide-table").evaluate((node) => node.clientWidth));
+});
+
+test("第四套算法可参与比较，说明页按 ETF 展示原研究规则", async ({ page }) => {
+  const rule = { family: "oversold", slow: 120, trend_floor: .02, volume_min: 1, recovery: 5,
+    rsi_window: 14, rsi_buy: 10, dip: .02, event_age: 2, buy_votes: 3, sell_votes: 2,
+    exit_ma: 10, rsi_sell: 70, stop_loss: .04, take_profit: .06, trailing: .05,
+    max_holding: 40, cooldown: 3, value_metric: "none", value_max: 80 };
+  await page.route("**/api/strategies/catalog", (route) => json(route, { ...catalog, templates: [...catalog.templates, {
+    ...catalog.templates[0], id: "hybrid_reversal", name: "复合反转", description: "复合结构测试说明",
+  }, {
+    ...catalog.templates[0], id: "etf_multifactor", name: "ETF多因子择时（实验）", description: "复用 50 轮历史研究的逐 ETF 规则。",
+    rules_by_instrument: { "510500": rule, "512100": { ...rule, family: "bottom", event_age: 5, slow: 40 } },
+  }] }));
+  await page.goto("/?page=strategies&code=510500&view=backtest");
+  await expect(page.getByRole("checkbox")).toHaveCount(4);
+  const multifactor = page.locator(".algorithm-pick-entry").filter({ has: page.getByRole("checkbox", { name: /多因子择时/ }) });
+  await expect(multifactor.getByRole("checkbox")).toBeChecked();
+  await expect(multifactor.getByText(/逐 ETF 规则/)).toBeVisible();
+  const request = page.waitForRequest((candidate) => candidate.method() === "POST" && candidate.url().endsWith("/strategies/comparisons"));
+  await page.getByRole("button", { name: "运行回测" }).click();
+  expect((await request).postDataJSON().templates.map(({ id }: { id: string }) => id)).toEqual([
+    "range_breakout", "bottom_confirmation", "hybrid_reversal", "etf_multifactor",
+  ]);
+  await multifactor.getByRole("link", { name: "算法说明" }).click();
+  await expect(page.getByRole("heading", { name: /多因子择时.*算法说明/ })).toBeVisible();
+  await expect(page.getByText(/120 日均线偏离/)).toBeVisible();
+  await page.getByLabel("查看 ETF 规则").selectOption("512100");
+  await expect(page.getByText(/40 日均线偏离/)).toBeVisible();
+  await page.getByRole("link", { name: "回测这套算法" }).click();
+  await expect(page.getByLabel("回测 ETF")).toHaveValue("512100");
+  await expect(page.getByRole("checkbox", { name: /多因子择时/ })).toBeChecked();
+  await expect(page.getByRole("checkbox", { name: /箱体突破/ })).not.toBeChecked();
 });
 
 test("算法选择项提供当前算法说明，比较结果不展示冻结参数块", async ({ page }) => {

@@ -145,7 +145,7 @@ export default function Review({ theme }: { theme: string }) {
       </header>
 
       <div className="notice">
-        本页只展示当前 20 只配置内 ETF；账户内其他 ETF、LOF、逆回购和现金未纳入，
+        本页只展示当前配置内 ETF；账户内其他 ETF、LOF、逆回购和现金未纳入，
         不能据此计算全账户收益。
       </div>
       {error && (

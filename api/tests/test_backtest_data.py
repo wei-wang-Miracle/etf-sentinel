@@ -1,10 +1,16 @@
 """验证权益解析、交易日完整性与未登记分红跳变保护。"""
 
 from copy import deepcopy
+from types import SimpleNamespace
 
+import httpx
 import pytest
 
+from app import backtest_data
 from app.backtest_data import (
+    fetch_actions,
+    front_adjusted_ohlc_rows,
+    indicator_ohlc_rows,
     parse_actions,
     post_split_rows,
     validate_market,
@@ -46,6 +52,29 @@ def test_same_day_record_and_ex_dividend_date_are_supported():
     assert actions["dividends"][0]["ex_date"] == "2026-01-15"
 
 
+def test_fetch_actions_retries_temporary_source_failure(monkeypatch):
+    """临时服务异常不能让日常批量权益核验留下单只空洞。"""
+    calls = []
+
+    def source_get(*args, **kwargs):
+        calls.append((args, kwargs))
+        if len(calls) < 3:
+            return httpx.Response(503, request=httpx.Request("GET", args[0]))
+        return httpx.Response(
+            200, content=HTML.encode(), request=httpx.Request("GET", args[0])
+        )
+
+    monkeypatch.setattr(backtest_data.httpx, "get", source_get)
+    monkeypatch.setattr(
+        backtest_data, "time", SimpleNamespace(sleep=lambda _: None), raising=False
+    )
+
+    actions = fetch_actions("510500")
+
+    assert len(calls) == 3
+    assert actions["actions"]["dividends"][0]["cash_per_share"] == "0.0620"
+
+
 def market():
     return [
         {
@@ -79,6 +108,42 @@ def test_known_dividend_and_rounding_tolerance_pass_but_splits_block():
     bad["splits"] = [{"effective_date": "2026-01-15", "ratio": "1:2"}]
     with pytest.raises(ValueError, match="折算"):
         validate_market(rows, bad)
+
+
+def test_known_split_produces_continuous_display_and_causal_indicator_prices():
+    rows = [
+        {
+            "trade_date": "2026-01-14",
+            "open": "10",
+            "high": "11",
+            "low": "9",
+            "close": "10",
+            "volume": "100",
+            "adjusted_close": "10",
+        },
+        {
+            "trade_date": "2026-01-15",
+            "open": "5",
+            "high": "5.5",
+            "low": "4.5",
+            "close": "5",
+            "volume": "200",
+            "adjusted_close": "10",
+        },
+    ]
+    actions = {
+        "dividends": [],
+        "splits": [{"effective_date": "2026-01-14", "ratio": "1:2"}],
+    }
+
+    validate_market(rows, actions, allow_splits=True)
+
+    display = front_adjusted_ohlc_rows(rows)
+    indicators = indicator_ohlc_rows(rows, actions)
+    assert [row["close"] for row in display] == ["5", "5"]
+    assert [row["high"] for row in display] == ["5.5", "5.5"]
+    assert [row["close"] for row in indicators] == ["10", "10"]
+    assert [row["volume"] for row in indicators] == ["100", "100"]
 
 
 def test_split_before_requested_interval_is_removed_before_validation():

@@ -5,7 +5,12 @@ from datetime import date, timedelta
 
 import pytest
 
-from app.algorithm_templates import prepare_template, template_snapshot, turning_events
+from app.algorithm_templates import (
+    prepare_template,
+    template_snapshot,
+    turning_events,
+    turning_profile,
+)
 
 
 def rows(count=180):
@@ -30,11 +35,35 @@ def test_template_freezes_internal_rules_and_rejects_injection():
     saved["template"]["rule"]["stop_loss"] = .99
     with pytest.raises(ValueError, match="模板"):
         prepare_template(rows(), [], saved)
+    saved = parameters()
+    saved["template"]["turning"]["parameters"]["background_days"] = 99
+    with pytest.raises(ValueError, match="模板"):
+        prepare_template(rows(), [], saved)
     assert parameters()["template"]["rule"]["stop_loss"] == .04
     with pytest.raises(ValueError, match="模板"):
         template_snapshot("etf_multifactor", "unknown", "510500")
     with pytest.raises(ValueError, match="ETF"):
         template_snapshot("etf_multifactor", "1.0.0", "000000")
+
+
+def test_turning_factor_uses_one_engine_with_etf_bound_parameters():
+    large = template_snapshot("range_breakout", "1.0.0", "510310")
+    mid = template_snapshot("range_breakout", "1.0.0", "510500")
+
+    assert large["rule"] == mid["rule"]
+    assert large["instrument_code"] == "510310"
+    assert mid["instrument_code"] == "510500"
+    assert large["turning"] == turning_profile("510310")
+    assert mid["turning"] == turning_profile("510500")
+    assert large["turning"]["parameters"] != mid["turning"]["parameters"]
+
+    history = rows()
+    full = turning_events(history, [], mid["turning"]["parameters"])
+    for end in (80, 125, 150):
+        assert turning_events(history[:end], [], mid["turning"]["parameters"]) == {
+            key: kind for key, kind in full.items()
+            if key <= history[end - 1]["trade_date"]
+        }
 
 
 def test_prefix_stable_and_model_cost_is_explicit():
@@ -81,20 +110,39 @@ def test_external_snapshot_accepts_only_template_valuation_metrics():
         external_snapshot(None, "510500", ["sentiment"], date(2026, 1, 1))
 
 
-def test_catalog_algorithms_do_not_change_with_etf():
+def test_catalog_algorithms_share_rules_but_freeze_etf_turning_parameters():
     from app.algorithm_templates import template_catalog
 
     codes = ["510310", "510330", "510500"]
     templates = template_catalog(codes)
-    assert {item["id"] for item in templates} == {
-        "range_breakout", "bottom_confirmation", "hybrid_reversal",
-    }
-    for item in templates:
+    assert [item["id"] for item in templates] == [
+        "range_breakout", "bottom_confirmation", "hybrid_reversal", "etf_multifactor",
+    ]
+    for item in templates[:3]:
         assert item["supported_instruments"] == codes
         snapshots = [template_snapshot(item["id"], item["version"], code) for code in codes]
-        assert snapshots[0] == snapshots[1] == snapshots[2]
-        assert "instrument_code" not in snapshots[0]
+        assert [snapshot["instrument_code"] for snapshot in snapshots] == codes
+        assert snapshots[0]["rule"] == snapshots[1]["rule"] == snapshots[2]["rule"]
+        assert snapshots[0]["turning"] == snapshots[1]["turning"]
+        assert snapshots[0]["turning"] != snapshots[2]["turning"]
+        assert item["turning_profiles_by_instrument"] == {
+            code: snapshot["turning"] for code, snapshot in zip(codes, snapshots, strict=True)
+        }
         assert snapshots[0]["rule"]["value_metric"] == "none"
+
+
+def test_multifactor_catalog_exposes_the_rule_used_for_each_supported_etf():
+    from app.algorithm_templates import template_catalog
+
+    algorithm = next(item for item in template_catalog(["510310", "510330", "000000"])
+                     if item["id"] == "etf_multifactor")
+    assert algorithm["supported_instruments"] == ["510310", "510330"]
+    rules = algorithm["rules_by_instrument"]
+    assert set(rules) == {"510310", "510330"}
+    for code, family, valuation in [("510310", "breakout", "pe_percentile"), ("510330", "hybrid", "none")]:
+        assert rules[code]["family"] == family
+        assert rules[code]["value_metric"] == valuation
+        assert rules[code] == template_snapshot(algorithm["id"], algorithm["version"], code)["rule"]
 
 
 def test_algorithm_backtest_accepts_only_selection_and_dates():

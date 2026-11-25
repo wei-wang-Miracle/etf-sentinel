@@ -9,6 +9,7 @@ export type Instrument = {
   source: string;
 };
 export type Log = {
+  kind?: "market" | "equity";
   instrument_code?: string;
   code?: string;
   start?: string;

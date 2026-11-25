@@ -14,7 +14,7 @@ from app import collection, jobs
 from app.collection import TZ, collect, now
 from app.db import Session, engine
 from app.main import app
-from app.models import Candle, Instrument, Job, Run, Window
+from app.models import BacktestSource, Candle, Instrument, Job, Run, Window
 
 pytestmark = pytest.mark.skipif(
     os.getenv("PGDATABASE") != "etf_sentinel_test",
@@ -113,7 +113,39 @@ def test_invalid_window_is_atomic():
     with Session() as db:
         assert db.scalar(select(func.count()).select_from(Candle)) == 0
         assert db.scalar(select(func.count()).select_from(Window)) == 0
-        assert db.get(Run, first).status == "failed"
+        assert db.get(Run, first).status == "partial"
+
+
+def test_market_job_verifies_all_configured_equity_sources_independently():
+    checked = []
+
+    def fetch_equity(code):
+        checked.append(code)
+        if code == "512100":
+            raise ValueError("权益来源暂不可用")
+        return {
+            "actions": {"dividends": [], "splits": []},
+            "source_url": f"https://example.com/{code}",
+            "source_html": "测试权益资料",
+            "source_sha256": "f" * 64,
+            "collected_at": now(),
+        }
+
+    run = run_id()
+    collect(run, source, fetch_equity=fetch_equity)
+
+    with Session() as db:
+        result = db.get(Run, run)
+        assert result.status == "partial"
+        assert checked == ["510500", "512100"]
+        assert db.scalar(select(func.count()).select_from(Candle)) == 2
+        assert db.get(BacktestSource, "510500") is not None
+        assert db.get(BacktestSource, "512100") is None
+        equity_logs = [entry for entry in result.logs if entry.get("kind") == "equity"]
+        assert [(entry["code"], entry["status"]) for entry in equity_logs] == [
+            ("510500", "success"),
+            ("512100", "failed"),
+        ]
 
 
 def test_config_and_local_candle_api():

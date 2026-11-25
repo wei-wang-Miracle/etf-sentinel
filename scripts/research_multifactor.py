@@ -163,10 +163,10 @@ def freeze(directory):
                              "external": external_cache[key], "calendar": trading_days(rows[0]["trade_date"], rows[-1]["trade_date"])[1],
                              "excluded_splits": splits}
     write(directory / "input.json", history)
-    subprocess.run(["node", str(ROOT / "web/scripts/export-turning-factors.mjs"), str(directory)], check=True)
+    subprocess.run([sys.executable, str(ROOT / "scripts/export_turning_factors.py"), str(directory)], check=True)
     source_files = ["api/app/multifactor_research.py", "api/app/backtest.py", "api/app/strategies.py",
                     "api/app/strategy_research.py", "api/app/backtest_data.py", "api/app/strategy_inputs.py",
-                    "api/app/index_valuation.py", "web/src/lib/turningPoints.ts", "web/scripts/export-turning-factors.mjs",
+                    "api/app/index_valuation.py", "api/app/algorithm_templates.py", "scripts/export_turning_factors.py",
                     "scripts/research_multifactor.py"]
     (directory / "source").mkdir(exist_ok=True)
     sources = {}

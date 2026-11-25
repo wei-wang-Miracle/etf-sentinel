@@ -12,12 +12,16 @@ export const catalog = {
   templates: [["range_breakout", "箱体突破"], ["bottom_confirmation", "底部确认"]].map(([id, name]) => ({
     id, version: "1.0.0", name, status: "experimental", description: `${name}的测试规则`,
     supported_instruments: ["510500", "512100"], note: "回测不代表未来收益。",
+    turning_profiles_by_instrument: {
+      "510500": { group: "mid", group_name: "中盘", parameters: { background_days: 3, slope_threshold: 0.01, breakout_window: 3, confirmation_ma_window: 20, confirmation_days: 3, breakout_atr_multiplier: 0.2, cooldown_days: 30, top_breakout_window: 3, top_ma_window: 3, top_confirmation_days: 1, top_trailing_atr: 3 } },
+      "512100": { group: "small", group_name: "小盘", parameters: { background_days: 5, slope_threshold: 0.01, breakout_window: 3, confirmation_ma_window: 5, confirmation_days: 3, breakout_atr_multiplier: 0.2, cooldown_days: 0, top_breakout_window: 3, top_ma_window: 3, top_confirmation_days: 1, top_trailing_atr: 3 } },
+    },
   })),
 };
 export const template = {
   id: "range_breakout", version: "1.0.0", name: "箱体突破", status: "experimental",
   rule: { family: "breakout", fast: 5, slow: 60, buy_votes: 3, value_max: 80 },
-  algorithm_version: "multifactor-v1", turning_version: "slope-structure-paired-v3",
+  algorithm_version: "multifactor-v1", turning_version: "slope-structure-paired-v4",
   note: "回测不代表未来收益。",
 };
 export const settings = { instrument_code: "510500", start_date: "2025-01-02", end_date: "2026-11-06",
@@ -78,6 +82,7 @@ export async function mockApi(page: Page) {
     if (path.endsWith("/job") || path === "/job") return json(route, job);
     if (path === "/research/universe") return json(route, { items: instruments.map((item) => ({ ...item, held: true })), default_code: "510500" });
     if (path === "/research/object") return json(route, summary(url.searchParams.get("code") || "510500"));
+    if (path.endsWith("/turning-events")) return json(route, { events: [], data_cutoff: null, partial: false });
     if (path.startsWith("/candles/")) return json(route, candles);
     if (path === "/backtests") return json(route, []);
     return json(route, { detail: `测试未配置接口：${request.method()} ${path}` }, 404);

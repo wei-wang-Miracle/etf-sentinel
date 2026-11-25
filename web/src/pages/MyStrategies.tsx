@@ -76,7 +76,7 @@ export default function MyStrategies({ theme }: { theme: string }) {
         <StrategyVersion key={binding.id} version={binding} theme={theme}>
         <section className="panel journey-inset" aria-label="管理每日信号">
           <h2>每日信号</h2>
-          <p>{binding.active ? "这个绑定正在生成每日信号。" : binding.algorithm_template_id ? "已保存回测。显式启用后，从下一适用交易日开始生成信号。" : "历史逐 ETF 规则保留作复盘，启用信号请回测并保存共享算法。"}</p>
+          <p>{binding.active ? "这个绑定正在生成每日信号。" : binding.algorithm_template_id ? "已保存回测。显式启用后，从下一适用交易日开始生成信号。" : "历史绑定保留作复盘。重新回测并保存算法后可启用信号。"}</p>
           <div className="journey-actions">
             {binding.algorithm_template_id && <button onClick={() => update({ view: "backtest", algorithm: templateKey(binding.template), start: binding.settings.start_date, end: binding.settings.end_date, edit: "", code })}>重新回测算法</button>}
             {binding.active ? <button disabled={busy} onClick={() => void toggle(binding)}>暂停信号</button>
@@ -89,7 +89,8 @@ export default function MyStrategies({ theme }: { theme: string }) {
         </section>
         </StrategyVersion>
       </> : !loadError && <p className="notice warning">找不到这个算法绑定。</p>
-      : isGuide ? guideTemplate && catalog.data ? <AlgorithmGuide template={guideTemplate} templates={catalog.data.templates} code={code} />
+      : isGuide ? guideTemplate && catalog.data ? <AlgorithmGuide template={guideTemplate} templates={catalog.data.templates}
+        instruments={catalog.data.instruments} code={code} onCode={(next) => update({ code: next })} />
         : !loadError && <p className="notice warning">找不到这套算法的说明。</p>
       : catalog.data && <>
         <div className="algorithm-library" aria-label="算法模板">

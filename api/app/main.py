@@ -11,12 +11,18 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
 from app.account_routes import router as account_router
+from app.algorithm_templates import turning_events, turning_profile
+from app.backtest_data import (
+    front_adjusted_ohlc_rows,
+    indicator_ohlc_rows,
+    validate_market,
+)
 from app.backtest_routes import router as backtest_router
 from app.collection import now
 from app.db import Session
 from app.index_valuation_routes import router as index_valuation_router
 from app.jobs import launch, next_run, recover_interrupted, scheduler
-from app.models import Candle, Instrument, Job, Run
+from app.models import BacktestSource, Candle, Instrument, Job, Run
 from app.national_team_routes import router as national_team_router
 from app.research_routes import router as research_router
 from app.review_routes import router as review_router
@@ -165,7 +171,7 @@ def run_job():
 
 @app.get("/candles/{code}")
 def candles(code: str, start: date, end: date):
-    """查询本地原始日 K，不触发外部采集。"""
+    """查询图表用前复权日 K，不触发外部采集。"""
     if start > end or not re.fullmatch(r"\d{6}", code):
         raise HTTPException(422, "代码或日期范围无效")
     with Session() as db:
@@ -176,18 +182,102 @@ def candles(code: str, start: date, end: date):
             .where(Candle.code == code, Candle.date >= start, Candle.date <= end)
             .order_by(Candle.date)
         ).all()
-        return [
+        raw_rows = [
             {
                 "date": r.date,
-                "open": float(r.open),
-                "high": float(r.high),
-                "low": float(r.low),
-                "close": float(r.close),
+                "open": str(r.open),
+                "high": str(r.high),
+                "low": str(r.low),
+                "close": str(r.close),
+                "adjusted_close": str(r.adjusted_close) if r.adjusted_close is not None else None,
                 "volume": float(r.volume),
                 "amount": float(r.amount),
-                "change_pct": float(r.change_pct) if r.change_pct is not None else None,
                 "source_updated_at": r.source_updated_at,
                 "collected_at": r.collected_at,
             }
             for r in rows
         ]
+        try:
+            displayed = front_adjusted_ohlc_rows(raw_rows)
+        except ValueError as exc:
+            raise HTTPException(422, f"行情复权资料未通过校验：{exc}") from None
+        previous_close = None
+        result = []
+        for row in displayed:
+            close = float(row["close"])
+            change_pct = (
+                (close / previous_close - 1) * 100
+                if previous_close is not None else None
+            )
+            result.append({
+                "date": row["date"],
+                "open": float(row["open"]),
+                "high": float(row["high"]),
+                "low": float(row["low"]),
+                "close": close,
+                "volume": row["volume"],
+                "amount": row["amount"],
+                "change_pct": change_pct,
+                "source_updated_at": row["source_updated_at"],
+                "collected_at": row["collected_at"],
+            })
+            previous_close = close
+        return result
+
+
+@app.get("/candles/{code}/turning-events")
+def candle_turning_events(code: str, start: date, end: date):
+    """读取行情图上的策略顶底确认日，沿用策略的日行情与权益校验。"""
+    if start > end or not re.fullmatch(r"\d{6}", code):
+        raise HTTPException(422, "代码或日期范围无效")
+    with Session() as db:
+        db.connection(execution_options={"isolation_level": "REPEATABLE READ"})
+        if not db.get(Instrument, code):
+            raise HTTPException(404, "标的尚未配置")
+        latest = db.scalar(
+            select(func.max(Candle.date)).where(Candle.code == code, Candle.date <= end)
+        )
+        if latest is None or latest < start:
+            return {"events": [], "data_cutoff": None, "partial": False}
+        source = db.get(BacktestSource, code)
+        if source is None:
+            raise HTTPException(422, "尚无已核验权益资料")
+        cutoff = min(latest, source.checked_through_date)
+        partial = cutoff < latest
+        if cutoff < start:
+            return {"events": [], "data_cutoff": None, "partial": partial}
+        candles = list(db.scalars(
+            select(Candle)
+            .where(Candle.code == code, Candle.date <= cutoff)
+            .order_by(Candle.date)
+        ))
+        rows = [
+            {
+                "trade_date": str(row.date),
+                **{
+                    key: str(getattr(row, key)) if getattr(row, key) is not None else None
+                    for key in ("open", "high", "low", "close", "adjusted_close", "volume")
+                },
+            }
+            for row in candles
+        ]
+        try:
+            validate_market(rows, source.corporate_actions, allow_splits=True)
+            indicator_rows = indicator_ohlc_rows(rows, source.corporate_actions)
+        except ValueError as exc:
+            raise HTTPException(422, f"行情或权益资料未通过校验：{exc}") from None
+
+    events = turning_events(
+        indicator_rows,
+        [],
+        turning_profile(code)["parameters"],
+    )
+    return {
+        "events": [
+            {"date": day, "kind": kind}
+            for day, kind in events.items()
+            if day >= start.isoformat()
+        ],
+        "data_cutoff": rows[-1]["trade_date"],
+        "partial": partial,
+    }

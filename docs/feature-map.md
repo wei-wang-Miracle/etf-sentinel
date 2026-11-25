@@ -35,28 +35,30 @@
 | 指标来源分类与日 K 微观条件 | 策略研究 | 已移除 | 旧自定义策略的条件配置与逐条件诊断已不属于当前用户流程，相关保存记录由迁移0014清理；固定模板内部因子不开放编辑 | [共享算法策略](single-etf-strategies.md) |
 | 创建策略因子拖拽配置 | 策略研究 | 已移除 | 因子拖拽配置页面、专属说明和用户条件草稿流程已删除；用户通过算法回测、保存绑定并显式启用后生成信号 | [共享算法策略](single-etf-strategies.md) |
 | 面向个人的单 ETF 策略流程 | 策略研究 | 已实现 | 支持非持仓 ETF，选择当前算法、查看详细说明、比较回测、保存独立回测记录、显式启用和查看每日信号；只允许调整研究区间，不支持组合或内部参数编辑 | [算法规则说明](single-etf-strategies.md)、[当前算法说明页](../web/src/components/AlgorithmGuide.tsx)、[我的策略页](../web/src/pages/MyStrategies.tsx) |
-| 同 ETF 共享算法比较 | 策略研究 | 已实现 | 对比当前共享算法与持有参照；历史记录保留内部规则快照用于复核，用户不选择历史算法版本；保存只接受成功的模板回测，启用仍需明确操作 | [算法规则说明](single-etf-strategies.md)、[比较页](../web/src/components/StrategyComparison.tsx)、[绑定详情](../web/src/components/StrategyVersion.tsx)、[操作回归](../web/tests/strategy.spec.ts) |
+| 同 ETF 算法比较 | 策略研究 | 已实现 | 对比三套共享算法、逐 ETF 多因子择时与持有参照。历史记录保留规则快照用于复核。成功回测可保存绑定，显式启用后生成信号 | [算法规则说明](single-etf-strategies.md)、[比较页](../web/src/components/StrategyComparison.tsx)、[绑定详情](../web/src/components/StrategyVersion.tsx)、[操作回归](../web/tests/strategy.spec.ts) |
 | 前后端工程初始化 | 工程基础 | 已实现 | 已扩展业务页面、迁移及采集；Docker Hub 连接受阻，三容器启动未验证 | [前端](../web/src/App.tsx)、[API](../api/app/main.py)、[Compose](../compose.yaml)、[初始化清单](superpowers/plans/2026-11-05-initialize.md) |
 | 投研简报视觉融合 | 工程基础 | 已实现 | 暖纸亮色、宋体标题、朱红操作强调、连续指标条；保留暗色和业务语义色 | [设计契约](design-contract.md)、[主题变量](../web/src/styles/tokens.css) |
 | ETF 研究案卷重设计 | 工程基础 | 已实现 | 协作投研、策略、信号、复盘及数据域；对象与日期连续、单对象标题、三阶段策略、只读快照、适用与历史信号、双主题及键盘读数；不改变投资或任务规则 | [总设计](../DESIGN.md)、[实施验收](design/frontend-validation.md) |
 | 前端视觉精修 | 工程基础 | 已实现 | 统一导航线条图标、筛选控件、间距和图注字号；中性选中态、窄屏换行；不改变业务口径 | [设计契约](design-contract.md#前端视觉精修)、[共享样式](../web/src/styles/global.css) |
 | 数据库语义与注释规范 | 工程基础 | 已实现 | 原地重命名迁移，不删除行情 | [数据库说明](database.md) |
 | 本地一键启动 | 工程基础 | 已实现 | Docker仅运行PostgreSQL；本机前后端支持start/restart、进程互斥与安全清理 | [启动脚本](../scripts/start-local.sh) |
-| 20只 ETF 统一标的配置 | 数据基础 | 已实现 | 原五只与国家队18只去重，采集开关、起点、覆盖范围 | [配置页](../web/src/pages/Instruments.tsx)、[功能说明](daily-data.md) |
-| 定时历史日行情采集入库 | 数据基础 | 已实现 | PostgreSQL、ChatBI；回补、增量、互斥和区间重试 | [采集](../api/app/collection.py)、[调度](../api/app/jobs.py)、[迁移](../api/migrations/versions/0001_daily_data.py) |
-| 日 K 与成交量展示 | 投研分析 | 已实现 | 依赖本地行情；MA5/10/20/30/60、同色成交量、可追溯图注；不提供实时或推断复权 | [行情页](../web/src/pages/Market.tsx)、[图表](../web/src/components/KLine.tsx) |
-| ETF分类斜率与结构顶底确认 | 投研分析 | 已实现 | 按20只ETF跟踪指数分为六类，在K线上仅标底部／顶部确认；各类使用独立历史拟合参数。50轮后总体58.1%（61/105），近期观察不足以证明80%。服务端复用对应因果事件版本作为多因子模板的结构票；图表确认点不等于实际交易 | [指标说明](turning-points.md)、[50轮分类检验](turning-points-validation.md)、[分类和参数](../web/src/lib/turningCategories.ts)、[计算](../web/src/lib/turningPoints.ts)、[图表](../web/src/components/EtfTurningChart.tsx) |
-| 共享算法库与ETF绑定 | 策略研究 | 已实现 | 固定算法跨ETF共用；同ETF统一比较多个算法及持有参照；回测成功后可保存算法与ETF的绑定，显式启用独立进行 | [共享算法策略](single-etf-strategies.md)、[工作台](../web/src/pages/MyStrategies.tsx) |
-| 逐ETF多因子历史研究 | 策略研究 | 已实现 | 旧实验50轮拟合总体88.8%（166/187），已观察区间64.3%（27/42）；只作历史证据，不是新算法指标或未来胜率。原冻结记录可复盘 | [历史报告](multifactor-research-validation.md)、[算法](../api/app/multifactor_research.py) |
-| A股图表规范与可追溯图注 | 投研分析 | 已实现 | 跨行情、国家队、回测、恐贪；红涨绿跌、均线、执行日买卖标记、图注与免责声明；复权口径未确认时不冒充前复权 | [设计契约](design-contract.md#klinechart)、[图注](../web/src/components/ChartCaption.tsx)、[图表工具](../web/src/lib/chart.ts) |
+| 23只 ETF 统一标的配置 | 数据基础 | 已实现 | 20只宽基 ETF，以及 518880 华安黄金 ETF、515880 国泰中证全指通信设备ETF和 560780 广发中证半导体材料设备ETF；支持设置采集开关和起点、查看行情覆盖范围。新增两只复用通用顶底参数，未纳入指数估值、国家队或宽基专项研究范围 | [配置页](../web/src/pages/Instruments.tsx)、[迁移0017](../api/migrations/versions/0017_add_etf_instruments.py)、[功能说明](daily-data.md) |
+| 定时历史日行情与权益批量核验 | 数据基础 | 已实现 | 行情仅采集启用标的；任务1随后核验全部配置ETF权益，逐只提交并分别记录；权益失败不回滚行情；PostgreSQL、ChatBI、分区间恢复与互斥 | [采集](../api/app/collection.py)、[调度](../api/app/jobs.py)、[说明](daily-data.md)、[迁移](../api/migrations/versions/0001_daily_data.py) |
+| 日 K 与成交量展示 | 投研分析 | 已实现 | 依赖本地行情；以前复权 OHLC 连续展示已核验份额折算，MA5/10/20/30/60基于展示序列，成交量保留源数值；不提供实时行情 | [行情页](../web/src/pages/Market.tsx)、[图表](../web/src/components/KLine.tsx) |
+| 策略顶底确认事件 | 投研分析 | 已实现 | 行情日K以只读接口标注统一顶底确认因子的底部、顶部确认日；与回测和每日信号共用服务端事件引擎，显示权益核验覆盖；权益资料缺失时可跳转更新对应 ETF，重试提供读取状态；518880 使用通用参数模板且明确未做黄金专项验证 | [指标说明](turning-points.md)、[算法模板](../api/app/algorithm_templates.py)、[行情接口](../api/app/main.py)、[图表](../web/src/components/EtfTurningChart.tsx) |
+| ETF顶底参数模板与历史检验 | 策略研究 | 已实现 | 20只宽基ETF按跟踪指数映射六类固定参数模板，属于统一顶底因子的敏感度差异，不提供第二套前端算法或来源切换；50轮历史研究总体58.1%（61/105），近期观察不足以证明80% | [指标说明](turning-points.md)、[50轮分类检验](turning-points-validation.md)、[算法模板](../api/app/algorithm_templates.py) |
+| 算法库与ETF绑定 | 策略研究 | 已实现 | 每套固定算法可绑定多只 ETF。多因子择时在说明页按 ETF 显示其实际规则，回测成功后可保存绑定 | [算法策略](single-etf-strategies.md)、[工作台](../web/src/pages/MyStrategies.tsx) |
+| 宽基 ETF 箱体突破优化验证 | 策略研究 | 已实现 | 30 轮离线候选，共用回测引擎；20 只 ETF 的留出验证暂无标的达到 80% 胜率门槛 | [验证报告](range-breakout-validation.md)、[复现脚本](../scripts/research_range_breakout.py) |
+| 逐ETF多因子历史研究 | 策略研究 | 已实现 | 50轮拟合总体88.8%（166/187），已观察区间64.3%（27/42）。第四套算法复用最终规则，原研究记录可复盘 | [历史报告](multifactor-research-validation.md)、[算法](../api/app/multifactor_research.py) |
+| A股图表规范与可追溯图注 | 投研分析 | 已实现 | 跨行情、国家队、回测、恐贪；红涨绿跌、均线、执行日买卖标记、图注与免责声明；行情标签页明确为前复权展示，顶底因子明确为因果复权计算 | [设计契约](design-contract.md#klinechart)、[图注](../web/src/components/ChartCaption.tsx)、[图表工具](../web/src/lib/chart.ts) |
 | 行业恐贪历史采集 | 数据基础 | 已实现 | 独立数据源与任务；首次五年，后续增量 | [行业恐贪说明](industry-sentiment.md) |
 | 行业恐贪概览与历史展示 | 投研分析 | 已实现 | 依赖行业恐贪入库；情绪着色、双轴合图，不直接生成信号 | [行业恐贪说明](industry-sentiment.md) |
 | 国家队18只ETF估算比例采集 | 数据基础 | 已实现 | 独立任务3，固定基准全量核验、增量写入；不保存源价格 | [国家队持仓说明](national-team.md) |
 | 国家队持仓与日K对照 | 投研分析 | 已实现 | 18只已纳入行情采集，复用同代码日K，缺失不补零；MA5/10/20/30/60与可追溯图注；不作为真实持仓或信号 | [国家队持仓页](../web/src/pages/NationalTeam.tsx) |
 | 统一策略注册与日频回测 | 策略研究 | 已实现 | 配置内ETF动态资格的持有、均线与动量确认规则；次日开盘、整手费用分红、同成本基准；买卖标记按执行日标注并同日同向合并；历史模拟非实际交易 | [策略与回测](backtesting.md)、[注册表](../api/app/strategies.py)、[引擎](../api/app/backtest.py)、[比较图](../web/src/components/StrategyComparison.tsx) |
 | 当前持仓ETF策略闭环 | 策略研究 | 已移除 | 旧五候选研究、批次与采用创建已下线（迁移0013清理旧观察链）；盘前计划与人工执行核对并入单ETF流程共用，未自动采用策略 | [单ETF说明](single-etf-strategies.md)、[信号与执行](../api/app/strategy_lab.py) |
-| 回测权益与不可变实验 | 数据基础 | 已实现 | 东方财富公开权益与交易日历校验；完整输入/结果快照入库供新流程引用；旧实验列表/复算入口已下线；权益本版手动更新 | [回测接口](../api/app/backtest_routes.py)、[迁移0006](../api/migrations/versions/0006_backtests.py) |
-| 配置内 ETF 持仓与成交同步展示 | 投资记录与复盘 | 已实现 | 同步配置内20只持仓/委托成交；1000行窗口、幂等、推导费用、非配置跳过；页面展示持仓和成交；不含收益复盘 | [同步](../api/app/account_sync.py)、[接口](../api/app/account_routes.py)、[页面](../web/src/pages/Review.tsx)、[迁移0008](../api/migrations/versions/0008_account_sync.py) |
+| 回测权益与不可变实验 | 数据基础 | 已实现 | 东方财富公开权益与交易日历校验；任务1批量核验全部配置ETF，也支持按ETF手动更新；完整输入/结果快照入库供新流程引用；旧实验列表/复算入口已下线 | [回测接口](../api/app/backtest_routes.py)、[批量任务](../api/app/collection.py)、[迁移0006](../api/migrations/versions/0006_backtests.py) |
+| 配置内 ETF 持仓与成交同步展示 | 投资记录与复盘 | 已实现 | 同步配置内 ETF 持仓/委托成交；1000行窗口、幂等、推导费用、非配置跳过；页面展示持仓和成交；不含收益复盘 | [同步](../api/app/account_sync.py)、[接口](../api/app/account_routes.py)、[页面](../web/src/pages/Review.tsx)、[迁移0008](../api/migrations/versions/0008_account_sync.py) |
 | 配置内 ETF 单标的收益复盘 | 投资记录与复盘 | 已实现 | 复用已实现同步；完整同步、权益、数量与T+1准入及显式依据确认后真实净盈亏/XIRR；统一资金的持有、MA20/MA60和现金单列，不输出不可比择时超额 | [设计](superpowers/specs/2026-11-06-configured-etf-review-design.md) |
 | 全账户复盘与现金基线 | 投资记录与复盘 | 待讨论 | 需要现金余额、配置外持仓、LOF/逆回购；当前不实施 | [设计](superpowers/specs/2026-11-06-real-account-review-design.md) |
 

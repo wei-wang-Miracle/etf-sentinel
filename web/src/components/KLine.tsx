@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import * as echarts from "echarts/core";
 import { CandlestickChart, BarChart, LineChart } from "echarts/charts";
 import {
@@ -23,7 +23,6 @@ echarts.use([
 import ChartReadout from "./ChartReadout";
 import type { Candle } from "../lib/api";
 import type { DailyAccount } from "../lib/backtests";
-import type { TurningPoint } from "../lib/turningPoints";
 import {
   MA_LINE_WIDTH,
   MA_WINDOWS,
@@ -33,6 +32,9 @@ import {
   movingAverage,
   readChartPalette,
 } from "../lib/chart";
+
+export type TurningEvent = { date: string; kind: "bottom" | "top" };
+const confirmationName = (kind: TurningEvent["kind"]) => kind === "bottom" ? "底部确认" : "顶部确认";
 
 // 直接读取冻结的收盘账本；缺少字段时不推算，不将缺失与零仓位混淆。
 function positionReadout(row?: DailyAccount): Record<string, string> {
@@ -57,10 +59,12 @@ export default function KLine({
   indexPoints = false,
   trades = [],
   onTrade,
-  turningPoints,
+  turningEvents,
   historyRows,
+  frontAdjusted = false,
 }: {
-  turningPoints?: TurningPoint[];
+  frontAdjusted?: boolean;
+  turningEvents?: TurningEvent[];
   historyRows?: Omit<Candle, "amount">[];
   indexPoints?: boolean;
   trades?: { trade_date: string; side: string; quantity: string; price: string; source?: "simulation" | "actual" }[];
@@ -71,6 +75,7 @@ export default function KLine({
   positions?: DailyAccount[];
 }) {
   const element = useRef<HTMLDivElement>(null);
+  const strategyEventsByDate = useMemo(() => new Map(turningEvents?.map(event => [event.date, event.kind])), [turningEvents]);
   const savedZoom = useRef<{ dates: string[]; start: number; end: number } | null>(null);
   const positionMode = positions !== undefined && holdings === undefined;
   const maRows = historyRows ?? rows;
@@ -96,7 +101,6 @@ export default function KLine({
       holdingRows.map((r) => [r.trade_date, r.estimated_holding_pct]),
     );
     const positionByDate = new Map((positions ?? []).map((row) => [row.trade_date, row]));
-    const turningByDate = new Map((turningPoints ?? []).map(point => [point.date, point]));
     const maByDate = new Map<string, Record<number, number>>();
     MA_WINDOWS.forEach((window) => {
       const values = movingAverage(
@@ -169,12 +173,8 @@ export default function KLine({
       trades.filter((trade) => trade.trade_date === day).forEach((trade) => {
         lines.push(`<div>${trade.source === "simulation" ? "模拟" : "真实记录"}${trade.side === "buy" ? "买入" : "卖出"} ${escapeHtml(trade.quantity)} 份 @ ${escapeHtml(trade.price)} 元</div>`);
       });
-      const point = turningByDate.get(day);
-      if (point) {
-        lines.push(`<div>结构状态：${escapeHtml(point.state)} · 数据截止：${escapeHtml(day)}</div>`);
-        if (point.slope5 != null) lines.push(`<div>归一化斜率 5日 ${point.slope5.toFixed(3)} / 20日 ${point.slope20?.toFixed(3)} / 60日 ${point.slope60?.toFixed(3)}</div>`);
-        if (point.signal) lines.push(`<div>${escapeHtml(point.signal.reason)}；失效参考价 ${formatPrice(point.signal.invalidation)}（收盘${point.signal.kind === "bottom" ? "跌破" : "突破"}）</div>`);
-      }
+      const strategyEvent = strategyEventsByDate.get(day);
+      if (strategyEvent) lines.push(`<div>${confirmationName(strategyEvent)} · ${escapeHtml(day)}</div>`);
       return lines.join("");
     };
     chart.setOption({
@@ -185,7 +185,7 @@ export default function KLine({
         description:
           (comparison
             ? "本地日K与国家队估算持仓比例同图双轴对照，左轴价格、右轴比例，共享日期与缩放；缺失数据不补零。"
-            : (positionMode ? "基金原始日K和每日收盘模拟仓位，仓位轴0%至100%，缺失不补零。" : indexPoints ? "指数原始日K和成交量。" : "基金原始日K和成交量。") + "上涨红色，下跌绿色；均线按源收盘价计算，复权口径未确认；悬停查看同日数值。") +
+            : (positionMode ? "基金原始日K和每日收盘模拟仓位，仓位轴0%至100%，缺失不补零。" : indexPoints ? "指数原始日K和成交量。" : frontAdjusted ? "基金前复权日K和成交量。" : "基金原始日K和成交量。") + (frontAdjusted ? "上涨红色，下跌绿色；均线按前复权收盘价计算；悬停查看同日数值。" : "上涨红色，下跌绿色；均线按源收盘价计算，复权口径未确认；悬停查看同日数值。")) +
           "仅供研究，不构成投资建议。",
       },
       tooltip: {
@@ -294,16 +294,19 @@ export default function KLine({
             tradeIndex: trade.source === "simulation" ? tradeIndex : null,
             itemStyle: { color: trade.side === "buy" ? palette.up : palette.down },
             label: { color: palette.surface, fontSize: 12 },
-          })), ...(turningPoints ?? []).flatMap(point => {
-            const signal = point.signal, candle = candleByDate.get(point.date);
-            if (!signal || !candle) return [];
-            const bottom = signal.kind === "bottom";
-            return [{ name: bottom ? "底部确认" : "顶部确认", value: bottom ? "底确" : "顶确",
-              coord: [point.date, bottom ? candle.low : candle.high], symbol: "triangle", symbolSize: 14,
+          })), ...dates.flatMap(date => {
+            const strategyEvent = strategyEventsByDate.get(date);
+            const kind = strategyEvent;
+            const candle = candleByDate.get(date);
+            if (!kind || !candle) return [];
+            const bottom = kind === "bottom";
+            const name = confirmationName(kind);
+            return [{ name, value: bottom ? "底确" : "顶确",
+              coord: [date, bottom ? candle.low : candle.high], symbol: "triangle", symbolSize: 14,
               symbolRotate: bottom ? 0 : 180, symbolOffset: [0, bottom ? 10 : -10],
               itemStyle: { color: bottom ? palette.chart3 : palette.chart4 },
               label: { show: true, position: bottom ? "bottom" : "top", color: bottom ? palette.chart3 : palette.chart4, fontSize: 12 },
-              tooltip: { formatter: () => `${bottom ? "底部确认" : "顶部确认"} · ${escapeHtml(point.date)}<br/>${escapeHtml(signal.reason)}<br/>失效参考价 ${formatPrice(signal.invalidation)} · ${escapeHtml(signal.version)}` },
+              tooltip: { formatter: () => `${name} · ${escapeHtml(date)}` },
             }];
           })] },
           name: "日K · 开/收/低/高",
@@ -398,7 +401,7 @@ export default function KLine({
       observer.disconnect();
       chart.dispose();
     };
-  }, [rows, theme, holdings, positions, positionMode, indexPoints, trades, onTrade, turningPoints, maRows]);
+  }, [rows, theme, holdings, positions, positionMode, indexPoints, trades, onTrade, strategyEventsByDate, maRows]);
   const candleByDate = new Map(rows.map(row => [row.date, row]));
   const holdingByDate = new Map((holdings ?? []).map(row => [row.trade_date, row.estimated_holding_pct]));
   const positionByDate = new Map((positions ?? []).map((row) => [row.trade_date, row]));
@@ -408,7 +411,6 @@ export default function KLine({
     values[`MA${window}`] = value == null ? "—" : formatPrice(value);
     maByDate.set(maRows[index].date, values);
   }));
-  const turningByDate = new Map((turningPoints ?? []).map(point => [point.date, point]));
   const readout = [...new Set([...candleByDate.keys(), ...holdingByDate.keys()])].sort().map(date => {
     const row = candleByDate.get(date);
     const values: Record<string, string> = { "开盘（元）": row ? String(row.open) : "—", "最高（元）": row ? String(row.high) : "—", "最低（元）": row ? String(row.low) : "—", "收盘（元）": row ? String(row.close) : "—", "成交量": row ? String(row.volume) : "—", ...maByDate.get(date) };
@@ -419,17 +421,8 @@ export default function KLine({
     if (holdings) { const ratio = holdingByDate.get(date); values["国家队估算比例"] = ratio == null ? "—" : `${ratio}%`; }
     const records = trades.filter(item => item.trade_date === date);
     if (records.length) values["操作标记"] = records.map(item => `${item.source === "simulation" ? "模拟" : "真实记录"}${item.side === "buy" ? "买入" : "卖出"} ${item.quantity}份 @ ${item.price}`).join("；");
-    const point = turningByDate.get(date);
-    if (point) {
-      values["结构状态"] = point.state;
-      values["指标数据截止"] = date;
-      if (point.slope5 != null) values["归一化斜率（5／20／60日）"] = `${point.slope5.toFixed(3)} / ${point.slope20?.toFixed(3)} / ${point.slope60?.toFixed(3)}`;
-      if (point.signal) {
-        values["确认依据"] = point.signal.reason;
-        values["失效参考价"] = `${formatPrice(point.signal.invalidation)}（收盘${point.signal.kind === "bottom" ? "跌破" : "突破"}）`;
-        values["顶底规则版本"] = point.signal.version;
-      }
-    }
+    const strategyEvent = strategyEventsByDate.get(date);
+    if (strategyEvent) values["顶底确认事件"] = confirmationName(strategyEvent);
     return { date, values };
   });
   return (

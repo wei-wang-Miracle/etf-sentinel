@@ -2,7 +2,7 @@ import { useState } from "react";
 import ChartCaption from "../components/ChartCaption";
 import Tabs from "../components/Tabs";
 import KLine from "../components/KLine";
-import EtfTurningChart from "../components/EtfTurningChart";
+import EtfTurningChart, { type TurningChartDisplay } from "../components/EtfTurningChart";
 import ValuationChart from "../components/ValuationChart";
 import { type Candle } from "../lib/api";
 import type { ValuationPoint } from "./IndexValuations";
@@ -36,6 +36,7 @@ export default function ResearchObject({ theme, code, summary, loading, error, r
 }) {
   const [query, update] = useResearchQuery({ tab: "price", start: dateAgo(365), end: dateAgo(1), metric: "pe", category: "", legacy_index: "" });
   const [showActual, setShowActual] = useState(false);
+  const [turningDisplay, setTurningDisplay] = useState<TurningChartDisplay>({ showBottom: true, showTop: true });
   const tab = views.some((item) => item.value === query.tab) ? query.tab : "price";
   const metric = metrics[query.metric] ? query.metric : "pe";
   const { start, end } = query;
@@ -92,17 +93,19 @@ export default function ResearchObject({ theme, code, summary, loading, error, r
           : plot.loading ? <div className="chart-loading skeleton-state" role="status">正在读取所选区间…</div> : plot.error ? <div className="empty" role="alert"><p>所选区间读取失败：{plot.error}</p><button onClick={plot.retry}>重试图表</button><a href={dataManagementUrl("jobs", tasks[tab], code)}>检查对应数据任务</a></div>
             : !hasPlot ? <div className="empty"><h2>所选区间暂无数据</h2><p>可以调整日期，或检查对应采集任务。</p><a href={dataManagementUrl("jobs", tasks[tab], code)}>检查对应数据任务</a></div> : <>
               {actual.error && <p className="notice warning">真实操作标记暂不可用，行情仍可查看。<button onClick={actual.retry}>重试标记</button></p>}
-              {tab === "price" ? <EtfTurningChart history={history} start={start} end={end} theme={theme} instrumentCode={code} trades={showActual ? actual.data?.markers : []} controls={<label><input type="checkbox" checked={showActual} onChange={event => setShowActual(event.target.checked)} />叠加真实操作</label>} />
+              {tab === "price" ? <EtfTurningChart history={history} start={start} end={end} theme={theme} instrumentCode={code}
+                display={turningDisplay} onDisplayChange={setTurningDisplay} trades={showActual ? actual.data?.markers : []}
+                controls={<label><input type="checkbox" checked={showActual} onChange={event => setShowActual(event.target.checked)} />叠加真实操作</label>} />
                 : tab === "valuation" ? <ValuationChart rows={valuation!.series} candles={valuation!.candles} title={metrics[metric].name} unit={metrics[metric].unit} theme={theme} />
                   : tab === "funds" ? <><KLine rows={candles} holdings={national!.holdings} theme={theme} />{!candles.length && <p className="notice warning">区间缺少本地日 K，仅展示估算比例，不伪造 ETF 价格。</p>}</>
                     : <SentimentTrend rows={sentiment!} theme={theme} />}
             </>}
       </div>
-      <ChartCaption title={`${summary.object.name} · ${code} · 日频`} meta={`${start} 至 ${end} · ${source}${tab === "price" || tab === "funds" ? " · 复权口径未确认" : ""}`} />
+      <ChartCaption title={`${summary.object.name} · ${code} · 日频`} meta={`${start} 至 ${end} · ${source}${tab === "price" ? " · 前复权 OHLC 展示；顶底确认使用因果复权价格" : tab === "funds" ? " · 复权口径未确认" : ""}`} />
       <details className="research-evidence"><summary>数据来源与使用边界</summary>
         {summary.warnings.map(message => <p key={message}>{message}</p>)}
         <p>最新摘要按各自源日期展示，不代表所选历史时点已知；图表仅展示所选日期区间。数据截止日期保留在各指标旁。</p>
-        <p>行情来源：财通证券，原始日 K 复权口径未确认；个人记录为本地只读同步，未确认成交所属日前的标记仅用于核对。国家队为固定基准估算比例，零份额下为空；恐贪保留源类别和标签，不推断分类阈值。</p>
+        <p>行情来源：财通证券。行情标签页以源复权收盘比率生成前复权 OHLC，消除已核验份额折算带来的图形断层；顶底确认按交易日可得的因果复权价格计算。个人记录为本地只读同步，未确认成交所属日前的标记仅用于核对。国家队为固定基准估算比例，零份额下为空；恐贪保留源类别和标签，不推断分类阈值。</p>
         <p>估值来源：韭圈；本地分位以截至各日十日历年有效样本统计，显示区间不改变回看窗口。修订历史不冒充原时点可得数据。</p>
         <a href={journeyUrl("etfs", code, { auxiliary: "compare", dimension: tab === "funds" ? "holdings" : tab === "price" ? "trend" : tab, start, end })}>进入跨 ETF 对比</a>
       </details>

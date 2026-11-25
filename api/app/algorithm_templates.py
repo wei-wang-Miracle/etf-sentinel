@@ -1,4 +1,4 @@
-"""共享算法模板及与回测、盘前信号共用的决策函数。"""
+"""算法模板及与回测、盘前信号共用的决策函数。"""
 
 from datetime import date
 from math import isfinite, log
@@ -7,9 +7,10 @@ from app.multifactor_research import VERSION as MULTIFACTOR_VERSION
 from app.multifactor_research import build_factors, prepare_signals
 
 TEMPLATE_ID = "etf_multifactor"
+MULTIFACTOR_NAME = "ETF多因子择时（实验）"
 TEMPLATE_VERSION = "1.0.0"
 SHARED_WARMUP_BARS = 60
-TURNING_VERSION = "slope-structure-paired-v3"
+TURNING_VERSION = "slope-structure-paired-v4"
 TEMPLATE_STATUS = "experimental"
 TEMPLATE_NOTE = "历史拟合结果不是未来胜率保证；模板不自动启用或下单。"
 GROUP_NAMES = {
@@ -21,7 +22,112 @@ GROUP_NAMES = {
     "tech": "科创板",
 }
 
-# 旧版逐ETF研究快照仅用于复盘及既有观察运行。
+# 顶底确认因子只有一套计算流程。类别仅决定同一流程的固定敏感度，不产生
+# 前端或单ETF专属的事件算法。未参与宽基分类拟合的标的使用通用参数。
+_DEFAULT_TURNING_PARAMETERS = {
+    "background_days": 3,
+    "slope_threshold": .05,
+    "short_slope_threshold": .05,
+    "breakout_window": 10,
+    "breakout_atr_multiplier": .2,
+    "confirmation_days": 1,
+    "cooldown_days": 10,
+    "confirmation_ma_window": 20,
+    "top_ma_window": 20,
+    "top_breakout_window": 10,
+    "top_confirmation_days": 1,
+    "top_trailing_atr": 0,
+}
+_TURNING_PARAMETERS_BY_GROUP = {
+    "large": {
+        **_DEFAULT_TURNING_PARAMETERS,
+        "background_days": 1,
+        "slope_threshold": .01,
+        "short_slope_threshold": 0,
+        "breakout_window": 5,
+        "breakout_atr_multiplier": 0,
+        "confirmation_days": 2,
+        "cooldown_days": 0,
+        "confirmation_ma_window": 20,
+        "top_ma_window": 7,
+        "top_breakout_window": 5,
+        "top_confirmation_days": 2,
+    },
+    "mid": {
+        **_DEFAULT_TURNING_PARAMETERS,
+        "background_days": 3,
+        "slope_threshold": .01,
+        "short_slope_threshold": .3,
+        "breakout_window": 3,
+        "breakout_atr_multiplier": .2,
+        "confirmation_days": 3,
+        "cooldown_days": 30,
+        "confirmation_ma_window": 20,
+        "top_ma_window": 3,
+        "top_breakout_window": 3,
+        "top_confirmation_days": 1,
+        "top_trailing_atr": 3,
+    },
+    "small": {
+        **_DEFAULT_TURNING_PARAMETERS,
+        "background_days": 5,
+        "slope_threshold": .01,
+        "short_slope_threshold": .2,
+        "breakout_window": 3,
+        "breakout_atr_multiplier": .2,
+        "confirmation_days": 3,
+        "cooldown_days": 0,
+        "confirmation_ma_window": 5,
+        "top_ma_window": 3,
+        "top_breakout_window": 3,
+        "top_confirmation_days": 1,
+        "top_trailing_atr": 3,
+    },
+    "micro": {
+        **_DEFAULT_TURNING_PARAMETERS,
+        "background_days": 3,
+        "slope_threshold": .01,
+        "short_slope_threshold": 0,
+        "breakout_window": 3,
+        "breakout_atr_multiplier": .4,
+        "confirmation_days": 2,
+        "cooldown_days": 30,
+        "confirmation_ma_window": 5,
+        "top_ma_window": 5,
+        "top_breakout_window": 3,
+        "top_confirmation_days": 2,
+    },
+    "growth": {
+        **_DEFAULT_TURNING_PARAMETERS,
+        "background_days": 3,
+        "slope_threshold": .01,
+        "short_slope_threshold": .1,
+        "breakout_window": 2,
+        "breakout_atr_multiplier": 0,
+        "confirmation_days": 2,
+        "cooldown_days": 10,
+        "confirmation_ma_window": 20,
+        "top_ma_window": 3,
+        "top_breakout_window": 2,
+        "top_confirmation_days": 1,
+    },
+    "tech": {
+        **_DEFAULT_TURNING_PARAMETERS,
+        "background_days": 5,
+        "slope_threshold": .2,
+        "short_slope_threshold": .05,
+        "breakout_window": 5,
+        "breakout_atr_multiplier": .2,
+        "confirmation_days": 2,
+        "cooldown_days": 30,
+        "confirmation_ma_window": 3,
+        "top_ma_window": 7,
+        "top_breakout_window": 5,
+        "top_confirmation_days": 1,
+    },
+}
+
+# 50轮研究选定的逐ETF规则，同时供现行回测与历史快照复算。
 _LEGACY_RULES = {
     "159205": ("growth", "breakout", 20, 90, 10, 14, 30, .02, -.03, 1, 1, 5, 4, 10, 90, 3, .07, .015, .1, 15, 10, "none", 100),
     "159531": ("micro", "bottom", 5, 60, 10, 5, 35, .02, -.03, 1, .8, 5, 3, 10, 75, 2, .07, .1, .05, 20, 3, "none", 80),
@@ -44,6 +150,18 @@ _LEGACY_RULES = {
     "588050": ("tech", "hybrid", 5, 120, 10, 5, 35, .02, .02, 5, .8, 5, 4, 10, 70, 2, .04, .1, .05, 40, 3, "none", 80),
     "588080": ("tech", "bottom", 15, 60, 10, 5, 35, .02, -.03, 5, .8, 5, 4, 10, 75, 3, .03, .1, .07, 15, 20, "none", 80),
 }
+
+
+def turning_profile(instrument_code):
+    """返回ETF绑定的顶底因子参数快照。"""
+    group = _LEGACY_RULES.get(instrument_code, ("generic",))[0]
+    return {
+        "group": group,
+        "group_name": GROUP_NAMES.get(group, "通用"),
+        "parameters": dict(_TURNING_PARAMETERS_BY_GROUP.get(
+            group, _DEFAULT_TURNING_PARAMETERS
+        )),
+    }
 
 _RULE_FIELDS = (
     "family", "fast", "slow", "break_window", "rsi_window", "rsi_buy",
@@ -79,41 +197,76 @@ _SHARED_TEMPLATES = {
 
 
 def is_shared_template(template_id, version):
-    """返回此算法版本是否允许创建回测和新绑定。"""
+    """判断算法是否跨ETF使用同一组规则。"""
     return (template_id, version) in _SHARED_TEMPLATES
 
 
+def supports_template(template_id, version, instrument_code):
+    """判断标的能否回测并绑定所选算法。"""
+    return is_shared_template(template_id, version) or (
+        (template_id, version) == (TEMPLATE_ID, TEMPLATE_VERSION)
+        and instrument_code in _LEGACY_RULES
+    )
+
+
 def template_catalog(instruments):
-    """同一算法版本覆盖全部已配置ETF，具体区间仍需通过数据核验。"""
+    """列出共享算法和有明确逐ETF规则的多因子算法。"""
     supported = sorted(set(instruments))
-    return [
+    turning_profiles = {code: turning_profile(code) for code in supported}
+    catalog = [
         {
             "id": template_id, "version": version, "name": name,
             "status": TEMPLATE_STATUS, "description": description,
             "supported_instruments": supported, "note": TEMPLATE_NOTE,
+            "turning_profiles_by_instrument": turning_profiles,
         }
         for (template_id, version), (name, description, _) in _SHARED_TEMPLATES.items()
     ]
+    rules = {
+        code: template_snapshot(TEMPLATE_ID, TEMPLATE_VERSION, code)["rule"]
+        for code in supported if code in _LEGACY_RULES
+    }
+    if rules:
+        catalog.append({
+            "id": TEMPLATE_ID, "version": TEMPLATE_VERSION, "name": MULTIFACTOR_NAME,
+            "status": TEMPLATE_STATUS, "note": TEMPLATE_NOTE,
+            "description": "复用 50 轮历史研究的逐 ETF 规则，结合价格结构、动量、趋势和量能，部分 ETF 加入估值过滤。",
+            "supported_instruments": list(rules), "rules_by_instrument": rules,
+            "turning_profiles_by_instrument": {
+                code: turning_profiles[code] for code in rules
+            },
+        })
+    return catalog
 
 
 def template_snapshot(template_id, version, instrument_code=None):
-    """共享算法快照不含ETF身份；逐ETF快照只供原有记录核验。"""
+    """返回ETF绑定的算法与顶底因子参数快照。"""
     base = {
         "id": template_id, "version": version, "status": TEMPLATE_STATUS,
         "algorithm_version": MULTIFACTOR_VERSION, "turning_version": TURNING_VERSION,
         "note": TEMPLATE_NOTE,
     }
     if shared := _SHARED_TEMPLATES.get((template_id, version)):
+        if instrument_code is None:
+            raise ValueError("算法模板必须指定ETF")
         name, description, rule = shared
-        return {**base, "name": name, "description": description, "rule": dict(rule)}
+        return {
+            **base,
+            "name": name,
+            "description": description,
+            "instrument_code": instrument_code,
+            "turning": turning_profile(instrument_code),
+            "rule": dict(rule),
+        }
     if template_id != TEMPLATE_ID or version != TEMPLATE_VERSION:
         raise ValueError("算法模板版本不存在")
     if instrument_code not in _LEGACY_RULES:
         raise ValueError("算法模板尚未覆盖该ETF")
     group, *values = _LEGACY_RULES[instrument_code]
     return {
-        **base, "name": "ETF多因子择时（实验）", "instrument_code": instrument_code,
-        "group": GROUP_NAMES[group], "rule": dict(zip(_RULE_FIELDS, values, strict=True)),
+        **base, "name": MULTIFACTOR_NAME, "instrument_code": instrument_code,
+        "group": GROUP_NAMES[group], "turning": turning_profile(instrument_code),
+        "rule": dict(zip(_RULE_FIELDS, values, strict=True)),
     }
 
 
@@ -170,8 +323,8 @@ def _slope(rows, volatility):
     return numerator / denominator / volatility
 
 
-def turning_events(rows, dividends):
-    """逐日移植冻结的顶底算法，返回确认日到类型的因果映射。"""
+def turning_events(rows, dividends, parameters=None):
+    """按固定顶底因子流程返回确认日到类型的因果映射。"""
     from app.strategies import features
 
     signal_rows = []
@@ -189,10 +342,11 @@ def turning_events(rows, dividends):
     last_bottom = last_top = float("-inf")
     holding_high = 0.0
     bottom = top = None
-    options = {"background_days": 3, "slope_threshold": .05,
-               "short_slope_threshold": .05, "breakout_window": 10,
-               "breakout_atr_multiplier": .2, "confirmation_days": 1,
-               "cooldown_days": 10, "confirmation_ma_window": 20}
+    options = {**_DEFAULT_TURNING_PARAMETERS, **(parameters or {})}
+    top_ma_window = options["top_ma_window"]
+    top_breakout_window = options["top_breakout_window"]
+    top_confirmation_days = options["top_confirmation_days"]
+    top_trailing_atr = options["top_trailing_atr"]
     for i, row in enumerate(signal_rows):
         if i == 0 or ids[i] < 0 or ids[i] != ids[i - 1]:
             start = i
@@ -225,36 +379,56 @@ def turning_events(rows, dividends):
             top_armed = True
         prior = signal_rows[i - options["breakout_window"]:i]
         prior_high = max(float(r["high"]) for r in prior)
-        top_prior = prior
+        prior_low = min(float(r["low"]) for r in prior)
+        top_prior = signal_rows[i - top_breakout_window:i]
+        top_high = max(float(r["high"]) for r in top_prior)
         top_low = min(float(r["low"]) for r in top_prior)
-        top_ma = sum(float(r["close"]) for r in signal_rows[i - ma_window + 1:i + 1]) / ma_window
-        previous_top_ma = top_ma + (float(signal_rows[i - ma_window]["close"]) - close) / ma_window
+        top_ma = sum(float(r["close"]) for r in signal_rows[i - top_ma_window + 1:i + 1]) / top_ma_window
+        previous_top_ma = top_ma + (float(signal_rows[i - top_ma_window]["close"]) - close) / top_ma_window
         bottom_ready = (atr > 0 and bottom_armed and i - last_bottom >= options["cooldown_days"]
                         and slope5 > options["short_slope_threshold"] and slope20 > previous20
                         and close > ma20 and ma20 > previous_ma20)
         top_ready = (atr > 0 and top_armed and i - last_top >= options["cooldown_days"]
                      and slope5 < -options["short_slope_threshold"] and slope20 < previous20
                      and close < top_ma and top_ma < previous_top_ma)
-        top_low = min(float(r["low"]) for r in top_prior)
         if expected == "top":
             holding_high = max(holding_high, high)
+        trailing_level = holding_high - top_trailing_atr * atr
+        trailing_ready = (
+            top_trailing_atr > 0 and expected == "top" and atr > 0
+            and slope5 < -options["short_slope_threshold"]
+            and close < trailing_level
+        )
         if bottom and (not bottom_ready or close <= bottom["level"]):
             bottom = None
         if top and (not top_ready or close >= top["level"]):
             top = None
         signal = None
-        if bottom and bottom_ready and i - bottom["index"] >= options["confirmation_days"] \
+        if trailing_ready:
+            signal = "top"
+            last_top, top_armed = i, False
+        elif expected == "bottom" and bottom and bottom_ready \
+                and i - bottom["index"] >= options["confirmation_days"] \
                 and close > bottom["level"]:
             signal = "bottom"
             last_bottom, bottom_armed = i, False
-        elif top and top_ready and i - top["index"] >= options["confirmation_days"] \
+        elif expected == "top" and top and top_ready \
+                and i - top["index"] >= top_confirmation_days \
                 and close < top["level"]:
             signal = "top"
             last_top, top_armed = i, False
         if not bottom and not signal and bottom_ready and close > prior_high + options["breakout_atr_multiplier"] * atr:
-            bottom = {"index": i, "level": prior_high + options["breakout_atr_multiplier"] * atr}
+            bottom = {
+                "index": i,
+                "level": prior_high + options["breakout_atr_multiplier"] * atr,
+                "invalidation": prior_low,
+            }
         if not top and not signal and top_ready and close < top_low - options["breakout_atr_multiplier"] * atr:
-            top = {"index": i, "level": top_low - options["breakout_atr_multiplier"] * atr}
+            top = {
+                "index": i,
+                "level": top_low - options["breakout_atr_multiplier"] * atr,
+                "invalidation": top_high,
+            }
         if signal:
             events[row["trade_date"]] = signal
             bottom = top = None
@@ -267,7 +441,7 @@ def prepare_template(rows, dividends, parameters):
     """将冻结模板转换成统一引擎的每日收盘决策和因子解释。"""
     validate_template_parameters(parameters)
     template = parameters["template"]
-    turning = turning_events(rows, dividends)
+    turning = turning_events(rows, dividends, template["turning"]["parameters"])
     factors = build_factors(rows, dividends, turning, parameters["external"])
     shared = is_shared_template(template["id"], template["version"])
     warmup_end = SHARED_WARMUP_BARS - 1 if shared else 60
