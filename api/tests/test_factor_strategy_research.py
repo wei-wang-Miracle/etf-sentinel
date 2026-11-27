@@ -196,6 +196,7 @@ def test_category_leader_is_selected_only_by_development_score():
 def _score_summary(**overrides):
     summary = {
         "completed": 12,
+        "win_rate": 0.70,
         "profit_factor": 1.5,
         "expectancy": 500.0,
         "return": 0.1,
@@ -203,6 +204,7 @@ def _score_summary(**overrides):
         "drawdown": -0.04,
         "exposure": 0.3,
         "positive_unit_ratio": 1.0,
+        "qualified_unit_ratio": 1.0,
     }
     summary.update(overrides)
     return summary
@@ -212,9 +214,46 @@ def test_category_score_blocks_low_sample_and_caps_extreme_profit_factor():
     from app.factor_strategy_research import _category_score
 
     assert _category_score(_score_summary(completed=4, profit_factor=9_000.0)) == 0.0
+    assert _category_score(_score_summary(expectancy=-10.0)) == 0.0
     assert _category_score(_score_summary(profit_factor=9_000.0)) == _category_score(
         _score_summary(profit_factor=4.0)
     )
+    assert _category_score(_score_summary(excess_return=-0.5)) == _category_score(
+        _score_summary(excess_return=0.5)
+    )
+
+
+def test_win_rate_gates_replace_buy_and_hold_outperformance_gate():
+    from app.factor_strategy_research import _discard_reasons
+
+    passing = _score_summary(
+        excess_return=-0.40,
+        drawdown=-0.11,
+        independent_units=3,
+        cross_unit_pass=True,
+    )
+    assert _discard_reasons(passing) == []
+
+    low_win_rate = _score_summary(
+        win_rate=0.60,
+        independent_units=3,
+        cross_unit_pass=True,
+    )
+    assert "胜率低于65%门槛" in _discard_reasons(low_win_rate)
+
+    low_pf = _score_summary(
+        profit_factor=1.20,
+        independent_units=3,
+        cross_unit_pass=True,
+    )
+    assert "利润因子低于1.25" in _discard_reasons(low_pf)
+
+    deep_dd = _score_summary(
+        drawdown=-0.13,
+        independent_units=3,
+        cross_unit_pass=True,
+    )
+    assert "最大回撤低于-12%门槛" in _discard_reasons(deep_dd)
 
 
 def test_bear_market_defense_is_reported_without_removing_release_blockers():
@@ -433,3 +472,51 @@ def test_expression_explainability_requires_one_screen_chinese_description():
 
     assert len(render_expression(expression)) > 100
     assert expression_is_explainable(expression) is False
+
+
+def test_anti_cheat_expression_rules_block_root_not_event_consecutive_and_nesting():
+    from app.factor_strategy_research import (
+        expression_is_explainable,
+        holdout_start_date,
+    )
+
+    root_not = {"op": "not", "expression": {"op": "factor", "factor_id": "turning_top"}}
+    assert expression_is_explainable(root_not, role="entry") is False
+    assert expression_is_explainable(root_not, role="exit") is True
+
+    event_consecutive = {
+        "op": "consecutive",
+        "expression": {"op": "factor", "factor_id": "turning_top"},
+        "days": 5,
+    }
+    assert expression_is_explainable(event_consecutive, role="exit") is False
+
+    state_consecutive = {
+        "op": "consecutive",
+        "expression": {"op": "factor", "factor_id": "ma60_rising"},
+        "days": 3,
+    }
+    assert expression_is_explainable(state_consecutive, role="entry") is True
+
+    nested_within = {
+        "op": "within",
+        "expression": {
+            "op": "within",
+            "expression": {"op": "factor", "factor_id": "turning_bottom"},
+            "days": 3,
+        },
+        "days": 5,
+    }
+    assert expression_is_explainable(nested_within, role="entry") is False
+
+    long_rows = price_rows(1900)
+    short_rows = long_rows[-350:]
+    holdout = holdout_start_date(
+        {
+            "510300": {"rows": long_rows},
+            "510500": {"rows": long_rows},
+            "159205": {"rows": short_rows},
+        }
+    )
+    # 留出段应按多年度长序列的最后 20% 切分，而不是被 350 根的新标的拖成 60 天
+    assert holdout == long_rows[-round((1900 - 66) * 0.2)]["trade_date"]

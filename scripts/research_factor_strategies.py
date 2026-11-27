@@ -35,7 +35,10 @@ def main():
     manifest = json.loads(manifest_path.read_text())
     if manifest.get("input_sha256") != digest(input_path):
         parser.error("冻结输入哈希与manifest不一致")
-    if snapshot.get("version") != "factor-strategy-snapshot-v1.0.0":
+    if snapshot.get("version") not in (
+        "factor-strategy-snapshot-v1.0.0",
+        "factor-strategy-snapshot-v1.1.0",
+    ):
         parser.error("冻结输入版本不受支持")
     universe = snapshot.get("universe")
     if not isinstance(universe, dict):

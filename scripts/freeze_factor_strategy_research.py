@@ -1,4 +1,4 @@
-"""从本地已核验行情冻结分类因子策略研究输入。"""
+"""从本地已核验行情冻结分类因子策略研究输入（默认 2019-01-01 起）。"""
 
 import argparse
 import hashlib
@@ -21,13 +21,63 @@ def write(path, value):
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n")
 
 
+def _verified_suspensions_for(code, report_data, actual_days):
+    """基于三源对比审计报告核验缺失日是否确为全网一致无交易的停牌日。"""
+    from app.backtest_data import trading_days
+
+    if not actual_days:
+        return ()
+    expected, _ = trading_days(actual_days[0], actual_days[-1])
+    missing = sorted(set(expected) - set(actual_days))
+    if not missing:
+        return ()
+    if not report_data:
+        raise ValueError(f"{code} 存在缺失交易日 {missing}，且缺少免费源对比报告可供核验")
+
+    item = (report_data.get("items") or {}).get(code)
+    if not item or item.get("status") != "ok":
+        raise ValueError(f"{code} 未通过免费源验证报告，不能放行停牌日 {missing}")
+
+    cross = item.get("cross_check") or {}
+    peers = cross.get("peers") or {}
+    if not peers:
+        raise ValueError(f"{code} 缺少可用横向对照源，不能放行停牌日 {missing}")
+
+    peer_present_missing = {
+        day
+        for peer_info in peers.values()
+        for day in (peer_info.get("primary_missing_dates") or [])
+    }
+    unverified = [day for day in missing if day in peer_present_missing]
+    if unverified:
+        raise ValueError(f"{code} 缺失交易日 {unverified} 在其他可用源有交易记录，拒绝放行")
+    return tuple(missing)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("directory", type=Path, help="必须不存在的新冻结目录")
+    parser.add_argument(
+        "--start-date",
+        default="2019-01-01",
+        help="研究样本起始日期 YYYY-MM-DD（默认 2019-01-01）",
+    )
+    parser.add_argument(
+        "--verification-report",
+        type=Path,
+        default=ROOT / ".local" / "free-history-verification.json",
+        help="免费历史行情跨源核验报告路径，用于放行真实停牌日",
+    )
     args = parser.parse_args()
     directory = args.directory.resolve()
     if directory.exists():
         parser.error("冻结目录已存在，不能覆盖")
+
+    report_data = (
+        json.loads(args.verification_report.read_text())
+        if args.verification_report.is_file()
+        else None
+    )
 
     from dotenv import load_dotenv
 
@@ -50,7 +100,9 @@ def main():
             source = db.get(BacktestSource, code)
             candles = list(
                 db.scalars(
-                    select(Candle).where(Candle.code == code).order_by(Candle.date)
+                    select(Candle)
+                    .where(Candle.code == code, Candle.date >= args.start_date)
+                    .order_by(Candle.date)
                 )
             )
             if source is None or not candles:
@@ -81,9 +133,17 @@ def main():
                 }
                 for candle in candles
             ]
+            actual_days = [row["trade_date"] for row in rows]
+            suspensions = _verified_suspensions_for(code, report_data, actual_days)
             actions = source.corporate_actions
             turning = turning_events(
-                rows, actions.get("dividends", []), turning_profile(code)["parameters"]
+                rows,
+                [
+                    event
+                    for event in actions.get("dividends", [])
+                    if event["ex_date"] >= actual_days[0]
+                ],
+                turning_profile(code)["parameters"],
             )
             item, item_coverage = build_factor_snapshot_item(
                 code=code,
@@ -101,6 +161,8 @@ def main():
                     "equity_collected_at": source.collected_at.isoformat(),
                 },
                 turning=turning,
+                start_date=args.start_date,
+                verified_suspensions=suspensions,
             )
             universe[code] = item
             coverage[code] = item_coverage
@@ -112,7 +174,8 @@ def main():
     write(
         input_path,
         {
-            "version": "factor-strategy-snapshot-v1.0.0",
+            "version": "factor-strategy-snapshot-v1.1.0",
+            "start_date": args.start_date,
             "universe": universe,
             "excluded": excluded,
         },
@@ -129,8 +192,9 @@ def main():
     write(
         directory / "manifest.json",
         {
-            "version": "factor-strategy-snapshot-v1.0.0",
+            "version": "factor-strategy-snapshot-v1.1.0",
             "created_at": datetime.now(UTC).isoformat(),
+            "start_date": args.start_date,
             "input_sha256": digest(input_path),
             "instrument_count": len(universe),
             "excluded": excluded,
@@ -138,8 +202,8 @@ def main():
             "coverage": coverage,
             "sources": sources,
             "evidence": (
-                "冻结内容来自本地已核验ETF日行情、权益资料与指数映射；"
-                "当前历史长度有限，研究结果不构成未来有效性证明。"
+                f"冻结内容来自本地已核验ETF日行情（{args.start_date}起）、权益资料与指数映射，"
+                "经多源核验的真实停牌日明确登记在coverage；研究结果不构成未来有效性证明。"
             ),
             "accounting": (
                 "历史OHLC、成交量和每份现金分红已按份额折算转换到冻结末日的统一份额口径；"
@@ -148,7 +212,7 @@ def main():
         },
     )
     print(
-        f"已冻结 {len(universe)} 只ETF，排除 {len(excluded)} 只，"
+        f"已冻结 {len(universe)} 只ETF（起点 {args.start_date}），排除 {len(excluded)} 只，"
         f"覆盖至 {min(item['end'] for item in coverage.values())}；未发布策略。"
     )
 

@@ -36,16 +36,17 @@ STRESS_COSTS = {
     "minimum_commission": 5,
     "slippage_bps": 10,
 }
-RESEARCH_VERSION = "factor-strategy-research-v1.1.0"
+RESEARCH_VERSION = "factor-strategy-research-v1.2.0"
 HOLDOUT_RATIO = 0.2
 MIN_HOLDOUT_DAYS = 60
 MIN_COMPLETED_TRADES = 5
+MIN_WIN_RATE = 0.65
 MAX_SCORE_PROFIT_FACTOR = 4.0
 BEARISH_BENCHMARK_RETURN = -0.05
 MAX_DOWNSIDE_CAPTURE_RATIO = 0.5
 MAX_DRAWDOWN_COMPRESSION_RATIO = 0.5
-MAX_DRAWDOWN = -0.08
-MIN_PROFIT_FACTOR = 1.1
+MAX_DRAWDOWN = -0.12
+MIN_PROFIT_FACTOR = 1.25
 MAX_EXPLANATION_CHARS = 100
 
 
@@ -552,23 +553,32 @@ def _unit_summary(code_results):
 def _category_score(summary):
     if summary["completed"] < MIN_COMPLETED_TRADES:
         return 0.0
-    expectancy = (summary["expectancy"] or 0.0) / COSTS["initial_cash"]
+    expectancy_raw = summary["expectancy"]
+    if expectancy_raw is None or expectancy_raw <= 0:
+        return 0.0
+    win_rate = summary.get("win_rate")
+    if win_rate is None:
+        return 0.0
+    expectancy = expectancy_raw / COSTS["initial_cash"]
     profit_factor = summary["profit_factor"]
     if profit_factor is None:
         profit_factor = MAX_SCORE_PROFIT_FACTOR
     else:
         profit_factor = min(profit_factor, MAX_SCORE_PROFIT_FACTOR)
-    sample_weight = min(1.0, summary["completed"] / 12)
+    if profit_factor < 1.0:
+        return 0.0
+    sample_weight = min(1.0, summary["completed"] / 20)
+    unit_ratio = summary.get("qualified_unit_ratio", summary["positive_unit_ratio"])
     return round(
         (
-            summary["return"] * 100
-            + summary["excess_return"] * 75
-            + (profit_factor - 1) * 5
-            + expectancy * 100
-            - abs(summary["drawdown"]) * 25
+            win_rate * 100
+            + (profit_factor - 1) * 15
+            + expectancy * 120
+            + summary["return"] * 25
+            - abs(summary["drawdown"]) * 60
         )
-        * (0.5 + sample_weight / 2)
-        * summary["positive_unit_ratio"],
+        * (0.4 + 0.6 * sample_weight)
+        * (0.3 + 0.7 * unit_ratio),
         6,
     )
 
@@ -618,20 +628,21 @@ def _discard_reasons(summary):
     reasons = []
     if summary["completed"] < MIN_COMPLETED_TRADES:
         reasons.append(f"完成交易不足{MIN_COMPLETED_TRADES}笔")
+    win_rate = summary.get("win_rate")
+    if win_rate is None or win_rate < MIN_WIN_RATE:
+        reasons.append(f"胜率低于{MIN_WIN_RATE:.0%}门槛")
     if (summary["expectancy"] or 0) <= 0:
         reasons.append("成本后单笔期望不为正")
     if (summary["profit_factor"] or 0) < MIN_PROFIT_FACTOR:
         reasons.append(f"利润因子低于{MIN_PROFIT_FACTOR}")
     if summary["return"] <= 0:
         reasons.append("窗口绝对收益不为正")
-    if summary["excess_return"] <= 0:
-        reasons.append("未跑赢同成本买入持有基准")
     if summary["drawdown"] < MAX_DRAWDOWN:
         reasons.append(f"最大回撤低于{MAX_DRAWDOWN:.0%}门槛")
     if summary["independent_units"] == 1:
         reasons.append("仅有一个独立单位，不能作为跨标的验证")
     elif not summary["cross_unit_pass"]:
-        reasons.append("独立单位正收益覆盖不足一半")
+        reasons.append("独立单位胜率与正收益覆盖不足一半")
     return reasons
 
 
@@ -651,7 +662,17 @@ def summarize_category(category, universe, evaluations):
         item["profit_factor"] for item in values if item["profit_factor"] is not None
     ]
     expectancies = [item["expectancy"] for item in values if item["expectancy"] is not None]
+    win_rates = [item["win_rate"] for item in values if item["win_rate"] is not None]
     returns = [item["return"] for item in values]
+    qualified_unit_ratio = (
+        sum(
+            item["return"] > 0
+            and (item["win_rate"] or 0) >= MIN_WIN_RATE
+            and (item["expectancy"] or 0) > 0
+            for item in values
+        )
+        / len(values)
+    )
     summary = {
         "category": category,
         "etf_count": sum(len(item["codes"]) for item in values),
@@ -663,14 +684,14 @@ def summarize_category(category, universe, evaluations):
         "completed": sum(item["completed"] for item in values),
         "carry_in_completed": sum(item["carry_in_completed"] for item in values),
         "open": sum(item["open"] for item in values),
+        "win_rate": fmean(win_rates) if win_rates else None,
         "expectancy": fmean(expectancies) if expectancies else None,
         "profit_factor": fmean(profit_factors) if profit_factors else None,
         "positive_unit_ratio": sum(item["return"] > 0 for item in values) / len(values),
+        "qualified_unit_ratio": qualified_unit_ratio,
         "benchmark_return": fmean(item["benchmark_return"] for item in values),
         "benchmark_drawdown": min(item["benchmark_drawdown"] for item in values),
-        "cross_unit_pass": None
-        if len(values) == 1
-        else sum(item["return"] > 0 for item in values) / len(values) >= 0.5,
+        "cross_unit_pass": None if len(values) == 1 else qualified_unit_ratio >= 0.5,
         "units": units,
         "by_etf": {
             code: evaluations[code]
@@ -680,6 +701,9 @@ def summarize_category(category, universe, evaluations):
     }
     summary["calmar"] = (
         summary["return"] / -summary["drawdown"] if summary["drawdown"] < 0 else None
+    )
+    summary["exposure_adjusted_return"] = (
+        summary["return"] / summary["exposure"] if summary["exposure"] > 0 else None
     )
     summary["excess_return"] = summary["return"] - summary["benchmark_return"]
     summary["score"] = _category_score(summary)
@@ -750,9 +774,38 @@ def _simplify_expression(expression):
     return deduplicated[0] if len(deduplicated) == 1 else {"op": operator, "items": deduplicated}
 
 
-def expression_is_explainable(expression):
-    """以可读中文说明而非因子数限制候选的审查边界。"""
+def _has_disallowed_structure(expression):
+    """禁止时间算子同类套娃，及禁止对单日离散事件因子套连续成立。"""
+    operator = expression["op"]
+    if operator == "factor":
+        return False
+    if operator in {"all", "any"}:
+        return any(_has_disallowed_structure(item) for item in expression["items"])
+    if operator == "not":
+        return _has_disallowed_structure(expression["expression"])
+    if operator in {"within", "consecutive"}:
+        child = expression["expression"]
+        if child["op"] in {"within", "consecutive"}:
+            return True
+        if (
+            operator == "consecutive"
+            and child["op"] == "factor"
+            and FACTORS[child["factor_id"]]["output_type"] == "event"
+        ):
+            return True
+        return _has_disallowed_structure(child)
+    return _has_disallowed_structure(expression["first"]) or _has_disallowed_structure(
+        expression["then"]
+    )
+
+
+def expression_is_explainable(expression, *, role="any"):
+    """以可读中文说明及结构防作弊规则限制候选表达式边界。"""
     simplified = simplify_expression(expression)
+    if role == "entry" and simplified["op"] == "not":
+        return False
+    if _has_disallowed_structure(simplified):
+        return False
     return len(_render_expression(simplified)) <= MAX_EXPLANATION_CHARS
 
 
@@ -901,14 +954,16 @@ def _categories(universe):
 
 
 def holdout_start_date(universe):
-    """以最短有效历史的最后20%锁定共同留出段，最少60个交易日。"""
+    """锁定共同留出段：多年度样本按中位历史长度取最后20%，短样本兜底60个交易日。"""
     end = min(item["rows"][-1]["trade_date"] for item in universe.values())
     candidates = [
         item["rows"]
         for item in universe.values()
         if item["rows"][-1]["trade_date"] == end
     ]
-    reference = min(candidates, key=len)
+    long_candidates = [rows for rows in candidates if len(rows) >= 500]
+    pool = sorted(long_candidates or candidates, key=len)
+    reference = pool[len(pool) // 2]
     available = len(reference) - RISK_BASELINE["warmup"] - 1
     holdout_days = max(MIN_HOLDOUT_DAYS, round(available * HOLDOUT_RATIO))
     if holdout_days >= available:
@@ -1010,8 +1065,8 @@ def run_research(universe, rounds=50, *, random_seed=20261127):
                 signature = _signature(entry, exit_expression)
                 if (
                     signature in signatures_by_category[category]
-                    or not expression_is_explainable(entry)
-                    or not expression_is_explainable(exit_expression)
+                    or not expression_is_explainable(entry, role="entry")
+                    or not expression_is_explainable(exit_expression, role="exit")
                 ):
                     continue
                 signatures_by_category[category].add(signature)
@@ -1043,11 +1098,15 @@ def run_research(universe, rounds=50, *, random_seed=20261127):
         leader = select_category_leader(category, candidates_by_category[category])
         if leader is None:
             continue
+        dev_codes = set(leader["development"][category]["by_etf"])
+        eligible_universe = {
+            code: item for code, item in universe.items() if code in dev_codes
+        }
         holdout = summarize_category(
             category,
-            universe,
+            eligible_universe,
             evaluate_universe(
-                universe,
+                eligible_universe,
                 leader["entry_expression"],
                 leader["exit_expression"],
                 start_date=holdout_start,
@@ -1055,9 +1114,9 @@ def run_research(universe, rounds=50, *, random_seed=20261127):
         )
         stress = summarize_category(
             category,
-            universe,
+            eligible_universe,
             evaluate_universe(
-                universe,
+                eligible_universe,
                 leader["entry_expression"],
                 leader["exit_expression"],
                 start_date=holdout_start,
@@ -1094,5 +1153,5 @@ def run_research(universe, rounds=50, *, random_seed=20261127):
         ),
         "candidates": candidates,
         "category_leaders": leaders,
-        "note": "候选仅用于离线研究；留出期不参与候选选择，结果不自动进入生产策略或每日信号。",
+        "note": "候选仅用于离线研究；留出期不参与候选选择，一直持有仅作对比参照，结果不自动进入生产策略或每日信号。",
     }

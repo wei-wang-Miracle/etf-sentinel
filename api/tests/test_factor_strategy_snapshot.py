@@ -1,5 +1,7 @@
 from decimal import Decimal
 
+import pytest
+
 
 def row(day, price, volume=100):
     return {
@@ -47,3 +49,35 @@ def test_factor_snapshot_item_freezes_category_independent_key_and_daily_truth()
     ]
     assert item["factor_truth"][0]["turning_bottom"] is False
     assert coverage["rows"] == 2
+
+
+def test_factor_snapshot_allows_verified_suspensions_and_rejects_unverified_gaps():
+    from app.factor_strategy_snapshot import build_factor_snapshot_item
+
+    # 2026-01-05, 2026-01-07 为交易日，中间 2026-01-06 为模拟停牌日
+    sparse_rows = [row("2026-01-05", 10), row("2026-01-07", 10.1)]
+    with pytest.raises(ValueError, match="未核验交易日"):
+        build_factor_snapshot_item(
+            code="159915",
+            name="创业板ETF",
+            rows=sparse_rows,
+            actions={"dividends": [], "splits": []},
+            indices=["399006.SZ"],
+            source={"market_source": "本地行情"},
+            turning={},
+        )
+
+    item, coverage = build_factor_snapshot_item(
+        code="159915",
+        name="创业板ETF",
+        rows=[row("2025-12-31", 9.9), *sparse_rows],
+        actions={"dividends": [], "splits": []},
+        indices=["399006.SZ"],
+        source={"market_source": "本地行情"},
+        turning={},
+        start_date="2026-01-01",
+        verified_suspensions=("2026-01-06",),
+    )
+
+    assert item["rows"][0]["trade_date"] == "2026-01-05"
+    assert coverage["verified_suspensions"] == ["2026-01-06"]
