@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import EtfTurningChart, { type TurningChartDisplay } from "../components/EtfTurningChart";
+import EtfFactorChart from "../components/EtfFactorChart";
 import ChartCaption from "../components/ChartCaption";
 import { api, type Candle, type Instrument } from "../lib/api";
 import { chartStamp } from "../lib/chart";
@@ -34,7 +34,6 @@ export default function Market({
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [retry, setRetry] = useState(0);
-  const [turningDisplay, setTurningDisplay] = useState<TurningChartDisplay>({ showBottom: true, showTop: true });
   useEffect(() => {
     api<Instrument[]>("/instruments")
       .then(setInstruments)
@@ -190,8 +189,7 @@ export default function Market({
               title={`${code} · 日线 · 前复权展示`}
               meta={`${start} ~ ${end} · 均线 MA5/10/20/30/60（按前复权收盘计算） · 顶底确认使用因果复权价格 · 来源：${item?.source === "ChatBI" ? "财通证券历史日行情（ChatBI）" : item?.source ?? "财通证券历史日行情"} · 生成：${chartStamp()}`}
             />
-            <EtfTurningChart history={history} start={start} end={end} theme={theme} instrumentCode={code}
-              display={turningDisplay} onDisplayChange={setTurningDisplay} />
+            <EtfFactorChart history={history} start={start} end={end} theme={theme} instrumentCode={code} />
           </>
         )}
         <div className="panel-footer">

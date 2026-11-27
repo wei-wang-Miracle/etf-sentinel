@@ -1,4 +1,4 @@
-import { test, expect, json, summary, savedVersion, candles } from "./fixtures";
+import { test, expect, json, summary, assignment, catalog, candles } from "./fixtures";
 
 const detailUrl = "/?page=etfs&code=510500&object=etf:510500&detail=overview&tab=price";
 
@@ -88,17 +88,15 @@ test("日K提供可键盘操作的日期读数，不能只靠悬停", async ({ p
 });
 
 test("启用策略尚未生成信号时不能提示无策略", async ({ page }) => {
-  await page.route("**/api/strategies", (route) => json(route, [{ ...savedVersion, active: true }]));
-  await page.route("**/api/strategy-lab/observations", (route) => json(route, [{ id: 11, instrument_code: "510500", active: true, rule: { name: "测试趋势" } }]));
+  await page.route("**/api/strategies/catalog", (route) => json(route, { ...catalog, assignments: [assignment] }));
   await page.goto("/?page=etfs&code=510500&detail=signals");
   await expect(page.getByText(/等待下一次运行/)).toBeVisible();
   await expect(page.getByText(/保存并启用一条策略后/)).toHaveCount(0);
 });
 
 test("未知仓位只给方向，历史计划与适用计划分开", async ({ page }) => {
-  await page.route("**/api/strategies", (route) => json(route, [{ ...savedVersion, active: true }]));
-  await page.route("**/api/strategy-lab/observations", (route) => json(route, [{ id: 11, instrument_code: "510500", active: true, rule: { name: "测试趋势" } }]));
-  await page.route("**/api/strategy-lab/signals", (route) => json(route, [{ id: 20, instrument_code: "510500", observation_id: 11,
+  await page.route("**/api/strategies/catalog", (route) => json(route, { ...catalog, assignments: [assignment] }));
+  await page.route("**/api/strategy-lab/signals", (route) => json(route, [{ id: 20, instrument_code: "510500", assignment_id: assignment.id, strategy_id: assignment.strategy_id, strategy_name: "箱体突破",
     execution_date: "2020-01-02", generated_at: "2020-01-01T00:00:00Z", data_cutoff: "2019-12-31", skip_note: null,
     plan: { action: "buy", actual_quantity: null, available_quantity: null, quantity_status: "unknown", target_quantity: null,
       reason: "测试仓位未知", funding_check_required: true, warnings: [] }, execution: { status: "pending", links: [] } }]));
@@ -114,7 +112,7 @@ test("未知仓位只给方向，历史计划与适用计划分开", async ({ pa
 test("数据管理返回目标只允许内部页面", async ({ page }) => {
   await page.goto("/?page=data&manage=jobs&return_to=https%3A%2F%2Fevil.example%2F");
   await expect(page.getByRole("link", { name: /返回原任务/ })).toHaveCount(0);
-  const target = "?page=strategies&code=512100&view=editor&stage=compare";
+  const target = "?page=strategies&code=512100&view=backtest";
   await page.goto(`/?page=data&manage=jobs&task=index-valuations&return_to=${encodeURIComponent(target)}`);
   await expect(page.getByRole("link", { name: /返回原任务/ })).toHaveAttribute("href", target);
 });
@@ -127,14 +125,13 @@ test("有效零国家队比例不显示为缺失", async ({ page }) => {
 
 test("策略状态刷新失败时旧计划不继续列为适用", async ({ page }) => {
   let unavailable = false;
-  await page.route("**/api/strategies", route => json(route, unavailable ? { detail: "测试版本状态不可用" } : [{ ...savedVersion, active: true }], unavailable ? 503 : 200));
-  await page.route("**/api/strategy-lab/observations", route => json(route, [{ id: 11, instrument_code: "510500", active: true, rule: { name: "测试趋势" } }]));
-  await page.route("**/api/strategy-lab/signals", route => json(route, [{ id: 90, instrument_code: "510500", observation_id: 11, execution_date: "2099-01-02", generated_at: "2026-11-06T00:00:00Z", data_cutoff: "2026-11-05", skip_note: null, plan: { action: "buy", actual_quantity: null, quantity_status: "unknown", reason: "测试旧计划", warnings: [] }, execution: { status: "pending", links: [] } }]));
+  await page.route("**/api/strategies/catalog", route => json(route, unavailable ? { detail: "测试策略状态不可用" } : { ...catalog, assignments: [assignment] }, unavailable ? 503 : 200));
+  await page.route("**/api/strategy-lab/signals", route => json(route, [{ id: 90, instrument_code: "510500", assignment_id: assignment.id, strategy_id: assignment.strategy_id, strategy_name: "箱体突破", execution_date: "2099-01-02", generated_at: "2026-11-06T00:00:00Z", data_cutoff: "2026-11-05", skip_note: null, plan: { action: "buy", actual_quantity: null, quantity_status: "unknown", reason: "测试旧计划", warnings: [] }, execution: { status: "pending", links: [] } }]));
   await page.route("**/api/strategy-lab/signals/generate", route => { unavailable = true; return json(route, { created: [], existing: [], blocked: [] }); });
   await page.goto("/?page=etfs&code=510500&detail=signals");
   await expect(page.getByText("测试旧计划", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "检查并生成盘前信号" }).click();
-  await expect(page.getByText(/部分策略状态未取得/)).toBeVisible();
+  await expect(page.getByText(/策略状态未取得/)).toBeVisible();
   await expect(page.getByText("测试旧计划", { exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "历史记录", exact: true }).click();
   await expect(page.getByText("测试旧计划", { exact: true })).toBeVisible();
@@ -142,7 +139,7 @@ test("策略状态刷新失败时旧计划不继续列为适用", async ({ page 
 
 
 test("每日信号按算法因子标签、满足状态和当时数值展示", async ({ page }) => {
-  await page.route("**/api/strategy-lab/signals", (route) => json(route, [{ id: 21, instrument_code: "510500", observation_id: 11,
+  await page.route("**/api/strategy-lab/signals", (route) => json(route, [{ id: 21, instrument_code: "510500", assignment_id: assignment.id, strategy_id: assignment.strategy_id, strategy_name: "箱体突破",
     execution_date: "2020-01-02", generated_at: "2020-01-01T00:00:00Z", data_cutoff: "2019-12-31", skip_note: null,
     plan: { action: "buy", quantity_status: "unknown", actual_quantity: null, reason: "微观条件依据", warnings: [],
       conditions: { buy: [
@@ -157,13 +154,12 @@ test("每日信号按算法因子标签、满足状态和当时数值展示", as
 });
 
 test("每日信号显示算法名称，不显示算法版本号", async ({ page }) => {
-  await page.route("**/api/strategies", (route) => json(route, [{ ...savedVersion, active: true }]));
-  await page.route("**/api/strategy-lab/observations", (route) => json(route, []));
-  await page.route("**/api/strategy-lab/signals", (route) => json(route, [{ id: 91, instrument_code: "510500", observation_id: 11,
+  await page.route("**/api/strategies/catalog", (route) => json(route, { ...catalog, assignments: [assignment] }));
+  await page.route("**/api/strategy-lab/signals", (route) => json(route, [{ id: 91, instrument_code: "510500", assignment_id: assignment.id, strategy_id: assignment.strategy_id, strategy_name: "箱体突破",
     execution_date: "2099-01-02", generated_at: "2026-11-06T00:00:00Z", data_cutoff: "2099-01-01", skip_note: null,
     plan: { action: "wait", quantity_status: "unknown", actual_quantity: null, reason: "测试信号", warnings: [], indicators: { template_version: "1.0.0" } },
     execution: { status: "pending", links: [] } }]));
   await page.goto("/?page=etfs&code=510500&detail=signals");
-  await expect(page.locator(".signal-version")).toHaveText("箱体突破 · 箱体突破");
+  await expect(page.locator(".signal-version")).toHaveText("箱体突破");
   await expect(page.getByText(/第\d+版|1\.0\.0|算法模板版本/)).toHaveCount(0);
 });

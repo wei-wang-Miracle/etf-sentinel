@@ -13,7 +13,6 @@ from sqlalchemy import (
     Index,
     Numeric,
     String,
-    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -532,51 +531,66 @@ Index(
 )
 
 
-class StrategyResearchBatch(Base):
-    """冻结用户采用的算法模板及其来源，数据不随行情同步改写。"""
+class ResearchFactor(Base):
+    """供用户观察和理解的市场因子目录项。"""
 
-    __tablename__ = "strategy_research_batches"
-    __table_args__: ClassVar[dict] = {"comment": "ETF算法模板采用记录批次；冻结模板版本、回测来源及采用时间，不表示真实成交"}
-    research_batch_id: Mapped[int] = mapped_column(primary_key=True, comment="本地研究批次唯一编号")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), comment="研究创建时间，带时区")
-    input_snapshot: Mapped[dict] = mapped_column(JSON, comment="冻结采用输入JSON：模板保存版本编号、回测设置与引擎版本；不含真实账户本金")
-    result_snapshot: Mapped[dict] = mapped_column(JSON, comment="冻结采用结果JSON：关联比较编号、回测编号及后续观察状态")
-    input_sha256: Mapped[str] = mapped_column(String(64), comment="规范输入快照SHA256，核查研究假设未被修改")
+    __tablename__ = "research_factors"
+    __table_args__: ClassVar[dict] = {"comment": "代码实现的可观察市场事件和状态目录；不保存可执行算法或因子版本"}
+    factor_id: Mapped[str] = mapped_column(String(64), primary_key=True, comment="稳定因子身份，关联代码中的因子计算实现")
+    factor_name: Mapped[str] = mapped_column(String(100), comment="因子中文名称，用于图例、悬停和策略说明")
+    category: Mapped[str] = mapped_column(String(40), comment="因子业务分类，例如结构确认、趋势转折、突破事件、超跌状态或反转确认")
+    output_type: Mapped[str] = mapped_column(String(16), comment="因子输出类型：event表示确认事件，state表示进入状态时的标记")
+    meaning: Mapped[str] = mapped_column(comment="面向用户的输出含义及非买卖指令说明，不包含可执行表达式")
+    chart_visible: Mapped[bool] = mapped_column(default=True, comment="是否允许在行情日K图提供显示标记")
 
 
-class StrategyObservation(Base):
-    """用户明确采用的不可变算法模板版本，暂停仅停止新信号。"""
+class ResearchStrategyFactor(Base):
+    """说明策略由哪些因子参与，不承担条件求值。"""
 
-    __tablename__ = "strategy_observations"
+    __tablename__ = "research_strategy_factors"
     __table_args__: ClassVar[tuple] = (
-        Index("uq_strategy_observation_active", "instrument_code", unique=True, postgresql_where=text("active")),
-        {"comment": "ETF算法模板观察版本；采用不代表已下单或实际成交，更新模板需新建版本"},
+        Index("ix_research_strategy_factors_factor_id", "factor_id"),
+        {"comment": "当前策略与观察因子的组成关系；计算顺序和规则由代码负责"},
     )
-    observation_id: Mapped[int] = mapped_column(primary_key=True, comment="观察版本唯一编号")
-    strategy_version_id: Mapped[int | None] = mapped_column(ForeignKey("saved_strategy_versions.strategy_version_id"), nullable=True, comment="采用的算法模板保存版本编号；NULL表示已退役的旧持仓候选观察")
-    research_batch_id: Mapped[int] = mapped_column(ForeignKey("strategy_research_batches.research_batch_id"), comment="模板采用记录所属研究批次编号")
-    instrument_code: Mapped[str] = mapped_column(ForeignKey("instruments.instrument_code"), comment="可交易ETF六位代码，指数不得作为观察对象")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), comment="用户采用时间，带时区；此前历史不算前向业绩")
-    active: Mapped[bool] = mapped_column(default=True, comment="是否继续生成新计划；暂停不修改历史规则及信号")
-    rule_snapshot: Mapped[dict] = mapped_column(JSON, comment="不可变模板JSON：模板标识和版本、算法及顶底版本、ETF冻结参数、模型状态起点、研究本金与成本；不含真实账户本金")
+    strategy_id: Mapped[str] = mapped_column(String(64), primary_key=True, comment="代码目录中的当前策略身份；算法实现不入库")
+    factor_id: Mapped[str] = mapped_column(ForeignKey("research_factors.factor_id"), primary_key=True, comment="策略使用的因子稳定身份")
+    role: Mapped[str] = mapped_column(String(24), comment="因子在策略中的作用：trigger、confirmation、filter、exit或risk")
+    display_order: Mapped[int] = mapped_column(comment="策略说明中因子关系的展示顺序，从0开始")
+
+
+class InstrumentStrategyAssignment(Base):
+    """用户明确采用的每只ETF当前策略分配。"""
+
+    __tablename__ = "instrument_strategy_assignments"
+    __table_args__: ClassVar[tuple] = (
+        Index("uq_instrument_strategy_assignment", "instrument_code", unique=True),
+        {"comment": "每只ETF唯一当前策略分配；未采用时无记录，暂停不清除历史信号"},
+    )
+    assignment_id: Mapped[int] = mapped_column(primary_key=True, comment="当前策略分配唯一编号；更换策略时保持分配身份")
+    instrument_code: Mapped[str] = mapped_column(ForeignKey("instruments.instrument_code"), comment="可交易ETF六位代码；每只ETF至多一条当前分配")
+    strategy_id: Mapped[str] = mapped_column(String(64), comment="当前采用的服务端策略身份；仅研究策略不可分配")
+    active: Mapped[bool] = mapped_column(default=True, comment="是否为该ETF生成后续盘前计划；false表示暂停")
+    comparison_id: Mapped[int] = mapped_column(ForeignKey("strategy_comparisons.comparison_id"), comment="用户据以采用该策略的成功比较记录")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), comment="当前分配首次采用或替换的本地时间，带时区")
+    settings_snapshot: Mapped[dict] = mapped_column(JSON, comment="采用时账户本金、交易成本和模型状态起点；不是可选历史策略版本")
 
 
 class StrategySignal(Base):
-    """某个观察版本在尚未开盘时生成的唯一执行计划。"""
+    """当前策略分配在尚未开盘时生成的唯一执行计划。"""
 
     __tablename__ = "strategy_signals"
     __table_args__: ClassVar[tuple] = (
-        Index("uq_strategy_signal_observation_day", "observation_id", "execution_date", unique=True),
-        {"comment": "ETF逐日观察计划与生成时证据；提示、人工确认和真实成交分开，不回填历史信号"},
+        Index("uq_strategy_signal_assignment_day", "assignment_id", "execution_date", unique=True),
+        {"comment": "ETF逐日策略计划与生成时证据；提示、人工确认和真实成交分开，不回填历史信号"},
     )
     signal_id: Mapped[int] = mapped_column(primary_key=True, comment="日计划唯一编号")
-    observation_id: Mapped[int] = mapped_column(ForeignKey("strategy_observations.observation_id"), comment="产生计划的不可变观察版本编号")
+    assignment_id: Mapped[int] = mapped_column(ForeignKey("instrument_strategy_assignments.assignment_id"), comment="产生计划时所属的ETF当前策略分配编号")
     instrument_code: Mapped[str] = mapped_column(ForeignKey("instruments.instrument_code"), comment="计划对应可交易ETF六位代码")
-    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), comment="首次生成时间，带时区；同版本同执行日重复请求不修改")
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), comment="首次生成时间，带时区；同一分配同一执行日重复请求不修改")
     data_cutoff: Mapped[Date] = mapped_column(comment="决策所用完整行情最后交易日，不晚于生成时已采集数据")
     execution_date: Mapped[Date] = mapped_column(comment="最早执行的尚未开盘交易日；不表示实际成交日")
     plan_snapshot: Mapped[dict] = mapped_column(JSON, comment="冻结计划JSON：方向、研究目标比例份额、实际及可用份额、数据源日期、原因、因子、输入摘要和待资金核对提示")
-    evidence_snapshot: Mapped[dict] = mapped_column(JSON, comment="决策证据JSON：当时完整行情、权益、规则版本及采集时刻，可重算；不使用后来修订覆盖")
+    evidence_snapshot: Mapped[dict] = mapped_column(JSON, comment="决策证据JSON：策略身份、规则与采用时刻、当时的行情权益、采集时刻及账户证据；不使用后来修订覆盖")
     skip_note: Mapped[str | None] = mapped_column(comment="用户明确不执行的原因；空表示未主动跳过，不等于未成交证明")
     skipped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), comment="人工跳过确认时间，带时区；未跳过为空")
 
@@ -601,46 +615,24 @@ class StrategyExecutionLink(Base):
     confirmation_note: Mapped[str] = mapped_column(comment="人工确认依据或偏离说明，不可空白；不包含自动下单含义")
 
 
-class SavedStrategy(Base):
-    """算法模板与可交易ETF的稳定绑定。"""
-
-    __tablename__ = "saved_strategies"
-    __table_args__: ClassVar[tuple] = (
-        Index("uq_saved_strategy_etf_algorithm", "instrument_code", "algorithm_template_id", unique=True),
-        {"comment": "共享算法与可交易ETF的绑定；保存不自动启用，不代表真实交易"},
-    )
-    strategy_id: Mapped[int] = mapped_column(primary_key=True, comment="算法与ETF绑定的稳定编号，后续不可变回测记录共用")
-    algorithm_template_id: Mapped[str | None] = mapped_column(String(64), comment="服务端算法模板稳定标识，不含版本；NULL仅表示历史逐ETF规则")
-    instrument_code: Mapped[str] = mapped_column(ForeignKey("instruments.instrument_code"), comment="绑定的可交易ETF六位证券代码，指数不可作为主体")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), comment="首次保存策略身份的带时区本地时间")
-
-
 class StrategyComparison(Base):
-    """冻结同ETF算法模板的统一假设、数据及成功失败结果。"""
+    """冻结当前策略的统一假设、数据及成功失败结果。"""
 
     __tablename__ = "strategy_comparisons"
-    __table_args__: ClassVar[dict] = {"comment": "单ETF算法模板统一比较记录；包含模板版本、失败对象及研究证据类型，不覆盖既有回测或启用状态"}
+    __table_args__: ClassVar[dict] = {"comment": "单ETF当前策略统一比较记录；保存本次研究证据，不构成可选择的策略版本"}
     comparison_id: Mapped[int] = mapped_column(primary_key=True, comment="本次统一比较的唯一编号")
     instrument_code: Mapped[str] = mapped_column(ForeignKey("instruments.instrument_code"), comment="比较的唯一可交易ETF证券代码")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), comment="比较完成并保存的带时区本地时间")
-    input_sha256: Mapped[str] = mapped_column(String(64), comment="规范输入JSON的SHA256，包括策略版本、共同假设及全部输入快照")
-    input_snapshot: Mapped[dict] = mapped_column(JSON, comment="不可变JSON：settings统一区间本金费用、candidates模板及版本、market行情权益日历、external各日期外部指标与采集证据、引擎及算法版本")
-    result_snapshot: Mapped[dict] = mapped_column(JSON, comment="不可变JSON：tracks各模板与持有参照的status成功失败、reason原因、backtest_id、account日权益成交分红绩效、完整平仓轮次及未平仓诊断；complete表示全部成功")
+    input_sha256: Mapped[str] = mapped_column(String(64), comment="本次比较全部策略身份、共同假设与市场输入规范JSON的SHA256摘要")
+    input_snapshot: Mapped[dict] = mapped_column(JSON, comment="不可变JSON：settings统一区间本金费用、candidates当前策略身份、market行情权益日历、external外部指标及引擎/数据摘要")
+    result_snapshot: Mapped[dict] = mapped_column(JSON, comment="不可变JSON：tracks策略与持有参照的状态、原因、回测编号、日权益成交分红绩效及平仓诊断")
 
 
-class SavedStrategyVersion(Base):
-    """有效模板回测产生的不可变策略版本，启用状态由观察记录表示。"""
+class StrategyComparisonFactor(Base):
+    """记录一次比较中各策略轨道实际引用的因子身份。"""
 
-    __tablename__ = "saved_strategy_versions"
-    __table_args__: ClassVar[tuple] = (
-        Index("uq_saved_strategy_version", "strategy_id", "version_number", unique=True),
-        {"comment": "算法模板不可变版本；模板版本、预算、费用和原回测固定，更新需保存新版本"},
-    )
-    strategy_version_id: Mapped[int] = mapped_column(primary_key=True, comment="算法模板策略具体版本唯一编号，与稳定strategy_id不同")
-    strategy_id: Mapped[int] = mapped_column(ForeignKey("saved_strategies.strategy_id"), comment="归属策略稳定编号")
-    version_number: Mapped[int] = mapped_column(comment="同一策略内从1递增的版本号")
-    strategy_name: Mapped[str] = mapped_column(String(100), comment="保存时的算法中文名称；历史记录保留原名称，非收益承诺")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), comment="版本保存时间，带时区")
-    configuration: Mapped[dict] = mapped_column(JSON, comment="不可变JSON：template为冻结算法标识、版本和规则，settings为回测日期、本金、成本及ETF；历史逐ETF规则保留原快照")
-    backtest_run_id: Mapped[int] = mapped_column(ForeignKey("backtest_runs.backtest_run_id"), comment="已成功核算且规则配置相符的不可变原回测编号")
-    comparison_id: Mapped[int] = mapped_column(ForeignKey("strategy_comparisons.comparison_id"), comment="产生该有效回测的统一比较编号")
+    __tablename__ = "strategy_comparison_factors"
+    __table_args__: ClassVar[dict] = {"comment": "单次比较轨道与实际使用因子的关系；仅研究引用记录，不保存因子代码版本"}
+    comparison_id: Mapped[int] = mapped_column(ForeignKey("strategy_comparisons.comparison_id"), primary_key=True, comment="所属策略比较记录")
+    strategy_id: Mapped[str] = mapped_column(String(64), primary_key=True, comment="本轨道运行的代码目录策略身份")
+    factor_id: Mapped[str] = mapped_column(ForeignKey("research_factors.factor_id"), primary_key=True, comment="本轨道实际使用的因子身份")

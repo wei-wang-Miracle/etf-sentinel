@@ -1,0 +1,73 @@
+import pytest
+from fastapi import HTTPException
+from pydantic import ValidationError
+
+from app.models import Base
+from app.research_factors import FACTORS, STRATEGIES
+from app.strategy_workbench import _candidate
+
+
+def test_factor_and_strategy_tables_replace_algorithm_version_storage():
+    tables = Base.metadata.tables
+
+    assert {
+        "research_factors",
+        "research_strategy_factors",
+        "instrument_strategy_assignments",
+        "strategy_comparisons",
+        "strategy_comparison_factors",
+        "strategy_signals",
+        "strategy_execution_links",
+    } <= tables.keys()
+    assert not {
+        "saved_strategies",
+        "saved_strategy_versions",
+        "strategy_observations",
+        "strategy_research_batches",
+    } & tables.keys()
+    assert set(tables["research_factors"].primary_key.columns.keys()) == {"factor_id"}
+    assert set(tables["instrument_strategy_assignments"].primary_key.columns.keys()) == {"assignment_id"}
+    assert "assignment_id" in tables["strategy_signals"].c
+    assert "factor_id" in tables["strategy_comparison_factors"].c
+    assert "research_strategies" not in tables
+    assert set(STRATEGIES) == {
+        "range_breakout",
+        "bottom_confirmation",
+        "hybrid_reversal",
+        "range_breakout_research",
+        "left_reversal_research",
+    }
+
+
+def test_research_factor_directory_has_matching_database_columns_and_comments():
+    factor_table = Base.metadata.tables["research_factors"]
+    relation_table = Base.metadata.tables["research_strategy_factors"]
+
+    assert set(FACTORS)  # Registry contains the complete first research set.
+    assert factor_table.comment and all(column.comment for column in factor_table.columns)
+    assert relation_table.comment and all(column.comment for column in relation_table.columns)
+    assert all({factor_id for factor_id, _ in strategy["factors"]} <= set(FACTORS) for strategy in STRATEGIES.values())
+
+
+def test_legacy_overfit_multifactor_is_not_a_current_strategy():
+    with pytest.raises(HTTPException, match="策略不可用"):
+        _candidate("etf_multifactor", "510300")
+
+
+def test_strategy_comparison_request_uses_strategy_identities_only():
+    from app.strategy_workbench import ComparisonRequest
+
+    request = ComparisonRequest.model_validate({
+        "instrument_code": "510300",
+        "start_date": "2025-01-01",
+        "end_date": "2025-12-31",
+        "strategies": ["range_breakout"],
+    })
+    assert request.strategies == ["range_breakout"]
+    with pytest.raises(ValidationError):
+        ComparisonRequest.model_validate({
+            "instrument_code": "510300",
+            "start_date": "2025-01-01",
+            "end_date": "2025-12-31",
+            "templates": [{"id": "range_breakout", "version": "1.0.0"}],
+        })

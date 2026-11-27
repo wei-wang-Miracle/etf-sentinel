@@ -4,7 +4,7 @@ test("主导航保留正在研究的ETF，不默选第一只", async ({ page }) 
   await page.goto("/?page=etfs&code=512100&object=etf:512100&detail=overview");
   await page.getByRole("button", { name: "我的策略", exact: true }).click();
   await expect(page).toHaveURL(/code=512100/);
-  await page.getByRole("button", { name: "开始算法对比" }).click();
+  await page.getByRole("button", { name: "开始策略对比" }).click();
   await expect(page.getByLabel("回测 ETF", { exact: true })).toHaveValue("512100");
 });
 
@@ -47,7 +47,7 @@ test("业务Tab使用方向键且唯一当前项进入Tab序", async ({ page }) 
 
 test("没有对象时策略页要求选择，不自动选择配置第一只", async ({ page }) => {
   await page.goto("/?page=strategies");
-  await page.getByRole("button", { name: "开始算法对比" }).click();
+  await page.getByRole("button", { name: "开始策略对比" }).click();
   await expect(page.getByLabel("回测 ETF", { exact: true })).toHaveValue("");
   await expect(page.getByText("先选择 ETF，再比较算法。", { exact: true })).toBeVisible();
 });

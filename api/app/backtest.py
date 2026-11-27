@@ -19,6 +19,13 @@ def money(value):
     return value.quantize(CENT, rounding=ROUND_HALF_UP)
 
 
+def execution_price(opening, side, slip):
+    """按单边滑点和最小报价单位向不利方向取整。"""
+    return (
+        opening * (1 + slip if side == "buy" else 1 - slip) / TICK
+    ).to_integral_value(rounding=ROUND_CEILING if side == "buy" else ROUND_FLOOR) * TICK
+
+
 def metrics(daily, trades, initial):
     """以期初资金为初始净值，计算含应收分红、未强平的收盘收益。"""
     values = [initial, *[Decimal(r["equity"]) for r in daily]]
@@ -113,11 +120,7 @@ def simulate(rows, dividends, settings, signals, begin, *, benchmark=False):
         note = ""
         if side:
             opening = Decimal(row["open"])
-            price = (
-                opening * (1 + slip if side == "buy" else 1 - slip) / TICK
-            ).to_integral_value(
-                rounding=ROUND_CEILING if side == "buy" else ROUND_FLOOR
-            ) * TICK
+            price = execution_price(opening, side, slip)
             count = quantity if side == "sell" else int(cash / (price * 100)) * 100
             if side == "buy":
                 while (

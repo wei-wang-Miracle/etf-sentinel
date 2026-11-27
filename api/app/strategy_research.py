@@ -28,10 +28,11 @@ def with_reserve(account, reserve):
     return result
 
 
-def diagnostics(account, initial=RESEARCH_CASH):
+def diagnostics(account, initial=RESEARCH_CASH, *, dividend_record_dates=None):
     """补充水下交易日、在场比例和完整退出轮次，末尾未平仓单列。
 
     轮次净盈亏包含买卖佣金及持有期间权益分红，滑点已体现在成交价格中。
+    指定除息日到登记日的映射时，按登记日收盘持仓归属已入账权益；否则保留旧口径。
     仅适用于现有空满仓引擎的一买一卖账户，不推断真实委托先后。
     """
     peak, underwater, longest = initial, 0, 0
@@ -42,6 +43,13 @@ def diagnostics(account, initial=RESEARCH_CASH):
             longest = max(longest, underwater)
         else:
             peak, underwater = equity, 0
+
+    def held_for_dividend(ex_date, entry_date, exit_date):
+        if dividend_record_dates is None:
+            return entry_date <= ex_date <= exit_date
+        # 卖出在开盘，登记日收盘时已不持有。同理，登记日开盘买入可取得权益。
+        return entry_date <= dividend_record_dates[ex_date] < exit_date
+
     rounds, opening = [], None
     for trade in account["trades"]:
         if trade["side"] == "buy":
@@ -52,9 +60,9 @@ def diagnostics(account, initial=RESEARCH_CASH):
                     Decimal(event["amount"])
                     for event in account["dividends"]
                     if event["kind"] == "receivable"
-                    and opening["trade_date"]
-                    <= event["trade_date"]
-                    <= trade["trade_date"]
+                    and held_for_dividend(
+                        event["trade_date"], opening["trade_date"], trade["trade_date"]
+                    )
                 ),
                 Decimal(0),
             )

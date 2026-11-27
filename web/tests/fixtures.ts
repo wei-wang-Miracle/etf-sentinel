@@ -6,28 +6,27 @@ export const instruments = ["510500", "512100"].map((code, index) => ({
   start_date: "2024-01-01", first_date: "2024-01-02", last_date: "2026-11-06",
   count: 600, source: "测试行情",
 }));
+export const factorCatalog = {
+  factors: [
+    { id: "turning_bottom", name: "阶段底部确认" },
+    { id: "turning_top", name: "阶段顶部确认" },
+    { id: "volume_breakout_up", name: "放量向上突破" },
+  ].map((factor) => ({ ...factor, category: "结构确认", meaning: "仅用于观察。", chart_visible: true, output_type: "event" })),
+};
 export const catalog = {
   instruments: instruments.map((item) => ({ instrument_code: item.code, instrument_name: item.name,
     first_date: item.first_date, last_date: item.last_date, default_start: "2025-01-02", default_end: item.last_date, source_checked_through: "2026-11-06" })),
-  templates: [["range_breakout", "箱体突破"], ["bottom_confirmation", "底部确认"]].map(([id, name]) => ({
-    id, version: "1.0.0", name, status: "experimental", description: `${name}的测试规则`,
-    supported_instruments: ["510500", "512100"], note: "回测不代表未来收益。",
-    turning_profiles_by_instrument: {
-      "510500": { group: "mid", group_name: "中盘", parameters: { background_days: 3, slope_threshold: 0.01, breakout_window: 3, confirmation_ma_window: 20, confirmation_days: 3, breakout_atr_multiplier: 0.2, cooldown_days: 30, top_breakout_window: 3, top_ma_window: 3, top_confirmation_days: 1, top_trailing_atr: 3 } },
-      "512100": { group: "small", group_name: "小盘", parameters: { background_days: 5, slope_threshold: 0.01, breakout_window: 3, confirmation_ma_window: 5, confirmation_days: 3, breakout_atr_multiplier: 0.2, cooldown_days: 0, top_breakout_window: 3, top_ma_window: 3, top_confirmation_days: 1, top_trailing_atr: 3 } },
-    },
+  strategies: [["range_breakout", "箱体突破"], ["bottom_confirmation", "底部确认"], ["hybrid_reversal", "复合反转"]].map(([id, name]) => ({
+    id, name, description: `${name}的测试规则`, supported_instruments: ["510500", "512100"],
+    factors: [{ ...factorCatalog.factors[id === "range_breakout" ? 2 : 0], role: "trigger" }],
   })),
-};
-export const template = {
-  id: "range_breakout", version: "1.0.0", name: "箱体突破", status: "experimental",
-  rule: { family: "breakout", fast: 5, slow: 60, buy_votes: 3, value_max: 80 },
-  algorithm_version: "multifactor-v1", turning_version: "slope-structure-paired-v4",
-  note: "回测不代表未来收益。",
+  assignments: [] as StrategyAssignment[],
 };
 export const settings = { instrument_code: "510500", start_date: "2025-01-02", end_date: "2026-11-06",
   initial_cash: "50000", commission_rate: "0.0001", minimum_commission: "0", slippage_bps: "5" };
-export const savedVersion = { id: 10, strategy_id: 1, algorithm_template_id: "range_breakout", name: "箱体突破", version: 1, instrument_code: "510500",
-  template, settings, backtest_id: 1, comparison_id: 5, active: false, observation_id: 11, created_at: "2026-11-06T08:00:00Z" };
+type StrategyAssignment = { id: number; strategy_id: string; instrument_code: string; comparison_id: number; active: boolean; adopted_at: string };
+export const assignment: StrategyAssignment = { id: 10, strategy_id: "range_breakout", instrument_code: "510500",
+  comparison_id: 5, active: true, adopted_at: "2026-11-05T08:00:00Z" };
 export const holdings = { as_of: "2026-11-06", items: instruments.map((item) => ({
   instrument_code: item.code, instrument_name: item.name, current_amount: 1000, enable_amount: 1000,
   market_value: 5000, cost_price: 4, latest_close_date: "2026-11-06",
@@ -43,7 +42,7 @@ export const comparison = {
   input_sha256: "test-input-snapshot", complete: true, data_cutoff: "2026-11-06",
   note: "测试模板回测结果，不代表未来表现。",
   market_rows: candles.map(({ date, ...rest }) => ({ ...rest, trade_date: date })),
-  tracks: [{ key: "template:range_breakout:1.0.0", backtest_id: 1, name: template.name, status: "success", template, allocation: 100, account: {
+  tracks: [{ key: "strategy:range_breakout", backtest_id: 1, name: "箱体突破", strategy_id: "range_breakout", status: "success", account: {
     daily: candles.map((row, index) => ({ trade_date: row.date, nav: 1 + index / 1000, drawdown: 0,
       cash: "0", quantity: 10000, equity: "51000", position_weight: 1, reason: "测试", execution_note: "", dividend_receivable: "0" })),
     trades: [], metrics: { total_return: 0.05, max_drawdown: -0.03, final_equity: "52500", trade_count: 2,
@@ -73,16 +72,14 @@ export async function mockApi(page: Page) {
       markers: [], start: settings.start_date, end: settings.end_date, quality: { issues: [] }, comparability: "测试数据不代表真实收益" });
     if (path === "/strategies/catalog") return json(route, catalog);
     if (path === "/strategies/comparisons") return json(route, request.method() === "POST" ? comparison : []);
-    if (path === "/strategies") return json(route, request.method() === "POST" ? savedVersion : []);
-    if (/\/strategies\/\d+\/enable/.test(path)) return json(route, { ...savedVersion, active: true });
-    if (/\/strategies\/\d+\/pause/.test(path)) return json(route, { ...savedVersion, active: false });
     if (/\/strategies\/comparisons\/\d+$/.test(path)) return json(route, comparison);
     if (/\/strategies\/comparisons\/\d+\/verify$/.test(path)) return json(route, { identical: true });
-    if (path === "/strategy-lab/signals" || path === "/strategy-lab/observations") return json(route, []);
+    if (path === "/strategy-lab/signals") return json(route, []);
     if (path.endsWith("/job") || path === "/job") return json(route, job);
     if (path === "/research/universe") return json(route, { items: instruments.map((item) => ({ ...item, held: true })), default_code: "510500" });
     if (path === "/research/object") return json(route, summary(url.searchParams.get("code") || "510500"));
-    if (path.endsWith("/turning-events")) return json(route, { events: [], data_cutoff: null, partial: false });
+    if (path === "/factors") return json(route, factorCatalog);
+    if (path.endsWith("/factors")) return json(route, { events: [], data_cutoff: null, partial: false, warmup_insufficient: false });
     if (path.startsWith("/candles/")) return json(route, candles);
     if (path === "/backtests") return json(route, []);
     return json(route, { detail: `测试未配置接口：${request.method()} ${path}` }, 404);

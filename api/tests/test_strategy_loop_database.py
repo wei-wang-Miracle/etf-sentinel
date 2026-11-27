@@ -13,8 +13,8 @@ from app.db import Session
 from app.main import app
 from app.models import (
     AccountEntrust,
-    StrategyObservation,
-    StrategyResearchBatch,
+    InstrumentStrategyAssignment,
+    StrategyComparison,
     StrategySignal,
 )
 
@@ -37,25 +37,27 @@ def frozen_sell_signal():
     """直接落库一条盘前卖出计划，核对保留的人工确认链路。"""
     stamp = datetime(2026, 7, 1, 8, tzinfo=ZoneInfo("Asia/Shanghai"))
     with Session() as db:
-        batch = StrategyResearchBatch(
+        comparison = StrategyComparison(
+            instrument_code="159205",
             created_at=stamp,
             input_snapshot={"kind": "single_etf"},
             result_snapshot={},
             input_sha256="a" * 64,
         )
-        db.add(batch)
+        db.add(comparison)
         db.flush()
-        observation = StrategyObservation(
-            research_batch_id=batch.research_batch_id,
+        assignment = InstrumentStrategyAssignment(
+            comparison_id=comparison.comparison_id,
             instrument_code="159205",
+            strategy_id="range_breakout",
             created_at=stamp,
             active=False,
-            rule_snapshot={},
+            settings_snapshot={},
         )
-        db.add(observation)
+        db.add(assignment)
         db.flush()
         signal = StrategySignal(
-            observation_id=observation.observation_id,
+            assignment_id=assignment.assignment_id,
             instrument_code="159205",
             generated_at=stamp,
             data_cutoff=date(2026, 6, 30),
@@ -65,7 +67,7 @@ def frozen_sell_signal():
                 "requested_quantity": "1000",
                 "quantity_status": "available",
             },
-            evidence_snapshot={},
+            evidence_snapshot={"strategy_id": "range_breakout", "rule": {"name": "箱体突破"}},
         )
         db.add(signal)
         db.commit()

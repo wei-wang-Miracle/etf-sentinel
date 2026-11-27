@@ -1,11 +1,13 @@
 import type { Page } from "@playwright/test";
-import { test, expect, json } from "./fixtures";
+import { test, expect, factorCatalog, json } from "./fixtures";
 import { reversalRows } from "./turning-fixtures";
 
 const rows = reversalRows();
 const start = rows[0].date;
 const end = rows.at(-1)!.date;
 const url = `/?page=etfs&code=510500&detail=overview&tab=price&start=${start}&end=${end}`;
+const event = (index: number, factor: number) => ({ ...factorCatalog.factors[factor],
+  factor_id: factorCatalog.factors[factor].id, trade_date: rows[index].date });
 
 async function chartState(page: Page) {
   return page.locator(".kline").evaluate(async (element) => {
@@ -30,21 +32,18 @@ test.beforeEach(async ({ page }) => {
   await page.route("**/api/candles/512100?*", (route) => json(route, rows));
 });
 
-test("行情只展示服务端统一顶底确认因子", async ({ page }) => {
-  const events = [
-    { date: rows[112].date, kind: "bottom" },
-    { date: rows[200].date, kind: "top" },
-  ];
-  await page.route("**/api/candles/510500/turning-events?*", (route) => {
+test("行情默认展示阶段顶底，可叠加同日的其他因子", async ({ page }) => {
+  const events = [event(112, 0), event(112, 2), event(200, 1)];
+  await page.route("**/api/candles/510500/factors?*", (route) => {
     const query = new URL(route.request().url()).searchParams;
     return json(route, {
-      events: events.filter((event) => event.date >= query.get("start")! && event.date <= query.get("end")!),
+      events: events.filter((item) => item.trade_date >= query.get("start")! && item.trade_date <= query.get("end")!),
       data_cutoff: query.get("end"),
       partial: false,
     });
   });
-  await page.route("**/api/candles/512100/turning-events?*", (route) => json(route, {
-    events: [{ date: rows[140].date, kind: "top" }],
+  await page.route("**/api/candles/512100/factors?*", (route) => json(route, {
+    events: [event(140, 1)],
     data_cutoff: rows[190].date,
     partial: true,
   }));
@@ -52,14 +51,18 @@ test("行情只展示服务端统一顶底确认因子", async ({ page }) => {
   await page.goto(url);
   await expect(page.getByLabel("顶底来源")).toHaveCount(0);
   await expect.poll(async () => (await chartState(page)).markers.map((marker) => ({ name: marker.name, coord: marker.coord }))).toEqual([
-    { name: "底部确认", coord: [rows[112].date, rows[112].low] },
-    { name: "顶部确认", coord: [rows[200].date, rows[200].high] },
+    { name: "阶段底部确认", coord: [rows[112].date, rows[112].low] },
+    { name: "阶段顶部确认", coord: [rows[200].date, rows[200].high] },
   ]);
+  await page.getByText(/因子标记 · 已选/).click();
+  await page.getByRole("checkbox", { name: /放量向上突破/ }).check();
+  await expect.poll(async () => (await chartState(page)).markers.filter((marker) => marker.coord[0] === rows[112].date).map((marker) => marker.name)).toEqual(["阶段底部确认", "放量向上突破"]);
   await page.getByText("键盘日期读数", { exact: true }).click();
   await page.getByLabel("读数日期").selectOption(rows[112].date);
   await expect(page.locator(".chart-readout .readout-values")).toContainText("底部确认");
+  await expect(page.locator(".chart-readout .readout-values")).toContainText("放量向上突破");
   await page.getByRole("checkbox", { name: /底部确认/ }).uncheck();
-  await expect.poll(async () => (await chartState(page)).markers.map((marker) => marker.name)).toEqual(["顶部确认"]);
+  await expect.poll(async () => (await chartState(page)).markers.map((marker) => marker.name)).toEqual(["放量向上突破", "阶段顶部确认"]);
   await page.getByLabel("当前 ETF").selectOption("512100");
   await expect(page.getByText(/部分行情日期尚未核验权益/)).toBeVisible();
   await expect.poll(async () => (await chartState(page)).markers.map((marker) => marker.coord[0])).toEqual([rows[140].date]);
@@ -69,14 +72,14 @@ test("顶底接口失败时保留日K但不回退到本地实验算法", async (
   let requests = 0;
   let verified = false;
   let runs: unknown[] = [];
-  await page.route("**/api/candles/510500/turning-events?*", async (route) => {
+  await page.route("**/api/candles/510500/factors?*", async (route) => {
     requests += 1;
     if (!verified) {
       if (requests > 1) await new Promise((resolve) => setTimeout(resolve, 500));
       await json(route, { detail: "尚无已核验权益资料" }, 422);
       return;
     }
-    await json(route, { events: [{ date: rows[112].date, kind: "bottom" }], data_cutoff: end, partial: false });
+    await json(route, { events: [event(112, 0)], data_cutoff: end, partial: false });
   });
   await page.route("**/api/job", (route) => json(route, {
     enabled: true, time: "01:00", next_run: null, source_configured: true, runs,
@@ -101,10 +104,10 @@ test("顶底接口失败时保留日K但不回退到本地实验算法", async (
   await expect(page.getByRole("link", { name: "到行情任务批量更新权益资料", exact: true })).toHaveAttribute("href", /page=data.*manage=jobs.*code=510500.*task=etf/);
 
   const beforeRetry = requests;
-  const retried = page.waitForRequest((request) => request.url().includes("/api/candles/510500/turning-events"));
+  const retried = page.waitForRequest((request) => request.url().includes("/api/candles/510500/factors"));
   await page.getByRole("button", { name: "重试标点", exact: true }).click();
   await retried;
-  await expect(page.getByRole("status")).toContainText("正在读取顶底确认因子");
+  await expect(page.getByRole("status")).toContainText("正在读取因子标记");
   await expect(page.getByRole("status")).toContainText("尚无已核验权益资料");
   expect(requests).toBe(beforeRetry + 1);
 
@@ -118,5 +121,5 @@ test("顶底接口失败时保留日K但不回退到本地实验算法", async (
   await expect(page.getByText("已核验：现金分红 0 项，份额折算 0 项", { exact: true })).toBeVisible();
   await page.getByRole("link", { name: "返回原任务 · 510500", exact: true }).click();
   await expect(page).toHaveURL(/page=etfs.*code=510500/);
-  await expect.poll(async () => (await chartState(page)).markers.map((marker) => marker.name)).toEqual(["底部确认"]);
+  await expect.poll(async () => (await chartState(page)).markers.map((marker) => marker.name)).toEqual(["阶段底部确认"]);
 });

@@ -3,6 +3,7 @@
 from decimal import ROUND_CEILING, Decimal
 from statistics import fmean
 
+from app.indicators import prior_close_margin, volume_ratio
 from app.strategies import Decision, features
 
 VERSION = "multifactor-v1"
@@ -47,11 +48,11 @@ def build_factors(rows, dividends, turning, external=None):
             "bias": {w: values[i] / avg - 1 if avg else None for w, avg in averages.items()},
             "momentum": {w: values[i] / values[i - w] - 1 if i >= w else None
                          for w in (1, 3, 5, 10, 20)},
-            "break_up": {w: values[i] > max(values[i - w:i]) if i >= w else None
+            "break_up": {w: prior_close_margin(values, i, w) > 0 if i >= w else None
                          for w in BREAK_WINDOWS},
             "break_down": {w: values[i] < min(values[i - w:i]) if i >= w else None
                            for w in BREAK_WINDOWS},
-            "volume_ratio": volumes[i] / fmean(volumes[i - 20:i]) if i >= 20 else None,
+            "volume_ratio": volume_ratio(volumes, i),
             "bottom_age": i - last["bottom"], "top_age": i - last["top"],
             **{key: float(raw) if (raw := external.get(key, {}).get(
                 rows[i - 1]["trade_date"], {}).get("value")) is not None and i else None

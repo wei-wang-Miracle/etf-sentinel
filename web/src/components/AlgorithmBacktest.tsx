@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { api, stamp } from "../lib/api";
 import { dateAgo } from "../lib/research";
-import { journeyUrl, templateKey, type Comparison, type JourneyCatalog, type SavedStrategy } from "../lib/strategyJourney";
+import { journeyUrl, type Comparison, type ComparisonTrack, type JourneyCatalog, type StrategyAssignment } from "../lib/strategyJourney";
 import { useApiResource } from "../lib/useApiResource";
 import StrategyComparison from "./StrategyComparison";
 
@@ -12,23 +12,25 @@ type Props = {
   range: { start: string; end: string };
   theme: string;
   onCode: (code: string) => void;
-  onSaved: (value: SavedStrategy) => void;
+  onAdopted: () => void;
 };
 
-export default function AlgorithmBacktest({ catalog, code, algorithm, range, theme, onCode, onSaved }: Props) {
+export default function AlgorithmBacktest({ catalog, code, algorithm, range, theme, onCode, onAdopted }: Props) {
   const instrument = catalog.instruments.find((item) => item.instrument_code === code);
-  const available = catalog.templates.filter((item) => item.supported_instruments.includes(code));
-  const initialTemplate = available.find((item) => item.id === algorithm || templateKey(item) === algorithm);
+  const available = catalog.strategies.filter((item) => item.supported_instruments.includes(code));
+  const initialTemplate = available.find((item) => item.id === algorithm);
   const yesterday = dateAgo(1);
   const maxDate = instrument?.default_end ?? yesterday;
   const [start, setStart] = useState(range.start || instrument?.default_start || "");
   const [end, setEnd] = useState(range.end || instrument?.default_end || "");
   const [selected, setSelected] = useState(() => initialTemplate ? [initialTemplate.id] : available.map((item) => item.id));
   const choices = available.filter((item) => selected.includes(item.id));
-  const signature = JSON.stringify([code, start, end, choices.map(templateKey)]);
+  const signature = JSON.stringify([code, start, end, choices.map((item) => item.id)]);
   const [current, setCurrent] = useState<{ signature: string; result: Comparison }>();
   const [historicalId, setHistoricalId] = useState<number>();
-  const [saved, setSaved] = useState<Record<string, SavedStrategy>>({});
+  const [adopted, setAdopted] = useState<StrategyAssignment>();
+  const [pending, setPending] = useState<ComparisonTrack>();
+  const assignment = adopted ?? catalog.assignments.find((row) => row.instrument_code === code);
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState<string>();
   const [error, setError] = useState("");
@@ -46,24 +48,28 @@ export default function AlgorithmBacktest({ catalog, code, algorithm, range, the
     try {
       const value = await api<Comparison>("/strategies/comparisons", "POST", {
         instrument_code: code, start_date: start, end_date: end,
-        templates: choices.map(({ id, version }) => ({ id, version })),
+        strategies: choices.map(({ id }) => id),
       });
       setCurrent({ result: value, signature });
       setHistoricalId(undefined);
-      setSaved({});
+      setPending(undefined);
       history.retry();
     } catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
   }
 
-  async function save(trackKey: string) {
-    if (!result || stale || busy || saving) return;
-    setSaving(trackKey);
+  async function adopt() {
+    if (!result || !pending || historicalId || stale || busy || saving) return;
+    setSaving(pending.key);
     setError("");
     try {
-      const value = await api<SavedStrategy>("/strategies", "POST", { comparison_id: result.id, track_key: trackKey });
-      setSaved((items) => ({ ...items, [`${result.id}:${trackKey}`]: value }));
-      onSaved(value);
+      const value = await api<StrategyAssignment>("/strategies/adopt", "POST", {
+        comparison_id: result.id, strategy_id: pending.strategy_id,
+        replace_active: !!assignment && assignment.strategy_id !== pending.strategy_id,
+      });
+      setAdopted(value);
+      setPending(undefined);
+      onAdopted();
     } catch (e) { setError((e as Error).message); }
     finally { setSaving(undefined); }
   }
@@ -100,14 +106,17 @@ export default function AlgorithmBacktest({ catalog, code, algorithm, range, the
     </section>
     {error && <p className="notice warning" role="alert">{error}</p>}
     {busy && <p className="notice" role="status">正在按同一份行情计算各算法和持有参照…</p>}
-    {stale && <p className="notice" role="status">研究范围已变更，请重新运行后再保存。</p>}
+    {stale && <p className="notice" role="status">研究范围已变更，请重新运行后再采用。</p>}
     {historical.loading && <p className="notice" role="status">正在读取回测快照…</p>}
     {historical.error && <p className="notice warning" role="alert">{historical.error} <button onClick={historical.retry}>重试</button></p>}
-    {result && <StrategyComparison key={result.id} result={result} theme={theme} renderBinding={!stale ? (track) => {
-      if (!track.template || !track.key.startsWith("template:") || !track.account || track.status !== "success") return <span className="muted">—</span>;
-      const binding = saved[`${result.id}:${track.key}`];
-      if (binding) return <><span role="status">已绑定 · {binding.active ? "已启用" : "未启用"}</span><br /><a href={journeyUrl("strategies", code, { view: "version", edit: String(binding.id) })} aria-label={`查看${track.name}绑定`}>查看绑定</a></>;
-      return <button type="button" disabled={busy || !!saving} aria-label={`保存并绑定${track.name}`} onClick={() => void save(track.key)}>{saving === track.key ? "保存中…" : "保存并绑定"}</button>;
+    {pending && !historicalId && !stale && <section className="notice" aria-label="确认采用策略">
+      <p>{assignment && assignment.strategy_id !== pending.strategy_id ? "替换当前策略为" : "采用"}「{pending.name}」用于 <span className="mono">{code}</span> 的后续盘前信号。历史计划保留，不会下单。</p>
+      <div className="journey-actions"><button className="primary" disabled={!!saving} onClick={() => void adopt()}>确认采用</button><button disabled={!!saving} onClick={() => setPending(undefined)}>取消</button></div>
+    </section>}
+    {result && <StrategyComparison key={result.id} result={result} theme={theme} renderAdoption={!stale && !historicalId ? (track) => {
+      if (track.strategy_id === "hold" || !track.account || track.status !== "success") return <span className="muted">—</span>;
+      if (assignment?.active && assignment.strategy_id === track.strategy_id) return <a href={journeyUrl("etfs", code, { detail: "signals" })}>当前已采用 · 查看信号</a>;
+      return <button type="button" disabled={busy || !!saving} aria-label={`采用${track.name}`} onClick={() => setPending(track)}>采用策略</button>;
     } : undefined} />}
     {code && <details className="panel journey-inset">
       <summary>历史回测</summary>

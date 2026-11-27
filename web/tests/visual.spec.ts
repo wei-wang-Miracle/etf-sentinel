@@ -16,7 +16,7 @@ for (const width of [1440, 1024, 768, 390]) {
   }
 }
 for (const width of [1440, 390]) {
-  for (const screen of ["strategies&code=510500&view=editor", "etfs&code=510500&detail=operations", "etfs&code=510500&detail=signals", "data&manage=account"]) {
+  for (const screen of ["strategies&code=510500&view=backtest", "etfs&code=510500&detail=operations", "etfs&code=510500&detail=signals", "data&manage=account"]) {
     test(`主要工作区 ${width} ${screen}`, async ({ page }) => {
       await page.setViewportSize({ width, height: 900 });
       const errors: string[] = [];

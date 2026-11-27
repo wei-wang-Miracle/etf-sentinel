@@ -29,12 +29,12 @@ function completedRoundMetrics(track: ComparisonTrack) {
   };
 }
 
-export default function StrategyComparison({ result, theme, initialBacktestId, renderBinding }: {
-  result: Comparison; theme: string; initialBacktestId?: number; renderBinding?: (track: ComparisonTrack) => ReactNode;
+export default function StrategyComparison({ result, theme, renderAdoption }: {
+  result: Comparison; theme: string; renderAdoption?: (track: ComparisonTrack) => ReactNode;
 }) {
   const tradePanel = useRef<HTMLElement>(null);
   const [field, setField] = useState<"nav" | "drawdown">("nav");
-  const [selected, setSelected] = useState(() => result.tracks.find((row) => initialBacktestId != null && row.backtest_id === initialBacktestId)?.key ?? "");
+  const [selected, setSelected] = useState("");
   const [actual, setActual] = useState<ActualReview>();
   const [opening, setOpening] = useState(false), [dates, setDates] = useState(false);
   const [showActual, setShowActual] = useState(false);
@@ -58,7 +58,6 @@ export default function StrategyComparison({ result, theme, initialBacktestId, r
     ["轮次胜率", (row) => row.account ? completedRoundMetrics(row).winRate : "—"],
     ["未平仓轮次", (row) => row.account ? completedRoundMetrics(row).open : "—"],
   ];
-  useEffect(() => { setOpening(false); setDates(false); setSelected(result.tracks.find((row) => initialBacktestId != null && row.backtest_id === initialBacktestId)?.key ?? ""); setTradeIndex(0); setVerification(""); }, [result.id, initialBacktestId]);
   useEffect(() => {
     const controller = new AbortController();
     setActual(undefined); setActualError("");
@@ -80,13 +79,13 @@ export default function StrategyComparison({ result, theme, initialBacktestId, r
     {!result.complete && <p className="notice warning">本次比较不完整，失败对象保留如下；不能将失败当作零收益。</p>}
     {verification && <p className="notice" role="status">{verification}</p>}
     <p className="notice">行情数据截止：{result.data_cutoff ?? "未提供"}。{result.note ?? "历史结果为回测模拟，不代表实际收益。"} 实验模板的历史拟合不证明未来达到 80% 胜率。</p>
-    <div className="strategy-matrix" role="region" aria-label="算法指标对照滚动区域" tabIndex={0}><table aria-label="算法指标对照"><thead><tr><th>比较指标</th>{result.tracks.map((row) => <th key={row.key}>{row.name}<p className="muted">{row.template ? "共享算法" : row.key.startsWith("hold") ? "持有参照" : "历史回测模拟"}</p></th>)}</tr></thead><tbody>
+    <div className="strategy-matrix" role="region" aria-label="算法指标对照滚动区域" tabIndex={0}><table aria-label="算法指标对照"><thead><tr><th>比较指标</th>{result.tracks.map((row) => <th key={row.key}>{row.name}<p className="muted">{row.strategy_id === "hold" ? "持有参照" : "历史回测模拟"}</p></th>)}</tr></thead><tbody>
       {metricRows.map(([label, value]) => <tr key={label}><th scope="row">{label}</th>{result.tracks.map((row) => <td key={row.key}>{value(row)}</td>)}</tr>)}
       <tr><th scope="row">模拟交易解释</th>{result.tracks.map((row) => <td key={row.key}>{row.account ? <button onClick={() => { setSelected(row.key); setTradeIndex(0); tradePanel.current?.focus({ preventScroll: true }); tradePanel.current?.scrollIntoView({ block: "start" }); }} aria-pressed={track?.key === row.key}>查看买卖点</button> : "计算失败"}</td>)}</tr>
-      {renderBinding && <tr><th scope="row">保存给 {code}</th>{result.tracks.map((row) => <td key={row.key}>{renderBinding(row)}</td>)}</tr>}
+      {renderAdoption && <tr><th scope="row">采用到 {code}</th>{result.tracks.map((row) => <td key={row.key}>{renderAdoption(row)}</td>)}</tr>}
     </tbody></table></div>
-    {result.tracks.some((row) => row.template && row.diagnostics?.sample_warning) && <p className="muted">
-      完整平仓不足 5 轮的算法：{result.tracks.filter((row) => row.template && row.diagnostics?.sample_warning).map((row) => row.name).join("、")}。胜率样本较少。
+    {result.tracks.some((row) => row.strategy_id !== "hold" && row.diagnostics?.sample_warning) && <p className="muted">
+      完整平仓不足 5 轮的策略：{result.tracks.filter((row) => row.strategy_id !== "hold" && row.diagnostics?.sample_warning).map((row) => row.name).join("、")}。胜率样本较少。
     </p>}
     <section className="panel">
       <div className="panel-header"><h2>资金曲线与回撤</h2><div className="journey-actions"><button aria-pressed={field === "nav"} onClick={() => setField("nav")}>研究净值</button><button aria-pressed={field === "drawdown"} onClick={() => setField("drawdown")}>回撤</button></div></div>

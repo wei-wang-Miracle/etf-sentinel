@@ -42,7 +42,12 @@ summary { cursor: pointer; min-height: 32px; color: var(--color-ink-muted); }
 .readout-values dd { margin: 0; font-family: var(--font-mono); }
 .readout-values dt { color: var(--color-ink-muted); }
 .research-evidence p { margin: 8px 0; color: var(--color-ink-muted); }
-.turning-controls { justify-content: flex-start; flex-wrap: wrap; column-gap: 16px; }
+.turning-controls { justify-content: flex-start; align-items: flex-start; flex-wrap: wrap; column-gap: 16px; }
+.turning-controls > label { min-height: 32px; }
+.turning-controls > label > input { min-height: 0; }
+@media (min-width: 1024px) {
+ .turning-controls > label, .turning-controls > details > summary { min-height: 24px; }
+}
 .turning-bottom { color: var(--color-chart-3); }
 .turning-top { color: var(--color-chart-4); }
 .turning-horizon { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }

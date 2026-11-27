@@ -2,7 +2,7 @@ import { useState } from "react";
 import ChartCaption from "../components/ChartCaption";
 import Tabs from "../components/Tabs";
 import KLine from "../components/KLine";
-import EtfTurningChart, { type TurningChartDisplay } from "../components/EtfTurningChart";
+import EtfFactorChart from "../components/EtfFactorChart";
 import ValuationChart from "../components/ValuationChart";
 import { type Candle } from "../lib/api";
 import type { ValuationPoint } from "./IndexValuations";
@@ -36,7 +36,6 @@ export default function ResearchObject({ theme, code, summary, loading, error, r
 }) {
   const [query, update] = useResearchQuery({ tab: "price", start: dateAgo(365), end: dateAgo(1), metric: "pe", category: "", legacy_index: "" });
   const [showActual, setShowActual] = useState(false);
-  const [turningDisplay, setTurningDisplay] = useState<TurningChartDisplay>({ showBottom: true, showTop: true });
   const tab = views.some((item) => item.value === query.tab) ? query.tab : "price";
   const metric = metrics[query.metric] ? query.metric : "pe";
   const { start, end } = query;
@@ -93,8 +92,8 @@ export default function ResearchObject({ theme, code, summary, loading, error, r
           : plot.loading ? <div className="chart-loading skeleton-state" role="status">正在读取所选区间…</div> : plot.error ? <div className="empty" role="alert"><p>所选区间读取失败：{plot.error}</p><button onClick={plot.retry}>重试图表</button><a href={dataManagementUrl("jobs", tasks[tab], code)}>检查对应数据任务</a></div>
             : !hasPlot ? <div className="empty"><h2>所选区间暂无数据</h2><p>可以调整日期，或检查对应采集任务。</p><a href={dataManagementUrl("jobs", tasks[tab], code)}>检查对应数据任务</a></div> : <>
               {actual.error && <p className="notice warning">真实操作标记暂不可用，行情仍可查看。<button onClick={actual.retry}>重试标记</button></p>}
-              {tab === "price" ? <EtfTurningChart history={history} start={start} end={end} theme={theme} instrumentCode={code}
-                display={turningDisplay} onDisplayChange={setTurningDisplay} trades={showActual ? actual.data?.markers : []}
+              {tab === "price" ? <EtfFactorChart history={history} start={start} end={end} theme={theme} instrumentCode={code}
+                trades={showActual ? actual.data?.markers : undefined}
                 controls={<label><input type="checkbox" checked={showActual} onChange={event => setShowActual(event.target.checked)} />叠加真实操作</label>} />
                 : tab === "valuation" ? <ValuationChart rows={valuation!.series} candles={valuation!.candles} title={metrics[metric].name} unit={metrics[metric].unit} theme={theme} />
                   : tab === "funds" ? <><KLine rows={candles} holdings={national!.holdings} theme={theme} />{!candles.length && <p className="notice warning">区间缺少本地日 K，仅展示估算比例，不伪造 ETF 价格。</p>}</>

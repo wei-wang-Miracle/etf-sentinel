@@ -33,8 +33,7 @@ import {
   readChartPalette,
 } from "../lib/chart";
 
-export type TurningEvent = { date: string; kind: "bottom" | "top" };
-const confirmationName = (kind: TurningEvent["kind"]) => kind === "bottom" ? "底部确认" : "顶部确认";
+export type FactorEvent = { trade_date: string; factor_id: string; name: string; category: string; meaning: string; output_type: "event" | "state" };
 
 // 直接读取冻结的收盘账本；缺少字段时不推算，不将缺失与零仓位混淆。
 function positionReadout(row?: DailyAccount): Record<string, string> {
@@ -59,12 +58,12 @@ export default function KLine({
   indexPoints = false,
   trades = [],
   onTrade,
-  turningEvents,
+  factorEvents,
   historyRows,
   frontAdjusted = false,
 }: {
   frontAdjusted?: boolean;
-  turningEvents?: TurningEvent[];
+  factorEvents?: FactorEvent[];
   historyRows?: Omit<Candle, "amount">[];
   indexPoints?: boolean;
   trades?: { trade_date: string; side: string; quantity: string; price: string; source?: "simulation" | "actual" }[];
@@ -75,7 +74,15 @@ export default function KLine({
   positions?: DailyAccount[];
 }) {
   const element = useRef<HTMLDivElement>(null);
-  const strategyEventsByDate = useMemo(() => new Map(turningEvents?.map(event => [event.date, event.kind])), [turningEvents]);
+  const factorsByDate = useMemo(() => {
+    const grouped = new Map<string, FactorEvent[]>();
+    for (const event of factorEvents ?? []) {
+      const existing = grouped.get(event.trade_date);
+      if (existing) existing.push(event);
+      else grouped.set(event.trade_date, [event]);
+    }
+    return grouped;
+  }, [factorEvents]);
   const savedZoom = useRef<{ dates: string[]; start: number; end: number } | null>(null);
   const positionMode = positions !== undefined && holdings === undefined;
   const maRows = historyRows ?? rows;
@@ -173,8 +180,7 @@ export default function KLine({
       trades.filter((trade) => trade.trade_date === day).forEach((trade) => {
         lines.push(`<div>${trade.source === "simulation" ? "模拟" : "真实记录"}${trade.side === "buy" ? "买入" : "卖出"} ${escapeHtml(trade.quantity)} 份 @ ${escapeHtml(trade.price)} 元</div>`);
       });
-      const strategyEvent = strategyEventsByDate.get(day);
-      if (strategyEvent) lines.push(`<div>${confirmationName(strategyEvent)} · ${escapeHtml(day)}</div>`);
+      for (const factor of factorsByDate.get(day) ?? []) lines.push(`<div>${escapeHtml(factor.name)} · ${escapeHtml(factor.meaning)}</div>`);
       return lines.join("");
     };
     chart.setOption({
@@ -295,19 +301,19 @@ export default function KLine({
             itemStyle: { color: trade.side === "buy" ? palette.up : palette.down },
             label: { color: palette.surface, fontSize: 12 },
           })), ...dates.flatMap(date => {
-            const strategyEvent = strategyEventsByDate.get(date);
-            const kind = strategyEvent;
             const candle = candleByDate.get(date);
-            if (!kind || !candle) return [];
-            const bottom = kind === "bottom";
-            const name = confirmationName(kind);
-            return [{ name, value: bottom ? "底确" : "顶确",
-              coord: [date, bottom ? candle.low : candle.high], symbol: "triangle", symbolSize: 14,
-              symbolRotate: bottom ? 0 : 180, symbolOffset: [0, bottom ? 10 : -10],
-              itemStyle: { color: bottom ? palette.chart3 : palette.chart4 },
-              label: { show: true, position: bottom ? "bottom" : "top", color: bottom ? palette.chart3 : palette.chart4, fontSize: 12 },
-              tooltip: { formatter: () => `${name} · ${escapeHtml(date)}` },
-            }];
+            if (!candle) return [];
+            return (factorsByDate.get(date) ?? []).map((factor, index) => {
+              const top = factor.factor_id === "turning_top";
+              const bottom = factor.factor_id === "turning_bottom";
+              const color = top ? palette.chart4 : bottom ? palette.chart3 : palette.chart2;
+              return { name: factor.name, value: bottom ? "底确" : top ? "顶确" : factor.name,
+                coord: [date, top ? candle.high : candle.low], symbol: top || bottom ? "triangle" : factor.output_type === "state" ? "circle" : "diamond", symbolSize: 12,
+                symbolRotate: top ? 180 : 0, symbolOffset: [0, top ? -10 : 10 + index * 12],
+                itemStyle: { color }, label: { show: top || bottom, position: top ? "top" : "bottom", color, fontSize: 12 },
+                tooltip: { formatter: () => `${escapeHtml(factor.name)} · ${escapeHtml(date)}` },
+              };
+            });
           })] },
           name: "日K · 开/收/低/高",
           data: dates.map((day) => {
@@ -401,7 +407,7 @@ export default function KLine({
       observer.disconnect();
       chart.dispose();
     };
-  }, [rows, theme, holdings, positions, positionMode, indexPoints, trades, onTrade, strategyEventsByDate, maRows]);
+  }, [rows, theme, holdings, positions, positionMode, indexPoints, trades, onTrade, factorsByDate, maRows, frontAdjusted]);
   const candleByDate = new Map(rows.map(row => [row.date, row]));
   const holdingByDate = new Map((holdings ?? []).map(row => [row.trade_date, row.estimated_holding_pct]));
   const positionByDate = new Map((positions ?? []).map((row) => [row.trade_date, row]));
@@ -421,8 +427,7 @@ export default function KLine({
     if (holdings) { const ratio = holdingByDate.get(date); values["国家队估算比例"] = ratio == null ? "—" : `${ratio}%`; }
     const records = trades.filter(item => item.trade_date === date);
     if (records.length) values["操作标记"] = records.map(item => `${item.source === "simulation" ? "模拟" : "真实记录"}${item.side === "buy" ? "买入" : "卖出"} ${item.quantity}份 @ ${item.price}`).join("；");
-    const strategyEvent = strategyEventsByDate.get(date);
-    if (strategyEvent) values["顶底确认事件"] = confirmationName(strategyEvent);
+    for (const factor of factorsByDate.get(date) ?? []) values[factor.name] = factor.meaning;
     return { date, values };
   });
   return (

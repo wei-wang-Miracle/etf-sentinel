@@ -62,6 +62,7 @@ def source(code, start, end, price="1.5"):
             "HIGH_PRICE": 2,
             "LOW_PRICE": 0.5,
             "CLOSE_PRICE": price,
+            "ADJUSTED_CLOSE": price,
             "VOLUME": 5000000000,
             "AMOUNT": 7500000000,
         }

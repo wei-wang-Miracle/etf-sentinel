@@ -1,4 +1,4 @@
-"""单ETF策略版本观察的盘前计划与真实执行核对闭环接口。"""
+"""当前策略分配的盘前计划与真实执行核对接口。"""
 
 from datetime import date, timedelta
 from decimal import Decimal
@@ -15,8 +15,8 @@ from app.collection import now
 from app.db import Session
 from app.models import (
     AccountEntrust,
+    InstrumentStrategyAssignment,
     StrategyExecutionLink,
-    StrategyObservation,
     StrategySignal,
 )
 
@@ -42,33 +42,6 @@ class SkipRequest(BaseModel):
     note: str = Field(min_length=1, max_length=1000)
 
 
-def observation_payload(row):
-    """观察规则版本与状态分开展示。"""
-    return {
-        "id": row.observation_id,
-        "research_batch_id": row.research_batch_id,
-        "strategy_version_id": row.strategy_version_id,
-        "instrument_code": row.instrument_code,
-        "created_at": row.created_at.astimezone(TZ),
-        "active": row.active,
-        "rule": row.rule_snapshot,
-    }
-
-
-@router.get("/observations")
-def observations():
-    """返回观察版本；启用与暂停统一由我的策略管理。"""
-    with Session() as db:
-        return [
-            observation_payload(r)
-            for r in db.scalars(
-                select(StrategyObservation).order_by(
-                    StrategyObservation.observation_id.desc()
-                )
-            )
-        ]
-
-
 def execution_window(at):
     """只允许为下一个尚未开盘交易日建计划，交易日开盘后不补当天计划。"""
     at = at.astimezone(TZ)
@@ -87,18 +60,16 @@ def execution_window(at):
     return cutoff, execution
 
 
-def make_plan(db, observation, at, cutoff, execution):
-    """仅服务我的策略显式启用的单ETF版本；旧持仓候选观察不再生成计划。"""
-    from app.strategy_plans import make_saved_plan
+def make_plan(db, assignment, at, cutoff, execution):
+    """为当前活动策略分配生成计划，不恢复任何历史实验规则。"""
+    from app.strategy_plans import make_assignment_plan
 
-    if observation.strategy_version_id is None:
-        raise ValueError("旧持仓候选观察已停用，请通过我的策略启用单ETF版本")
-    return make_saved_plan(db, observation, at, cutoff, execution)
+    return make_assignment_plan(db, assignment, at, cutoff, execution)
 
 
 @router.post("/signals/generate")
 def generate_signals():
-    """手动及调度共用，逐观察版本隔离失败，同版本执行日幂等。"""
+    """手动及调度共用，逐ETF隔离失败，同ETF执行日幂等。"""
     at = now()
     created, existing, blocked = [], [], []
     try:
@@ -108,18 +79,18 @@ def generate_signals():
     with Session() as db:
         ids = list(
             db.scalars(
-                select(StrategyObservation.observation_id).where(
-                    StrategyObservation.active.is_(True)
+                select(InstrumentStrategyAssignment.assignment_id).where(
+                    InstrumentStrategyAssignment.active.is_(True)
                 )
             )
         )
-    for observation_id in ids:
+    for assignment_id in ids:
         with Session() as db:
             db.connection(execution_options={"isolation_level": "REPEATABLE READ"})
             try:
-                observation = db.scalar(
-                    select(StrategyObservation)
-                    .where(StrategyObservation.observation_id == observation_id)
+                assignment = db.scalar(
+                    select(InstrumentStrategyAssignment)
+                    .where(InstrumentStrategyAssignment.assignment_id == assignment_id)
                     .with_for_update()
                 )
             except OperationalError as exc:
@@ -127,26 +98,26 @@ def generate_signals():
                     raise
                 blocked.append(
                     {
-                        "observation_id": observation_id,
-                        "reason": "观察状态在生成期间发生变化，请重新确认运行版本后重试",
+                        "assignment_id": assignment_id,
+                        "reason": "策略分配在生成期间发生变化，请重新确认后重试",
                     }
                 )
                 continue
-            if not observation.active:
+            if not assignment.active:
                 continue
             try:
                 at = now()
                 cutoff, execution = execution_window(at)
                 prior = db.scalar(
                     select(StrategySignal).where(
-                        StrategySignal.observation_id == observation_id,
+                        StrategySignal.assignment_id == assignment_id,
                         StrategySignal.execution_date == execution,
                     )
                 )
                 if prior:
                     existing.append(signal_payload(db, prior))
                     continue
-                plan, evidence = make_plan(db, observation, at, cutoff, execution)
+                plan, evidence = make_plan(db, assignment, at, cutoff, execution)
                 published_at = now()
                 if execution_window(published_at) != (cutoff, execution):
                     raise ValueError("计算跨过执行窗口，不能补写已过去的日计划")
@@ -154,8 +125,8 @@ def generate_signals():
                 evidence["generated_at"] = published_at.isoformat()
                 plan["input_sha256"] = digest(evidence)
                 signal = StrategySignal(
-                    observation_id=observation_id,
-                    instrument_code=observation.instrument_code,
+                    assignment_id=assignment_id,
+                    instrument_code=assignment.instrument_code,
                     generated_at=published_at,
                     data_cutoff=cutoff,
                     execution_date=execution,
@@ -167,21 +138,26 @@ def generate_signals():
                 created.append(signal_payload(db, signal))
             except IntegrityError as exc:
                 # 重复生成可能在等待观察锁前取得旧快照；唯一约束保证只发布一次。
-                if getattr(getattr(exc.orig, "diag", None), "constraint_name", None) != "uq_strategy_signal_observation_day":
+                if (
+                    getattr(getattr(exc.orig, "diag", None), "constraint_name", None)
+                    != "uq_strategy_signal_assignment_day"
+                ):
                     raise
                 db.rollback()
-                saved = db.scalar(select(StrategySignal).where(
-                    StrategySignal.observation_id == observation_id,
-                    StrategySignal.execution_date == execution,
-                ))
+                saved = db.scalar(
+                    select(StrategySignal).where(
+                        StrategySignal.assignment_id == assignment_id,
+                        StrategySignal.execution_date == execution,
+                    )
+                )
                 if saved is None:
                     raise
                 existing.append(signal_payload(db, saved))
             except ValueError as exc:
                 blocked.append(
                     {
-                        "observation_id": observation_id,
-                        "instrument_code": observation.instrument_code,
+                        "assignment_id": assignment_id,
+                        "instrument_code": assignment.instrument_code,
                         "reason": str(exc),
                     }
                 )
@@ -243,7 +219,9 @@ def signal_payload(db, signal):
     )
     return {
         "id": signal.signal_id,
-        "observation_id": signal.observation_id,
+        "assignment_id": signal.assignment_id,
+        "strategy_id": signal.evidence_snapshot["strategy_id"],
+        "strategy_name": signal.evidence_snapshot["rule"]["name"],
         "instrument_code": signal.instrument_code,
         "generated_at": signal.generated_at,
         "data_cutoff": signal.data_cutoff,
@@ -302,7 +280,8 @@ def execution_candidates(signal_id: int):
                 }
                 for r in rows
             ]
-            if signal.plan_snapshot["action"] in ("buy", "sell") and signal.plan_snapshot.get("quantity_status") != "unknown"
+            if signal.plan_snapshot["action"] in ("buy", "sell")
+            and signal.plan_snapshot.get("quantity_status") != "unknown"
             else []
         )
 
@@ -390,23 +369,6 @@ def skip_signal(signal_id: int, body: SkipRequest):
         return signal_payload(db, row)
 
 
-@router.get("/observations/{observation_id}/review")
-def review_observation(observation_id: int):
-    """采用后区间用当前数据重算规则，不将此前回看或实际成交混成前向业绩。"""
-    from app.strategy_plans import review_saved_observation
-
-    with Session() as db:
-        observation = db.get(StrategyObservation, observation_id)
-        if not observation:
-            raise HTTPException(404, "观察版本不存在")
-        if observation.strategy_version_id is None:
-            return {
-                "status": "blocked",
-                "reason": "旧持仓候选研究已下线，仅支持我的策略启用的单ETF版本复盘",
-            }
-        return review_saved_observation(db, observation, now())
-
-
 def collect_signals(run_id):
     """独立任务5记录08:30计划生成结果，失败不阻塞行情或账户同步。"""
     from app.models import Run
@@ -422,7 +384,7 @@ def collect_signals(run_id):
     logs.append(
         {
             "status": "success",
-            "message": f"新增{len(result['created'])}份计划；已有{len(result['existing'])}份；无观察版本时不自动采用策略",
+            "message": f"新增{len(result['created'])}份计划；已有{len(result['existing'])}份；无当前策略分配时不生成计划",
         }
     )
     with Session() as db:

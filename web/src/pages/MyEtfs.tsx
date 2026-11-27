@@ -3,7 +3,7 @@ import type { Instrument } from "../lib/api";
 import type { AccountHoldings } from "../lib/account";
 import { useResearchQuery } from "../lib/research";
 import { useApiResource } from "../lib/useApiResource";
-import { journeyUrl, type SavedStrategy } from "../lib/strategyJourney";
+import { journeyUrl, type JourneyCatalog } from "../lib/strategyJourney";
 import { dataManagementUrl } from "../lib/navigation";
 import Tabs from "../components/Tabs";
 import DailySignals from "../components/DailySignals";
@@ -16,7 +16,7 @@ export default function MyEtfs({ theme }: { theme: string }) {
   const [query, update] = useResearchQuery({ code: "", object: "", detail: "overview", scope: "held", search: "", start: "", end: "" });
   const instruments = useApiResource<Instrument[]>("/instruments");
   const holdings = useApiResource<AccountHoldings>("/account/holdings");
-  const versions = useApiResource<SavedStrategy[]>("/strategies");
+  const catalog = useApiResource<JourneyCatalog>(!query.code && !query.object || query.detail === "signals" ? "/strategies/catalog" : null);
   const legacyIndex = query.object.startsWith("index:");
   const code = legacyIndex ? query.object.slice(6) : query.code || (query.object.startsWith("etf:") ? query.object.slice(4) : "");
   const summary = useApiResource<ResearchSummary>(code ? `/research/object?object_type=${legacyIndex ? "index" : "etf"}&code=${encodeURIComponent(code)}` : null);
@@ -44,30 +44,30 @@ export default function MyEtfs({ theme }: { theme: string }) {
     </header>
     {legacyIndex ? <p className="empty" role="status">{summary.error || "正在定位指数关联的 ETF…"}</p> : <Tabs label="ETF详情" items={details} value={detail} onChange={(detail) => update({ detail })}>
       {detail === "overview" ? <ResearchObject theme={theme} code={code} summary={summary.data} loading={summary.loading} error={summary.error} retry={summary.retry} />
-        : detail === "operations" ? <EtfReview key={code} theme={theme} fixedObject /> : <DailySignals key={code} code={code} />}
+        : detail === "operations" ? <EtfReview key={code} theme={theme} fixedObject /> : <DailySignals key={code} code={code} catalog={catalog} />}
     </Tabs>}
   </div>;
 
   return <>
     <header className="page-header"><div><h1>我的 ETF</h1><p>从一只 ETF 开始，查看证据、研究方法与每日信号。</p></div><a href={journeyUrl("etfs", undefined, { auxiliary: "compare" })}>跨 ETF 对比</a></header>
-    <DailySignals compact />
+    <DailySignals compact catalog={catalog} />
     <section className="etf-directory" aria-labelledby="etf-directory-title">
       <div className="directory-toolbar"><div><h2 id="etf-directory-title">研究范围</h2><p className="muted">仅含配置内 ETF · 持仓快照 <span className="mono">{holdings.error ? "未取得" : holdings.data?.as_of ?? "尚未同步"}</span></p></div>
         <div className="directory-filters"><div className="segmented" role="group" aria-label="ETF范围"><button aria-pressed={scope === "held"} onClick={() => update({ scope: "held" })}>当前持仓</button><button aria-pressed={scope === "all"} onClick={() => update({ scope: "all" })}>全部 ETF</button></div>
           <label className="search-field"><span className="sr-only">搜索 ETF</span><input type="search" aria-label="搜索 ETF" placeholder="代码或名称" value={query.search} onChange={(event) => update({ search: event.target.value })} /></label></div>
       </div>
       {holdings.error && <p className="notice warning" role="alert">持仓状态未取得：{holdings.error}。仍可切换全部 ETF 研究。<button onClick={holdings.retry}>重试持仓</button><a href={dataManagementUrl("account")}>检查账户同步</a></p>}
-      {versions.error && <p className="notice warning" role="alert">策略状态未取得，ETF 行情仍可查看。<button onClick={versions.retry}>重试策略状态</button></p>}
+      {catalog.error && <p className="notice warning" role="alert">策略状态未取得，ETF 行情仍可查看。<button onClick={catalog.retry}>重试策略状态</button></p>}
       {instruments.error && <p className="alert" role="alert">标的读取失败：{instruments.error}<button onClick={instruments.retry}>重试标的</button></p>}
       {instruments.loading || (scope === "held" && holdings.loading) ? <div className="empty skeleton-state" role="status">正在读取 ETF 与持仓状态…</div>
         : !instruments.data?.length && !instruments.error ? <div className="empty"><h3>尚无配置内 ETF</h3><a href={dataManagementUrl("instruments")}>检查标的配置</a></div>
           : scope === "held" && !positionsKnown ? <div className="empty"><h3>{holdings.error ? "持仓状态未取得" : "尚未同步持仓"}</h3><p>先同步账户，或切换全部 ETF 开始研究。</p><button onClick={() => update({ scope: "all" })}>查看全部 ETF</button></div>
             : scope === "held" && !held.size ? <div className="empty"><h3>暂无当前持仓</h3><p>当前完整快照中没有正持仓，可研究未持仓 ETF。</p><button onClick={() => update({ scope: "all" })}>查看全部 ETF</button></div>
               : <div className="journey-etf-list"><div className="directory-columns" aria-hidden="true"><span>ETF 名称与代码</span><span>持仓状态</span><span>策略状态</span><span>行情截至</span></div>
-                {list.map((row) => { const active = versions.data?.find((version) => version.active && version.instrument_code === row.code); return <article key={row.code} className="journey-etf-row">
+                {list.map((row) => { const active = catalog.data?.assignments.find((assignment) => assignment.active && assignment.instrument_code === row.code); return <article key={row.code} className="journey-etf-row">
                   <a className="etf-name" href={journeyUrl("etfs", row.code, { scope, search: query.search, detail: "overview", tab: "price", ...dates })}><strong>{row.name}</strong><span className="mono">{row.code}</span></a>
                   <span className="holding-label">{!positionsKnown ? holdings.loading ? "持仓读取中" : holdings.error ? "持仓状态未取得" : "尚未同步" : held.has(row.code) ? "当前持仓" : "当前未持仓"}</span>
-                  <span>{versions.loading ? "策略读取中" : versions.error ? "策略状态未取得" : active ? <a href={journeyUrl("etfs", row.code, { detail: "signals" })}>{active.name}</a> : "未启用策略"}</span>
+                  <span>{catalog.loading ? "策略读取中" : catalog.error ? "策略状态未取得" : active ? <a href={journeyUrl("etfs", row.code, { detail: "signals" })}>{catalog.data?.strategies.find((item) => item.id === active.strategy_id)?.name ?? "已启用策略"}</a> : "未启用策略"}</span>
                   <span className="mono">{row.last_date ?? "暂无行情"}</span>
                 </article>; })}
                 {!list.length && !instruments.error && <div className="empty"><h3>没有匹配的 ETF</h3><p>请调整代码或名称。</p><button onClick={() => update({ search: "" })}>清除搜索</button></div>}

@@ -1,8 +1,9 @@
-"""独立数据库验证算法模板比较、版本保存与显式启停。"""
+"""独立数据库验证策略比较、因子目录及显式采用和暂停。"""
 
 import os
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,6 +15,7 @@ from app.collection import now
 from app.db import Session
 from app.main import app
 from app.models import BacktestSource, Candle, Instrument, Job
+from app.research_factors import FACTORS
 from app.strategy_inputs import market_snapshot
 
 pytestmark = pytest.mark.skipif(
@@ -27,10 +29,7 @@ BODY = {
     "instrument_code": "510500",
     "start_date": DAYS[75],
     "end_date": DAYS[-1],
-    "templates": [
-        {"id": "range_breakout", "version": "1.0.0"},
-        {"id": "bottom_confirmation", "version": "1.0.0"},
-    ],
+    "strategies": ["range_breakout", "bottom_confirmation"],
 }
 
 
@@ -82,101 +81,79 @@ def compare(body=None):
     return response.json()
 
 
-def save(comparison, key="template:range_breakout:1.0.0"):
-    response = client.post(
-        "/strategies", json={"comparison_id": comparison["id"], "track_key": key},
-    )
-    assert response.status_code == 200, response.text
-    return response.json()
+def adopt(result, strategy="range_breakout", **kwargs):
+    return client.post("/strategies/adopt", json={"comparison_id": result["id"], "strategy_id": strategy, **kwargs})
 
 
-def test_catalog_and_comparison_use_frozen_algorithms_without_binding():
+def test_catalog_compare_and_verify_without_automatic_adoption():
     catalog = client.get("/strategies/catalog").json()
-    assert len(catalog["templates"]) == 4
-    assert all(template["status"] == "experimental" for template in catalog["templates"])
-    assert "conditions" not in catalog and "sentiment_categories" not in catalog
-
+    assert {item["id"] for item in catalog["strategies"]} == {"range_breakout", "bottom_confirmation", "hybrid_reversal"}
+    assert catalog["assignments"] == []
+    factors = client.get("/factors").json()
+    assert {item["id"] for item in factors["factors"]} == set(FACTORS)
+    assert next(item for item in catalog["strategies"] if item["id"] == "range_breakout")["factors"][0]["id"] == "box_breakout_up"
     result = compare()
-    assert result["complete"], [(row["key"], row.get("reason")) for row in result["tracks"]]
-    breakout, bottom, hold = result["tracks"]
-    assert breakout["template"]["rule"]["family"] == "breakout"
-    assert bottom["template"]["rule"]["family"] == "bottom"
-    assert hold["key"] == "hold"
-    assert hold["evidence_type"] == "historical"
-    assert breakout["diagnostics"]["completed_rounds"] == len(breakout["diagnostics"]["rounds"])
-    assert result["data_cutoff"] == DAYS[-1]
-    assert result["settings"]["initial_cash"] == "50000"
-    assert client.get("/strategies").json() == []
-    denied = client.post("/strategies", json={"comparison_id": result["id"], "track_key": "hold"})
-    assert denied.status_code == 422
+    assert result["complete"], result["tracks"]
+    assert [row["strategy_id"] for row in result["tracks"]] == [*BODY["strategies"], "hold"]
+    assert client.get("/strategies/catalog").json()["assignments"] == []
+    assert client.get("/strategies").status_code == 404
+    assert client.get("/strategy-lab/observations").status_code == 404
+    assert adopt(result, "hold").status_code == 422
+    assert client.post(f"/strategies/comparisons/{result['id']}/verify").json()["identical"] is True
+    with Session() as db:
+        rows = db.execute(text("SELECT strategy_id, factor_id FROM strategy_comparison_factors WHERE comparison_id = :id"), {"id": result["id"]})
+        assert {tuple(row) for row in rows} == {
+            ("range_breakout", "box_breakout_up"), ("range_breakout", "turning_top"),
+            ("bottom_confirmation", "turning_bottom"), ("bottom_confirmation", "turning_top"),
+        }
 
 
-def test_client_cannot_submit_rule_or_unknown_template_version():
-    injected = {**BODY, "templates": [{**BODY["templates"][0], "rule": {"buy": {}}}]}
-    assert client.post("/strategies/comparisons", json=injected).status_code == 422
-    unknown = {**BODY, "templates": [{"id": "etf_multifactor", "version": "0.0.0"}]}
-    assert client.post("/strategies/comparisons", json=unknown).status_code == 422
+def test_comparison_rejects_user_rules_retired_and_research_strategies():
+    for invalid in ({**BODY, "templates": []}, {**BODY, "strategies": ["etf_multifactor"]},
+                    {**BODY, "strategies": ["left_reversal_research"]}):
+        assert client.post("/strategies/comparisons", json=invalid).status_code == 422
 
 
-def test_compare_four_algorithms_and_bind_multifactor_to_the_selected_etf():
-    selection = {**BODY, "templates": [*BODY["templates"],
-        {"id": "hybrid_reversal", "version": "1.0.0"},
-        {"id": "etf_multifactor", "version": "1.0.0"}]}
-    tracked = []
-    for code, family in [("510500", "oversold"), ("510330", "hybrid")]:
-        result = compare({**selection, "instrument_code": code})
-        assert result["complete"] and len(result["tracks"]) == 5
-        track = result["tracks"][3]
-        assert track["template"]["instrument_code"] == code
-        assert track["template"]["rule"]["family"] == family
-        verified = client.post(f"/strategies/comparisons/{result['id']}/verify")
-        assert verified.status_code == 200 and verified.json()["identical"]
-        binding = save(result, track["key"])
-        assert binding["algorithm_template_id"] == "etf_multifactor"
-        assert binding["instrument_code"] == code and not binding["active"]
-        tracked.append(binding)
-    assert tracked[0]["strategy_id"] != tracked[1]["strategy_id"]
-    enabled = client.post(f"/strategies/{tracked[0]['id']}/enable", json={})
-    assert enabled.status_code == 200 and enabled.json()["active"]
-
-
-def test_same_algorithm_supports_multiple_etfs_and_preserves_binding_identity():
+def test_adopt_replace_pause_and_resume_keep_one_assignment_per_etf():
     result = compare()
-    first = save(result)
-    assert save(result)["id"] == first["id"]
-    assert first["algorithm_template_id"] == "range_breakout"
-
-    repeated = save(compare({**BODY, "start_date": DAYS[76]}))
-    assert repeated["strategy_id"] == first["strategy_id"]
-    assert repeated["version"] == first["version"] + 1
-
-    other = save(compare({**BODY, "instrument_code": "510330"}))
-    assert other["instrument_code"] == "510330"
-    assert other["template"] == first["template"]
-    assert other["strategy_id"] != first["strategy_id"]
-
-    second_algorithm = save(result, "template:bottom_confirmation:1.0.0")
-    assert second_algorithm["strategy_id"] != first["strategy_id"]
-    assert client.post(f"/strategies/{first['id']}/enable", json={}).status_code == 200
-    switch = f"/strategies/{second_algorithm['id']}/enable"
-    assert client.post(switch, json={}).status_code == 409
-    assert client.post(switch, json={"replace_active": True}).status_code == 200
-    assert [row["id"] for row in client.get("/strategies").json() if row["active"]] == [second_algorithm["id"]]
+    response = adopt(result)
+    assert response.status_code == 200, response.text
+    first = response.json()
+    assert first["active"] and adopt(result).json() == first
+    assert adopt(result, "bottom_confirmation").status_code == 409
+    replaced = adopt(result, "bottom_confirmation", replace_active=True).json()
+    assert replaced["id"] == first["id"] and replaced["strategy_id"] == "bottom_confirmation"
+    assert client.post("/strategies/510500/pause").json()["active"] is False
+    assert adopt(result, "bottom_confirmation").json()["active"] is True
+    other = adopt(compare({**BODY, "instrument_code": "510330"})).json()
+    assert other["id"] != first["id"]
+    assert len(client.get("/strategies/catalog").json()["assignments"]) == 2
 
 
-def test_saved_version_stays_inactive_until_explicit_enable_and_recomputes():
-    original = compare()
-    version = save(original)
-    assert not version["active"]
-    assert version["template"]["version"] == "1.0.0"
+def test_generate_only_for_adopted_etf_and_keeps_old_signal_after_replacement(monkeypatch):
+    from app import strategy_lab, strategy_workbench
 
-    verified = client.post(f"/strategies/comparisons/{original['id']}/verify")
-    assert verified.status_code == 200 and verified.json()["identical"]
-
-    enabled = client.post(f"/strategies/{version['id']}/enable", json={})
-    assert enabled.status_code == 200, enabled.text
-    assert enabled.json()["active"]
-    assert enabled.json()["readiness"]["status"] == "waiting"
+    day = date.fromisoformat(DAYS[-1])
+    execution = date.fromisoformat(trading_days(day, date(2026, 11, 10))[0][1])
+    ts = datetime.combine(execution, datetime.min.time(), ZoneInfo("Asia/Shanghai")).replace(hour=8)
+    monkeypatch.setattr(strategy_lab, "now", lambda: ts)
+    monkeypatch.setattr(strategy_workbench, "now", lambda: ts)
+    with Session() as db:
+        db.get(BacktestSource, "510500").collected_at = ts
+        db.execute(text("UPDATE candles SET collected_at = :ts"), {"ts": ts})
+        db.commit()
+    result = compare()
+    assert client.post("/strategy-lab/signals/generate").json()["created"] == []
+    assert adopt(result).status_code == 200
+    generated = client.post("/strategy-lab/signals/generate").json()
+    assert len(generated["created"]) == 1, generated
+    signal = generated["created"][0]
+    assert signal["strategy_id"] == "range_breakout" and signal["plan"]["quantity_status"] == "unknown"
+    assert client.post("/strategy-lab/signals/generate").json()["existing"][0]["id"] == signal["id"]
+    assert adopt(result, "bottom_confirmation", replace_active=True).status_code == 200
+    assert client.get("/strategy-lab/signals").json()[0]["strategy_name"] == "箱体突破"
+    monkeypatch.setattr(strategy_lab, "now", lambda: ts.replace(hour=9, minute=30))
+    assert "已开盘" in client.post("/strategy-lab/signals/generate").json()["blocked"][0]["reason"]
 
 
 def test_catalog_default_range_uses_post_split_prices_and_verified_end():
@@ -224,20 +201,15 @@ def test_chart_confirmations_use_history_before_display_start_and_verified_cutof
         turning_profile("510500")["parameters"],
     )
 
-    response = client.get("/candles/510500/turning-events?start=2025-09-01&end=2026-01-01")
+    response = client.get("/candles/510500/factors?start=2025-09-01&end=2026-01-01")
     assert response.status_code == 200, response.text
-    assert response.json() == {
-        "events": [
-            {"date": day, "kind": kind}
-            for day, kind in expected_events.items()
-            if day >= "2025-09-01"
-        ],
-        "data_cutoff": "2025-12-26",
-        "partial": True,
+    payload = response.json()
+    assert {(item["trade_date"], item["factor_id"]) for item in payload["events"] if item["factor_id"].startswith("turning_")} == {
+        (day, f"turning_{kind}") for day, kind in expected_events.items() if day >= "2025-09-01"
     }
-    response = client.get("/candles/510500/turning-events?start=2025-10-01&end=2025-12-25")
-    assert response.json() == {"events": [], "data_cutoff": "2025-12-25", "partial": False}
-    assert client.get("/candles/510330/turning-events?start=2025-09-01&end=2026-01-01").status_code == 422
+    assert payload["data_cutoff"] == "2025-12-26" and payload["partial"] is True
+    assert all("2025-09-01" <= row["trade_date"] <= payload["data_cutoff"] for row in payload["events"])
+    assert client.get("/candles/510330/factors?start=2025-09-01&end=2026-01-01").status_code == 422
     assert client.get("/candles/510330?start=2025-09-01&end=2026-01-01").status_code == 200
 
 
@@ -270,7 +242,7 @@ def test_chart_uses_front_adjustment_and_turning_events_accept_verified_split():
     assert [row["close"] for row in chart.json()] == pytest.approx(expected)
 
     events = client.get(
-        f"/candles/510500/turning-events?start={DAYS[99]}&end={DAYS[101]}"
+        f"/candles/510500/factors?start={DAYS[99]}&end={DAYS[101]}"
     )
     assert events.status_code == 200, events.text
     assert events.json()["data_cutoff"] == DAYS[101]

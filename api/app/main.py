@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
 from app.account_routes import router as account_router
-from app.algorithm_templates import turning_events, turning_profile
+from app.algorithm_templates import SHARED_WARMUP_BARS, turning_events, turning_profile
 from app.backtest_data import (
     front_adjusted_ohlc_rows,
     indicator_ohlc_rows,
@@ -22,8 +22,17 @@ from app.collection import now
 from app.db import Session
 from app.index_valuation_routes import router as index_valuation_router
 from app.jobs import launch, next_run, recover_interrupted, scheduler
-from app.models import BacktestSource, Candle, Instrument, Job, Run
+from app.models import (
+    BacktestSource,
+    Candle,
+    Instrument,
+    Job,
+    ResearchFactor,
+    ResearchStrategyFactor,
+    Run,
+)
 from app.national_team_routes import router as national_team_router
+from app.research_factors import FACTORS, STRATEGIES, calculate_factor_events
 from app.research_routes import router as research_router
 from app.review_routes import router as review_router
 from app.sentiment_routes import router as sentiment_router
@@ -225,9 +234,35 @@ def candles(code: str, start: date, end: date):
         return result
 
 
-@app.get("/candles/{code}/turning-events")
-def candle_turning_events(code: str, start: date, end: date):
-    """读取行情图上的策略顶底确认日，沿用策略的日行情与权益校验。"""
+@app.get("/factors")
+def factor_catalog():
+    """返回可观察因子目录及其被哪些策略使用。"""
+    with Session() as db:
+        factors = list(db.scalars(select(ResearchFactor).order_by(ResearchFactor.category, ResearchFactor.factor_id)))
+        relations = list(db.scalars(select(ResearchStrategyFactor).order_by(ResearchStrategyFactor.strategy_id, ResearchStrategyFactor.display_order)))
+    by_strategy = {key: [] for key in STRATEGIES}
+    by_factor = {row.factor_id: [] for row in factors}
+    for relation in relations:
+        by_strategy[relation.strategy_id].append({"factor_id": relation.factor_id, "role": relation.role, "display_order": relation.display_order})
+        by_factor[relation.factor_id].append(relation.strategy_id)
+    return {
+        "factors": [
+            {"id": row.factor_id, "name": row.factor_name, "category": row.category,
+             "output_type": row.output_type, "meaning": row.meaning,
+             "chart_visible": row.chart_visible, "strategies": by_factor[row.factor_id]}
+            for row in factors
+        ],
+        "strategies": [
+            {"id": key, "name": definition["name"], "description": definition["description"],
+             "research_only": definition.get("research_only", False), "factors": by_strategy[key]}
+            for key, definition in STRATEGIES.items()
+        ],
+    }
+
+
+@app.get("/candles/{code}/factors")
+def candle_factors(code: str, start: date, end: date):
+    """读取行情图因子标记，按核验行情与权益做因果计算。"""
     if start > end or not re.fullmatch(r"\d{6}", code):
         raise HTTPException(422, "代码或日期范围无效")
     with Session() as db:
@@ -238,14 +273,14 @@ def candle_turning_events(code: str, start: date, end: date):
             select(func.max(Candle.date)).where(Candle.code == code, Candle.date <= end)
         )
         if latest is None or latest < start:
-            return {"events": [], "data_cutoff": None, "partial": False}
+            return {"events": [], "data_cutoff": None, "partial": False, "warmup_insufficient": False}
         source = db.get(BacktestSource, code)
         if source is None:
             raise HTTPException(422, "尚无已核验权益资料")
         cutoff = min(latest, source.checked_through_date)
         partial = cutoff < latest
         if cutoff < start:
-            return {"events": [], "data_cutoff": None, "partial": partial}
+            return {"events": [], "data_cutoff": None, "partial": partial, "warmup_insufficient": False}
         candles = list(db.scalars(
             select(Candle)
             .where(Candle.code == code, Candle.date <= cutoff)
@@ -267,17 +302,20 @@ def candle_turning_events(code: str, start: date, end: date):
         except ValueError as exc:
             raise HTTPException(422, f"行情或权益资料未通过校验：{exc}") from None
 
-    events = turning_events(
+    turning = turning_events(
         indicator_rows,
         [],
         turning_profile(code)["parameters"],
     )
+    # 指标行情已包含权益调整，不再次把现金分红加入收盘价。
+    events = calculate_factor_events(indicator_rows, turning)
     return {
         "events": [
-            {"date": day, "kind": kind}
-            for day, kind in events.items()
-            if day >= start.isoformat()
+            {**event, **FACTORS[event["factor_id"]]}
+            for event in events
+            if event["trade_date"] >= start.isoformat()
         ],
         "data_cutoff": rows[-1]["trade_date"],
         "partial": partial,
+        "warmup_insufficient": sum(row["trade_date"] <= start.isoformat() for row in rows) < SHARED_WARMUP_BARS,
     }
