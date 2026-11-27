@@ -3,6 +3,7 @@
 import os
 import re
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import date, timedelta
 from decimal import InvalidOperation
@@ -22,6 +23,8 @@ from app.backtest_data import (
 from app.backtest_routes import router as backtest_router
 from app.collection import fetch_rows, now, validate_row
 from app.db import Session
+from app.etf_catalog import fetch_catalog, fetch_fund_detail, parse_fund_detail
+from app.etf_flow_routes import router as etf_flow_router
 from app.index_valuation_routes import router as index_valuation_router
 from app.jobs import (
     launch,
@@ -34,6 +37,7 @@ from app.market_sentiment_routes import router as market_sentiment_router
 from app.models import (
     BacktestSource,
     Candle,
+    EtfCatalogProfile,
     IndexCandle,
     IndexValuationDaily,
     Instrument,
@@ -42,7 +46,9 @@ from app.models import (
     Job,
     MarketFearGreedDaily,
     MarketRegimeFactorDaily,
+    NationalTeamInstrument,
     ResearchFactor,
+    ResearchIndex,
     ResearchStrategyFactor,
     Run,
     SentimentDaily,
@@ -66,6 +72,7 @@ async def lifespan(app):
     recover_interrupted(4)
     recover_interrupted(5)
     recover_interrupted(6)
+    recover_interrupted(7)
     stop = threading.Event()
     thread = threading.Thread(target=scheduler, args=(stop,), daemon=True)
     thread.start()
@@ -81,6 +88,7 @@ app.include_router(sentiment_router)
 app.include_router(national_team_router)
 app.include_router(index_valuation_router)
 app.include_router(market_sentiment_router)
+app.include_router(etf_flow_router)
 app.include_router(research_router)
 app.include_router(review_router)
 app.include_router(strategy_lab_router)
@@ -88,9 +96,14 @@ app.include_router(strategy_workbench_router)
 
 
 class InstrumentCreate(BaseModel):
-    """仅接收 ETF 证券代码。"""
+    """新增ETF及用户显式确认的指数关联。"""
 
     code: str = Field(pattern=r"^[0-9]{6}$")
+    confirm_index_link: bool = False
+    tracking_index_code: str | None = Field(
+        default=None, pattern=r"^[0-9]{6}\.(SH|SZ)$"
+    )
+    mapping_evidence: str | None = None
 
 
 class InstrumentUpdate(BaseModel):
@@ -124,6 +137,13 @@ def instruments():
                     func.count(), func.min(Candle.date), func.max(Candle.date)
                 ).where(Candle.code == item.code)
             ).one()
+            profile = db.get(EtfCatalogProfile, item.code)
+            mapped_index = db.scalar(
+                select(InstrumentIndexLink.index_code)
+                .where(InstrumentIndexLink.instrument_code == item.code)
+                .order_by(InstrumentIndexLink.index_code)
+                .limit(1)
+            )
             result.append(
                 {
                     "code": item.code,
@@ -134,19 +154,23 @@ def instruments():
                     "first_date": first,
                     "last_date": last,
                     "source": "ChatBI · daily_ohlcv_etf",
+                    "catalog_profile": {
+                        "category_tag": profile.category_tag,
+                        "management_fee_pct": profile.management_fee_pct,
+                        "custody_fee_pct": profile.custody_fee_pct,
+                        "tracking_index_code": profile.tracking_index_code,
+                        "index_corr": profile.index_corr,
+                        "mapped_index_code": mapped_index,
+                    }
+                    if profile
+                    else None,
                 }
             )
         return result
 
 
-@app.post("/instruments", status_code=201)
-def create_instrument(body: InstrumentCreate):
-    """用 ETF 行情源确认代码，登记后启动现有行情任务。"""
-    code = body.code
-    with Session() as db:
-        if db.get(Instrument, code):
-            raise HTTPException(409, "该 ETF 已在标的配置中")
-
+def _verify_instrument_market_data(code: str) -> tuple[str | None, int]:
+    """以近30日ChatBI日行情确认ETF代码；FundDB不可替代该硬校验。"""
     end = now().date() - timedelta(days=1)
     start = end - timedelta(days=29)
     try:
@@ -161,15 +185,101 @@ def create_instrument(body: InstrumentCreate):
         raise HTTPException(502, "数据源返回的 ETF 行情未通过校验，请稍后重试") from None
 
     name = latest.get("STOCK_NAME")
-    statement = insert(Instrument).values(code=code)
-    if isinstance(name, str) and name.strip():
-        statement = statement.values(name=name)
+    return (name.strip() if isinstance(name, str) and name.strip() else None, len(rows))
+
+
+def _funddb_preview(code: str) -> tuple[dict | None, list[str]]:
+    """FundDB仅作为可降级档案建议，失败不影响行情核验后的新增。"""
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            catalog_future = executor.submit(fetch_catalog)
+            detail_future = executor.submit(fetch_fund_detail, code)
+            item = next(
+                (row for row in catalog_future.result() if row["instrument_code"] == code),
+                None,
+            )
+            raw_detail = detail_future.result()
+        if item is None:
+            return None, ["FundDB目录暂未收录该ETF，仍可仅按行情新增"]
+        detail = parse_fund_detail(
+            raw_detail, item.get("tracking_index_code")
+        )
+        return {
+            "fund_name": item.get("fund_name"),
+            "fund_full_name": item.get("fund_full_name"),
+            "category_primary": item.get("category_primary"),
+            "category_tag": item.get("category_tag"),
+            "tracking_index_code": item.get("tracking_index_code"),
+            "tracking_index_name": item.get("tracking_index_name"),
+            "index_corr": detail.get("index_corr"),
+            "setup_date": item.get("setup_date"),
+            "management_fee_pct": item.get("management_fee_pct"),
+            "custody_fee_pct": item.get("custody_fee_pct"),
+            "linked_otc_code": item.get("linked_otc_code"),
+        }, []
+    except Exception:  # noqa: BLE001 - 外部档案预览必须可降级且不泄露源错误
+        return None, ["FundDB档案暂不可用，仍可仅按行情新增"]
+
+
+@app.get("/instruments/preview/{code}")
+def preview_instrument(code: str):
+    """核验行情并展示可选档案建议；不写入标的或指数映射。"""
+    if not re.fullmatch(r"[0-9]{6}", code):
+        raise HTTPException(422, "证券代码必须为六位数字")
+    name, count = _verify_instrument_market_data(code)
+    profile, warnings = _funddb_preview(code)
     with Session() as db:
+        exists = db.get(Instrument, code) is not None
+        suggested = profile.get("tracking_index_code") if profile else None
+        known_index = bool(suggested and db.get(ResearchIndex, suggested))
+        national_team_covered = db.get(NationalTeamInstrument, code) is not None
+    return {
+        "code": code,
+        "market_verified": True,
+        "market_name": name,
+        "market_row_count": count,
+        "already_configured": exists,
+        "funddb_profile": profile,
+        "suggested_index_exists": known_index,
+        "national_team_covered": national_team_covered,
+        "warnings": warnings,
+    }
+
+
+@app.post("/instruments", status_code=201)
+def create_instrument(body: InstrumentCreate):
+    """用行情确认ETF代码；指数关联只接受用户明确确认和文字依据。"""
+    code = body.code
+    with Session() as db:
+        if db.get(Instrument, code):
+            raise HTTPException(409, "该 ETF 已在标的配置中")
+    name, _ = _verify_instrument_market_data(code)
+    evidence = body.mapping_evidence.strip() if body.mapping_evidence else ""
+    if body.confirm_index_link and (body.tracking_index_code is None or not evidence):
+        raise HTTPException(422, "确认指数关联时必须提供指数代码和核验依据")
+
+    with Session() as db:
+        if body.confirm_index_link and db.get(ResearchIndex, body.tracking_index_code) is None:
+            raise HTTPException(422, "待关联指数尚未纳入研究指数目录")
+        statement = insert(Instrument).values(code=code)
+        if name:
+            statement = statement.values(name=name)
         created = db.scalar(
-            statement.on_conflict_do_nothing(index_elements=[Instrument.code]).returning(Instrument.code)
+            statement.on_conflict_do_nothing(index_elements=[Instrument.code]).returning(
+                Instrument.code
+            )
         )
         if created is None:
             raise HTTPException(409, "该 ETF 已在标的配置中")
+        if body.confirm_index_link:
+            db.add(
+                InstrumentIndexLink(
+                    instrument_code=code,
+                    index_code=body.tracking_index_code,
+                    mapping_evidence=evidence,
+                    verified_date=now().date(),
+                )
+            )
         db.commit()
     queue_free_backfill(code)
     return {"code": code, "run_id": launch()}

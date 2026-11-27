@@ -9,7 +9,7 @@ export default function Jobs({
   initialTask?: string;
 }) {
   const [query, update] = useResearchQuery({ task: initialTask });
-  const tasks = [["etf", "基金日行情"], ["sentiment", "行业恐贪"], ["market-sentiment", "全市场温度"], ["national-team", "国家队持仓"], ["index-valuations", "指数估值"], ["strategy-signals", "策略日计划"]];
+  const tasks = [["etf", "基金日行情"], ["etf-flows", "ETF档案与份额流"], ["sentiment", "行业恐贪"], ["market-sentiment", "全市场温度"], ["national-team", "国家队持仓"], ["index-valuations", "指数估值"], ["strategy-signals", "策略日计划"]];
   const task = tasks.some(([key]) => key === query.task) ? query.task : "etf";
   return (
     <>
@@ -20,7 +20,7 @@ export default function Jobs({
   );
 }
 function TaskPanel({ task }: { task: string }) {
-  const path = task === "strategy-signals" ? "/strategy-lab/job" : task === "index-valuations" ? "/index-valuations/job" : task === "national-team" ? "/national-team/job" : task === "market-sentiment" ? "/market-sentiment/job" : task === "sentiment" ? "/sentiment/job" : "/job";
+  const path = task === "strategy-signals" ? "/strategy-lab/job" : task === "index-valuations" ? "/index-valuations/job" : task === "national-team" ? "/national-team/job" : task === "market-sentiment" ? "/market-sentiment/job" : task === "etf-flows" ? "/etf-flows/job" : task === "sentiment" ? "/sentiment/job" : "/job";
   const [job, setJob] = useState<Job | null>(null);
   const [time, setTime] = useState("01:00");
   const [enabled, setEnabled] = useState(true);
@@ -87,7 +87,7 @@ function TaskPanel({ task }: { task: string }) {
       <header className="page-header">
         <div>
           <h2>定时任务</h2>
-          <p>{task === "etf" ? "基金行情回补与权益资料批量核验" : "历史回补与每日增量，采集进度按区间保存"}</p>
+          <p>{task === "etf" ? "基金行情回补与权益资料批量核验" : task === "etf-flows" ? "配置内 ETF 档案核验与日度份额流沉淀" : "历史回补与每日增量，采集进度按区间保存"}</p>
         </div>
         <button
           className="primary"
@@ -173,6 +173,8 @@ function TaskPanel({ task }: { task: string }) {
               ? "首次回填五年，后续增量入库并重查最近七日修订。"
               : task === "market-sentiment"
               ? "全市场恐贪总分自2020-08起增量核验；五维子因子只返回近一年滚动窗口，按日累积且不删除本地旧历史。"
+              : task === "etf-flows"
+              ? "拉取配置内ETF的费率、成立日、跟踪指数关联参考及T-1份额净变动和折溢价；仅从首次采集日起逐日沉淀，不回填未采集历史。"
               : "行情采集截至昨日：启用标的首次按月回补，后续重查最近七日；随后核验全部配置 ETF 分红与折算资料。"}{" "}
             同一任务禁止重复触发。
           </p>

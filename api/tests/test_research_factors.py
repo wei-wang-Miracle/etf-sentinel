@@ -68,6 +68,12 @@ def test_factor_directory_declares_observable_identity_and_output_type():
         "consecutive_down_exhaustion",
         "gap_up_strong",
         "relative_strength_20d_positive",
+        "market_fear_extreme",
+        "market_greed_extreme",
+        "market_ivix_high",
+        "market_ivix_calm",
+        "market_breadth_weak",
+        "market_futures_deep_discount",
     }
     assert "oversold_recovery" not in FACTORS
     assert FACTORS["turning_bottom"]["output_type"] == "event"

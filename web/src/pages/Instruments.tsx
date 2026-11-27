@@ -4,6 +4,30 @@ import { api, type Instrument } from "../lib/api";
 import { dataManagementUrl } from "../lib/navigation";
 import { journeyUrl } from "../lib/strategyJourney";
 
+type InstrumentPreview = {
+  code: string;
+  market_verified: boolean;
+  market_name: string | null;
+  market_row_count: number;
+  already_configured: boolean;
+  funddb_profile: {
+    fund_name: string | null;
+    fund_full_name: string | null;
+    category_primary: string | null;
+    category_tag: string | null;
+    tracking_index_code: string | null;
+    tracking_index_name: string | null;
+    index_corr: number | null;
+    setup_date: string | null;
+    management_fee_pct: number | null;
+    custody_fee_pct: number | null;
+    linked_otc_code: string | null;
+  } | null;
+  suggested_index_exists: boolean;
+  national_team_covered: boolean;
+  warnings: string[];
+};
+
 function InstrumentRow({
   item,
   refresh,
@@ -44,6 +68,7 @@ function InstrumentRow({
       <td>
         <strong className="mono">{item.code}</strong>
         <span className="subtext">{item.name}</span>
+        {item.catalog_profile && <span className="subtext">{[item.catalog_profile.category_tag, item.catalog_profile.management_fee_pct == null ? null : `费率 ${item.catalog_profile.management_fee_pct}%+${item.catalog_profile.custody_fee_pct ?? "—"}%`, item.catalog_profile.mapped_index_code ? `关联指数 ${item.catalog_profile.mapped_index_code}` : item.catalog_profile.tracking_index_code ? `源跟踪 ${item.catalog_profile.tracking_index_code}` : "未映射指数"].filter(Boolean).join(" · ")}</span>}
       </td>
       <td>
         <label className="switch">
@@ -107,6 +132,9 @@ export default function Instruments({ embedded = false }: { embedded?: boolean }
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState("");
   const [added, setAdded] = useState<{ code: string; run_id: number | null }>();
+  const [preview, setPreview] = useState<InstrumentPreview>();
+  const [confirmIndexLink, setConfirmIndexLink] = useState(false);
+  const [mappingEvidence, setMappingEvidence] = useState("");
   async function load() {
     setError("");
     try {
@@ -120,15 +148,44 @@ export default function Instruments({ embedded = false }: { embedded?: boolean }
   useEffect(() => {
     void load();
   }, []);
-  async function add(event: FormEvent<HTMLFormElement>) {
+  async function previewCode(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setAdding(true);
     setAdded(undefined);
     setAddError("");
+    setPreview(undefined);
+      setConfirmIndexLink(false);
+    setMappingEvidence("");
     try {
-      const result = await api<{ code: string; run_id: number | null }>("/instruments", "POST", { code });
+      const result = await api<InstrumentPreview>(`/instruments/preview/${code}`);
+      setPreview(result);
+      setConfirmIndexLink(!!result.funddb_profile?.tracking_index_code && result.suggested_index_exists);
+    } catch (e) {
+      setAddError((e as Error).message);
+    } finally {
+      setAdding(false);
+    }
+  }
+  async function add() {
+    if (!preview) return;
+    setAdding(true);
+    setAdded(undefined);
+    setAddError("");
+    try {
+      const payload = confirmIndexLink
+        ? {
+          code: preview.code,
+          confirm_index_link: true,
+          tracking_index_code: preview.funddb_profile?.tracking_index_code,
+          mapping_evidence: mappingEvidence,
+        }
+        : { code: preview.code };
+      const result = await api<{ code: string; run_id: number | null }>("/instruments", "POST", {
+        ...payload,
+      });
       setAdded(result);
       setCode("");
+      setPreview(undefined);
       setSearch(result.code);
       await load();
     } catch (e) {
@@ -165,14 +222,29 @@ export default function Instruments({ embedded = false }: { embedded?: boolean }
       )}
       <section className="panel">
         <div className="panel-header">
-          <form className="date-controls" onSubmit={add}>
+          <form className="date-controls" onSubmit={previewCode}>
             <label>ETF 代码
               <input className="mono" type="text" inputMode="numeric" pattern="[0-9]{6}" size={8}
                 maxLength={6} required value={code} disabled={adding} onChange={(e) => setCode(e.target.value)} />
             </label>
-            <button className="primary" type="submit" disabled={adding}>{adding ? "确认代码中…" : "新增 ETF"}</button>
+            <button className="primary" type="submit" disabled={adding}>{adding ? "核验中…" : "核验并预览"}</button>
           </form>
         </div>
+        {preview && (
+          <div className="notice instrument-preview" role="status">
+            <div><strong className="mono">{preview.code}</strong> 已通过近30日行情核验（{preview.market_row_count} 条）{preview.market_name ? ` · ${preview.market_name}` : ""}</div>
+            {preview.funddb_profile ? <div className="preview-grid">
+              <span>FundDB档案：{preview.funddb_profile.fund_full_name ?? preview.funddb_profile.fund_name ?? "—"}</span>
+              <span>分类：{[preview.funddb_profile.category_primary, preview.funddb_profile.category_tag].filter(Boolean).join(" · ") || "—"}</span>
+              <span>建议指数：{preview.funddb_profile.tracking_index_name ?? "—"} <span className="mono">{preview.funddb_profile.tracking_index_code ?? ""}</span>{preview.funddb_profile.index_corr == null ? "" : ` · 相关度 ${preview.funddb_profile.index_corr.toFixed(3)}`}</span>
+              <span>指数估值池：{preview.suggested_index_exists ? "已纳入，可复用现有估值采集" : "未纳入，本次不会自动加入"} · 国家队覆盖：{preview.national_team_covered ? "已覆盖" : "未覆盖"}</span>
+            </div> : null}
+            {preview.warnings.map((warning) => <p className="muted" key={warning}>{warning}</p>)}
+            {preview.funddb_profile?.tracking_index_code && preview.suggested_index_exists && !preview.already_configured && <label className="switch"><input type="checkbox" checked={confirmIndexLink} onChange={(event) => setConfirmIndexLink(event.target.checked)} />同时建立已核验指数关联</label>}
+            {confirmIndexLink && <label>关联依据<input aria-label="指数关联依据" value={mappingEvidence} onChange={(event) => setMappingEvidence(event.target.value)} placeholder="例如基金合同与指数代码核验" required /></label>}
+            {preview.already_configured ? <p>该 ETF 已在研究范围内，无需重复新增。</p> : <button className="primary" type="button" onClick={add} disabled={adding || (confirmIndexLink && !mappingEvidence.trim())}>{adding ? "新增中…" : "确认新增 ETF"}</button>}
+          </div>
+        )}
         <div className="panel-header">
           <h2>
             研究标的 <span className="muted">/ {visibleRows.length}{keyword ? `（共 ${rows.length}）` : ""}</span>

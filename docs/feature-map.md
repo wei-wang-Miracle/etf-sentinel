@@ -70,8 +70,8 @@
 | 研究对象详情合并 | 投研分析 | 已实现 | ETF唯一主体、旧指数URL映射关联ETF、分区懒加载、五估值、情绪背景、国家队、个人摘要、研究入口与URL迁移；策略只能通过固定模板生成，不开放条件配置 | [设计](superpowers/specs/2026-11-06-research-object-design.md)、[页面](../web/src/pages/ResearchObject.tsx) |
 | 横向同维度对比 | 投研分析 | 已实现 | 当前持仓默认／全部配置切换，ETF关联估值、资金与趋势；情绪单列背景；同日排名、共享指数提示、六线图、热力图与URL | [设计](superpowers/specs/2026-11-06-cross-comparison-design.md)、[页面](../web/src/pages/Compare.tsx) |
 | 估值因子盘活与技术因子扩展 | 策略研究 | 已确认待实现 | 复用已采股息率/风险溢价/ROE与000300.SH，新增ADX14/MA250/回撤深度/相对强弱及分组因子弹窗，不开放用户编辑规则 | [设计方案](superpowers/specs/2026-11-27-indicator-factor-and-funddb-expansion-design.md#1-阶段一盘活已入库估值指标与扩展技术因子零新外部依赖) |
-| 全市场恐贪与五维温度采集展示 | 数据基础 | 已确认待实现 | 独立任务6采集 `fear-greed`（含iVIX/广度/期指升贴水等5维子因子），子因子近1年窗口逐日累积不覆盖旧历史；依赖投研与策略研究展示对齐 | [设计方案](superpowers/specs/2026-11-27-indicator-factor-and-funddb-expansion-design.md#2-阶段二接入全市场恐贪与五维-regime-子因子fear-greed) |
-| 场内ETF档案自动核验与份额流沉淀 | 数据基础 | 已确认待实现 | 独立任务7与新增预览接口复用 `fundsale/etf` 与 `fund/detail`，支持显式确认指数映射及日度份额净流/折溢价沉淀，不回填未采截面历史 | [设计方案](superpowers/specs/2026-11-27-indicator-factor-and-funddb-expansion-design.md#3-阶段三接入-fundsaleetf-与-funddetail标的自动识别映射校验与日度资金流) |
+| 全市场恐贪与五维温度采集展示 | 数据基础 | 已实现 | 独立任务6采集 `fear-greed`（含iVIX/广度/期指升贴水等5维子因子），子因子近1年窗口逐日累积不覆盖旧历史；严格早于 ETF 当日的上下文因子和研究页展示已接入 | [数据模块](../api/app/market_sentiment.py)、[设计方案](superpowers/specs/2026-11-27-indicator-factor-and-funddb-expansion-design.md#2-阶段二接入全市场恐贪与五维-regime-子因子fear-greed) |
+| 场内ETF档案自动核验与份额流沉淀 | 数据基础 | 已实现 | 独立任务7与新增预览接口复用 `fundsale/etf` 与 `fund/detail`；仅已配置且启用的 ETF 入库，映射必须由用户显式确认并提供依据。份额流不回填未采集历史，当前仅供观察 | [采集模块](../api/app/etf_flow.py)、[查询路由](../api/app/etf_flow_routes.py)、[设计方案](superpowers/specs/2026-11-27-indicator-factor-and-funddb-expansion-design.md#3-阶段三接入-fundsaleetf-与-funddetail标的自动识别映射校验与日度资金流) |
 
 分析页采用紧凑筛选与图表优先布局，移除底部数据明细表；配置与日志保留。
 

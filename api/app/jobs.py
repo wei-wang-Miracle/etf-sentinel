@@ -8,6 +8,7 @@ from sqlalchemy import select, text
 
 from app.collection import collect, now
 from app.db import Session, engine
+from app.etf_flow import collect_etf_flows
 from app.index_collection import collect_indices
 from app.market_sentiment import collect_market_sentiment
 from app.models import Job, Run
@@ -38,6 +39,7 @@ def launch(trigger="manual", job_id=1):
         4: collect_indices,
         5: collect_signals,
         6: collect_market_sentiment,
+        7: collect_etf_flows,
     }
     if job_id not in collectors:
         raise ValueError("未知采集任务")

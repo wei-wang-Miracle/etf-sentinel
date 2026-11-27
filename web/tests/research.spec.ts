@@ -2,7 +2,7 @@ import { test, expect, json, summary, assignment, catalog, candles } from "./fix
 
 const detailUrl = "/?page=etfs&code=510500&object=etf:510500&detail=overview&tab=price";
 
-test("图表维度横向标签支持键盘切换和刷新恢复，按需读取国家队序列", async ({ page }) => {
+test("资金与份额默认显示份额流，国家队作为按需子视图", async ({ page }) => {
   let requests = 0;
   await page.route("**/api/national-team/series/510500?*", (route) => {
     requests++;
@@ -16,10 +16,13 @@ test("图表维度横向标签支持键盘切换和刷新恢复，按需读取�
   await page.keyboard.press("ArrowRight");
   await expect(tabs.getByRole("tab", { name: "关联估值", exact: true })).toBeFocused();
   await page.keyboard.press("ArrowRight");
+  await expect(page.getByRole("img", { name: /ETF收盘价与近7日份额变动、收盘折溢价率/ })).toBeVisible();
+  expect(requests).toBe(0);
+  await page.getByRole("button", { name: "国家队估算", exact: true }).click();
   await expect(page.getByRole("img", { name: /国家队估算持仓比例同图双轴/ })).toBeVisible();
   await expect(page).toHaveURL(/tab=funds/);
   await page.reload();
-  await expect(page.getByRole("tab", { name: "国家队", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tab", { name: "资金与份额", exact: true })).toHaveAttribute("aria-selected", "true");
   await expect(page.getByText("0.00%", { exact: true })).toBeVisible();
 });
 
@@ -36,7 +39,7 @@ test("常规口径提示收在图表下方，不占据指标与图表层级", as
 test("国家队源不支持的 ETF 明确说明原因，不诱导反复采集", async ({ page }) => {
   const data = summary();
   await page.route("**/api/research/object?*", (route) => json(route, { ...data, linked: { ...data.linked, national_team_tracked: false }, summary: { ...data.summary, national_team: { ratio: null, as_of: null } } }));
-  await page.goto("/?page=etfs&code=510500&detail=overview&tab=funds");
+  await page.goto("/?page=etfs&code=510500&detail=overview&tab=funds&fund_view=national");
   await expect(page.getByRole("heading", { name: "该 ETF 不在国家队数据源范围内" })).toBeVisible();
   await expect(page.locator(".dossier-chart")).toContainText("仅提供18只ETF");
   await expect(page.locator(".dossier-chart")).toContainText("重新采集不会产生该标的数据");
@@ -46,7 +49,7 @@ test("国家队源不支持的 ETF 明确说明原因，不诱导反复采集", 
 test("国家队比例有数据而日 K 缺失时仍绘图，接口失败保留重试", async ({ page }) => {
   let available = false;
   await page.route("**/api/national-team/series/510500?*", (route) => json(route, available ? { estimation_start_date: "2026-01-01", holdings: [{ trade_date: "2026-11-06", estimated_holding_pct: 58.46 }], candles: [] } : { detail: "测试国家队接口失败" }, available ? 200 : 503));
-  await page.goto("/?page=etfs&code=510500&detail=overview&tab=funds");
+  await page.goto("/?page=etfs&code=510500&detail=overview&tab=funds&fund_view=national");
   await expect(page.getByRole("alert")).toContainText("测试国家队接口失败");
   available = true;
   await page.getByRole("button", { name: "重试图表" }).click();
@@ -107,7 +110,7 @@ test("数据管理返回目标只允许内部页面", async ({ page }) => {
 
 test("有效零国家队比例不显示为缺失", async ({ page }) => {
   await page.route("**/api/research/object?**", (route) => json(route, summary()));
-  await page.goto("/?page=etfs&code=510500&detail=overview&tab=funds");
+  await page.goto("/?page=etfs&code=510500&detail=overview&tab=funds&fund_view=national");
   await expect(page.getByText("0.00%", { exact: true })).toBeVisible();
 });
 

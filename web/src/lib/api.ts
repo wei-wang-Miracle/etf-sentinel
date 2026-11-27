@@ -7,6 +7,25 @@ export type Instrument = {
   first_date: string | null;
   last_date: string | null;
   source: string;
+  catalog_profile?: {
+    category_tag: string | null;
+    management_fee_pct: number | null;
+    custody_fee_pct: number | null;
+    tracking_index_code: string | null;
+    index_corr: number | null;
+    mapped_index_code: string | null;
+  } | null;
+};
+export type EtfFlowPoint = {
+  trade_date: string;
+  unit_shares_100m: number | null;
+  aum_100m: number | null;
+  net_share_flow_7d_100m: number | null;
+  net_share_flow_30d_100m: number | null;
+  discount_premium_pct: number | null;
+  purchase_status: string | null;
+  redeem_status: string | null;
+  collected_at: string;
 };
 export type Log = {
   kind?: "market" | "equity";

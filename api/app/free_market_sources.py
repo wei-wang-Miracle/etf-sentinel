@@ -13,7 +13,7 @@ from app.backtest_data import _transition_split_multiplier, trading_days
 
 # 分级顺序：优先东财（全历史、含成交额、与权益同源），备用新浪（精度一致），兜底腾讯（全历史分段）
 SOURCE_TIERS = ("eastmoney", "sina", "tencent")
-# 交易所日历库 XSHG 当前最早覆盖日；早于该日会导致严格日历校验失败
+# 免费历史源允许的最早日；交易所日历实际覆盖起点由运行时依赖决定
 MIN_CALENDAR_DATE = date(2006, 11, 27)
 
 _HEADERS = {
@@ -50,7 +50,13 @@ def audited_suspensions(source_series):
     }
     common_start = max(max(min(days) for days in source_dates.values()), str(MIN_CALENDAR_DATE))
     common_end = min(max(days) for days in source_dates.values())
-    expected, calendar_version = trading_days(common_start, common_end)
+    # 最早一根免费历史可能早于交易日历依赖的首个 session。该日保留为行情
+    # 来源边界，但不对没有日历证据的区间推断停牌。
+    import exchange_calendars as calendars
+
+    calendar = calendars.get_calendar("XSHG")
+    audit_start = max(common_start, str(calendar.first_session.date()))
+    expected, calendar_version = trading_days(audit_start, common_end)
     all_observed = set().union(*source_dates.values())
     sources = sorted(available)
     return {

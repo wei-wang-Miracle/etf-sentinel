@@ -98,6 +98,11 @@ export async function mockApi(page: Page) {
     if (path.endsWith("/job") || path === "/job") return json(route, job);
     if (path === "/research/universe") return json(route, { items: instruments.map((item) => ({ ...item, held: true })), default_code: "510500" });
     if (path === "/research/object") return json(route, summary(url.searchParams.get("code") || "510500"));
+    if (/^\/etf-flows\/\d{6}\/summary$/.test(path)) return json(route, {
+      latest: { trade_date: "2026-11-06", unit_shares_100m: 3.4, aum_100m: 12.5, net_share_flow_7d_100m: 0.2, net_share_flow_30d_100m: -0.3, discount_premium_pct: 0.12, purchase_status: "开放申购", redeem_status: "开放赎回", collected_at: "2026-11-07T00:00:00Z" },
+      coverage: { first_trade_date: "2026-11-06", last_trade_date: "2026-11-06", count: 1 },
+    });
+    if (/^\/etf-flows\/\d{6}\/series$/.test(path)) return json(route, { series: [{ trade_date: "2026-11-06", unit_shares_100m: 3.4, aum_100m: 12.5, net_share_flow_7d_100m: 0.2, net_share_flow_30d_100m: -0.3, discount_premium_pct: 0.12, purchase_status: "开放申购", redeem_status: "开放赎回", collected_at: "2026-11-07T00:00:00Z" }] });
     if (path === "/factors") return json(route, factorCatalog);
     if (path.endsWith("/factors")) return json(route, { events: [], data_cutoff: null, partial: false, warmup_insufficient: false });
     if (path.startsWith("/candles/")) return json(route, candles);

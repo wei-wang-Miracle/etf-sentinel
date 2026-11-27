@@ -425,6 +425,100 @@ class InstrumentIndexLink(Base):
     verified_date: Mapped[Date] = mapped_column(comment="本系统映射核验北京时间日期，非指数数据日期")
 
 
+class EtfCatalogProfile(Base):
+    """仅针对已配置 ETF 保存的 FundDB 档案快照。"""
+
+    __tablename__ = "etf_catalog_profiles"
+    __table_args__: ClassVar[dict] = {
+        "comment": "已配置ETF的FundDB档案快照；不向instruments外扩展全市场基金目录"
+    }
+    instrument_code: Mapped[str] = mapped_column(
+        ForeignKey("instruments.instrument_code"),
+        primary_key=True,
+        comment="ETF证券代码，关联instruments.instrument_code；仅已配置标的可写入",
+    )
+    fund_full_name: Mapped[str | None] = mapped_column(
+        Text, comment="FundDB基金全称；源未提供时为空"
+    )
+    category_primary: Mapped[str | None] = mapped_column(
+        String(100), comment="FundDB一级分类；仅供观察，不作为策略分类"
+    )
+    category_tag: Mapped[str | None] = mapped_column(
+        String(100), comment="FundDB二级分类或主题标签；仅供观察"
+    )
+    tracking_index_code: Mapped[str | None] = mapped_column(
+        String(32), comment="FundDB建议跟踪指数完整代码；不自动建立InstrumentIndexLink"
+    )
+    tracking_index_name: Mapped[str | None] = mapped_column(
+        String(100), comment="FundDB建议跟踪指数名称；仅供人工核验"
+    )
+    index_corr: Mapped[Decimal | None] = mapped_column(
+        Numeric(10, 6), comment="FundDB基金详情中建议指数相关度，闭区间0至1；不构成映射证据"
+    )
+    setup_date: Mapped[Date | None] = mapped_column(
+        comment="基金成立日期，按FundDB源值保存；可空"
+    )
+    management_fee_pct: Mapped[Decimal | None] = mapped_column(
+        Numeric(12, 6), comment="管理费率，百分数源口径，如0.5表示0.5%；可空"
+    )
+    custody_fee_pct: Mapped[Decimal | None] = mapped_column(
+        Numeric(12, 6), comment="托管费率，百分数源口径，如0.1表示0.1%；可空"
+    )
+    linked_otc_code: Mapped[str | None] = mapped_column(
+        String(32), comment="FundDB联接基金代码；可空"
+    )
+    source_url: Mapped[str] = mapped_column(
+        Text, comment="本档案外部数据源URL，不含访问凭据"
+    )
+    collected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), comment="本档案首次采集或字段修订的本地时间，带时区"
+    )
+
+
+class EtfFlowDaily(Base):
+    """配置内 ETF 的 FundDB 日度份额、规模和折溢价截面。"""
+
+    __tablename__ = "etf_flow_daily"
+    __table_args__: ClassVar[tuple] = (
+        Index("ix_etf_flow_daily_trade_date", "trade_date"),
+        {
+            "comment": "已配置ETF的FundDB日度份额流与折溢价；仅供观察，不进入当前策略因子",
+        },
+    )
+    instrument_code: Mapped[str] = mapped_column(
+        ForeignKey("instruments.instrument_code"),
+        primary_key=True,
+        comment="ETF证券代码，关联instruments.instrument_code；仅已配置标的可写入",
+    )
+    trade_date: Mapped[Date] = mapped_column(
+        primary_key=True, comment="FundDB规模或份额数据对应日期；非采集日期"
+    )
+    unit_shares_100m: Mapped[Decimal | None] = mapped_column(
+        Numeric(24, 6), comment="最新基金份额，单位亿份，允许源值为零；可空"
+    )
+    aum_100m: Mapped[Decimal | None] = mapped_column(
+        Numeric(24, 6), comment="最新基金规模，单位亿元，允许源值为零；可空"
+    )
+    net_share_flow_7d_100m: Mapped[Decimal | None] = mapped_column(
+        Numeric(24, 6), comment="近7日份额变动，单位亿份，正负表示申购赎回净变化；可空"
+    )
+    net_share_flow_30d_100m: Mapped[Decimal | None] = mapped_column(
+        Numeric(24, 6), comment="近30日份额变动，单位亿份，正负表示申购赎回净变化；可空"
+    )
+    discount_premium_pct: Mapped[Decimal | None] = mapped_column(
+        Numeric(16, 8), comment="FundDB源折溢价率，百分数源口径，正负均有效；可空"
+    )
+    purchase_status: Mapped[str | None] = mapped_column(
+        String(40), comment="源申购状态原文，如开放申购；可空"
+    )
+    redeem_status: Mapped[str | None] = mapped_column(
+        String(40), comment="源赎回状态原文，如开放赎回；可空"
+    )
+    collected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), comment="本截面首次采集或字段修订的本地时间，带时区"
+    )
+
+
 class InstrumentSentimentLink(Base):
     """ETF 与行业恐贪类别的显式核验关联。"""
 
