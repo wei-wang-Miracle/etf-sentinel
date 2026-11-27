@@ -50,7 +50,7 @@ def main():
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
     print(
-        f"已完成 {result['round_count']} 轮研究，生成 {len(result['candidates'])} 个候选，"
+        f"已完成每类别 {result['round_count']} 轮研究，生成 {len(result['candidates'])} 个候选，"
         f"覆盖 {len(result['category_leaders'])} 个类别；未发布策略。"
     )
 

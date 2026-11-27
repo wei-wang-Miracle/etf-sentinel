@@ -101,7 +101,7 @@ Expected: FAIL，因为研究模块不存在。
 ```python
 # 支持 factor/all/any/not/within/consecutive/after；每个叶子必须来自 FACTORS。
 # 生成的中文解释不得丢失 NOT、窗口或先后顺序。
-# 统一保护：2 ATR 初始止损（不宽于 5%）、盈利 2.5 ATR 后单调 2.5 ATR 跟踪、35 个交易日时间退出。
+# 统一保护：2 ATR 初始止损（不宽于 7%）、盈利 2.5 ATR 后单调 2.5 ATR 跟踪；浮盈达到 5 ATR 后收紧为 1.8 ATR；持有 18 个交易日且浮盈不足 1 ATR 时退出。
 # entry 真时目标为 1；exit 真或风险保护命中时目标为 0；决定于收盘、在下一交易日开盘执行。
 ```
 

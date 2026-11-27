@@ -139,6 +139,41 @@ def test_candidate_holdout_keeps_position_opened_before_report_window():
     assert set(result["benchmark"]) == {"return", "drawdown", "exposure"}
 
 
+def test_holdout_keeps_carry_position_in_equity_but_excludes_its_full_trade_pnl():
+    from app.factor_strategy_research import _window_statistics
+
+    account = {
+        "daily": [
+            {"trade_date": "2025-02-28", "equity": "50000", "quantity": 100},
+            {"trade_date": "2025-03-03", "equity": "51000", "quantity": 0},
+            {"trade_date": "2025-03-04", "equity": "51200", "quantity": 0},
+        ]
+    }
+    detail = {
+        "rounds": [
+            {
+                "entry_date": "2025-02-10",
+                "exit_date": "2025-03-03",
+                "pnl": "1000",
+            },
+            {
+                "entry_date": "2025-03-03",
+                "exit_date": "2025-03-04",
+                "pnl": "200",
+            },
+        ],
+        "open_rounds": 0,
+    }
+
+    window = _window_statistics(account, detail, "2025-03-03")
+
+    assert window["return"] == 0.024
+    assert window["completed"] == 1
+    assert window["rounds"] == [detail["rounds"][1]]
+    assert window["carry_in_completed"] == 1
+    assert window["carry_in_rounds"] == [detail["rounds"][0]]
+
+
 def test_category_leader_is_selected_only_by_development_score():
     from app.factor_strategy_research import select_category_leader
 
@@ -158,6 +193,131 @@ def test_category_leader_is_selected_only_by_development_score():
     assert select_category_leader("测试类别", candidates)["candidate_id"] == "development_winner"
 
 
+def _score_summary(**overrides):
+    summary = {
+        "completed": 12,
+        "profit_factor": 1.5,
+        "expectancy": 500.0,
+        "return": 0.1,
+        "excess_return": 0.03,
+        "drawdown": -0.04,
+        "exposure": 0.3,
+        "positive_unit_ratio": 1.0,
+    }
+    summary.update(overrides)
+    return summary
+
+
+def test_category_score_blocks_low_sample_and_caps_extreme_profit_factor():
+    from app.factor_strategy_research import _category_score
+
+    assert _category_score(_score_summary(completed=4, profit_factor=9_000.0)) == 0.0
+    assert _category_score(_score_summary(profit_factor=9_000.0)) == _category_score(
+        _score_summary(profit_factor=4.0)
+    )
+
+
+def test_bear_market_defense_is_reported_without_removing_release_blockers():
+    from app.factor_strategy_research import _discard_reasons, defense_evidence
+
+    summary = _score_summary(
+        **{
+            "return": -0.06,
+            "drawdown": -0.1,
+            "benchmark_return": -0.24,
+            "benchmark_drawdown": -0.3,
+            "independent_units": 3,
+            "cross_unit_pass": True,
+        }
+    )
+
+    evidence = defense_evidence(summary)
+
+    assert evidence == {
+        "applicable": True,
+        "engaged": True,
+        "excess_return": 0.18,
+        "downside_capture_ratio": 0.25,
+        "drawdown_compression_ratio": pytest.approx(1 / 3),
+        "qualified": True,
+    }
+    assert "窗口绝对收益不为正" in _discard_reasons(summary)
+
+
+def test_bear_market_defense_does_not_treat_staying_out_as_strategy_evidence():
+    from app.factor_strategy_research import defense_evidence
+
+    summary = _score_summary(
+        **{
+            "return": 0.0,
+            "drawdown": 0.0,
+            "exposure": 0.0,
+            "benchmark_return": -0.24,
+            "benchmark_drawdown": -0.3,
+        }
+    )
+
+    evidence = defense_evidence(summary)
+
+    assert evidence["applicable"] is True
+    assert evidence["engaged"] is False
+    assert evidence["qualified"] is False
+
+
+def test_category_leader_only_uses_its_own_evolution_pool():
+    from app.factor_strategy_research import select_category_leader
+
+    candidates = [
+        {
+            "candidate_id": "gold_candidate",
+            "research_category": "黄金",
+            "development": {"黄金": {"score": 3.0}},
+        },
+        {
+            "candidate_id": "communication_candidate",
+            "research_category": "通信设备",
+            "development": {"黄金": {"score": 999.0}},
+        },
+    ]
+
+    assert select_category_leader("黄金", candidates)["candidate_id"] == "gold_candidate"
+
+
+def test_research_runs_three_candidates_per_category_per_round():
+    from app.factor_strategy_research import run_research
+
+    rows = price_rows(140)
+    universe = {
+        "518880": {
+            "category": "黄金",
+            "independent_key": "518880",
+            "rows": rows,
+            "actions": {"dividends": []},
+            "factor_truth": truth_rows(len(rows)),
+        },
+        "515880": {
+            "category": "通信设备",
+            "independent_key": "515880",
+            "rows": rows,
+            "actions": {"dividends": []},
+            "factor_truth": truth_rows(len(rows)),
+        },
+    }
+
+    result = run_research(universe, rounds=1)
+
+    assert len(result["candidates"]) == 6
+    assert set(result["rounds"][0]["category_candidate_ids"]) == {"黄金", "通信设备"}
+    assert all(
+        len(candidate_ids) == 3
+        for candidate_ids in result["rounds"][0]["category_candidate_ids"].values()
+    )
+    assert {candidate["research_category"] for candidate in result["candidates"]} == {
+        "黄金",
+        "通信设备",
+    }
+
+
 def test_category_summary_labels_single_independent_unit_as_single_instrument_evidence():
     from app.factor_strategy_research import summarize_category
 
@@ -170,6 +330,8 @@ def test_category_summary_labels_single_independent_unit_as_single_instrument_ev
     evaluations = {
         "518880": {
             "rounds": [{"pnl": "100"}, {"pnl": "-50"}],
+            "carry_in_rounds": [],
+            "carry_in_completed": 0,
             "return": 0.04,
             "drawdown": -0.02,
             "exposure": 0.3,

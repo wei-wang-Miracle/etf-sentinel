@@ -36,10 +36,14 @@ STRESS_COSTS = {
     "minimum_commission": 5,
     "slippage_bps": 10,
 }
-RESEARCH_VERSION = "factor-strategy-research-v1.0.0"
+RESEARCH_VERSION = "factor-strategy-research-v1.1.0"
 HOLDOUT_RATIO = 0.2
 MIN_HOLDOUT_DAYS = 60
 MIN_COMPLETED_TRADES = 5
+MAX_SCORE_PROFIT_FACTOR = 4.0
+BEARISH_BENCHMARK_RETURN = -0.05
+MAX_DOWNSIDE_CAPTURE_RATIO = 0.5
+MAX_DRAWDOWN_COMPRESSION_RATIO = 0.5
 MAX_DRAWDOWN = -0.08
 MIN_PROFIT_FACTOR = 1.1
 MAX_EXPLANATION_CHARS = 100
@@ -383,10 +387,19 @@ def _window_statistics(account, detail, start_day):
         peak = max(peak, equity)
         drawdown = min(drawdown, equity / peak - 1)
     rounds = [
-        round_item for round_item in detail["rounds"] if round_item["exit_date"] >= start_day
+        round_item
+        for round_item in detail["rounds"]
+        if round_item["entry_date"] >= start_day
+    ]
+    carry_in_rounds = [
+        round_item
+        for round_item in detail["rounds"]
+        if round_item["entry_date"] < start_day <= round_item["exit_date"]
     ]
     return {
         "rounds": rounds,
+        "carry_in_rounds": carry_in_rounds,
+        "carry_in_completed": len(carry_in_rounds),
         "open": detail["open_rounds"],
         "completed": len(rounds),
         "return": float(Decimal(report_daily[-1]["equity"]) / baseline - 1),
@@ -480,6 +493,8 @@ def _compact_evaluation(result):
         key: result[key]
         for key in (
             "rounds",
+            "carry_in_rounds",
+            "carry_in_completed",
             "open",
             "completed",
             "return",
@@ -513,9 +528,13 @@ def evaluate_universe(
 
 def _unit_summary(code_results):
     rounds = [round_item for result in code_results.values() for round_item in result["rounds"]]
+    carry_in_rounds = [
+        round_item for result in code_results.values() for round_item in result["carry_in_rounds"]
+    ]
     stats = _pnl_statistics(rounds)
     return {
         **stats,
+        "carry_in_completed": len(carry_in_rounds),
         "return": fmean(result["return"] for result in code_results.values()),
         "drawdown": min(result["drawdown"] for result in code_results.values()),
         "exposure": fmean(result["exposure"] for result in code_results.values()),
@@ -531,21 +550,68 @@ def _unit_summary(code_results):
 
 
 def _category_score(summary):
-    expectancy = summary["expectancy"] or -200.0
-    profit_factor = summary["profit_factor"] or 0.0
+    if summary["completed"] < MIN_COMPLETED_TRADES:
+        return 0.0
+    expectancy = (summary["expectancy"] or 0.0) / COSTS["initial_cash"]
+    profit_factor = summary["profit_factor"]
+    if profit_factor is None:
+        profit_factor = MAX_SCORE_PROFIT_FACTOR
+    else:
+        profit_factor = min(profit_factor, MAX_SCORE_PROFIT_FACTOR)
     sample_weight = min(1.0, summary["completed"] / 12)
     return round(
         (
             summary["return"] * 100
             + summary["excess_return"] * 75
             + (profit_factor - 1) * 5
-            + expectancy / 100
+            + expectancy * 100
             - abs(summary["drawdown"]) * 25
         )
         * (0.5 + sample_weight / 2)
         * summary["positive_unit_ratio"],
         6,
     )
+
+
+def defense_evidence(summary):
+    """仅描述下跌留出段的相对防守，不参与任何发布资格判断。"""
+    benchmark_return = summary["benchmark_return"]
+    excess_return = summary["return"] - benchmark_return
+    engaged = summary["exposure"] > 0
+    if benchmark_return > BEARISH_BENCHMARK_RETURN:
+        return {
+            "applicable": False,
+            "engaged": engaged,
+            "excess_return": round(excess_return, 6),
+            "downside_capture_ratio": None,
+            "drawdown_compression_ratio": None,
+            "qualified": False,
+        }
+    downside_capture_ratio = abs(summary["return"]) / abs(benchmark_return)
+    benchmark_drawdown = summary["benchmark_drawdown"]
+    drawdown_compression_ratio = (
+        abs(summary["drawdown"]) / abs(benchmark_drawdown)
+        if benchmark_drawdown < 0
+        else None
+    )
+    return {
+        "applicable": True,
+        "engaged": engaged,
+        "excess_return": round(excess_return, 6),
+        "downside_capture_ratio": round(downside_capture_ratio, 6),
+        "drawdown_compression_ratio": (
+            round(drawdown_compression_ratio, 6)
+            if drawdown_compression_ratio is not None
+            else None
+        ),
+        "qualified": (
+            engaged
+            and excess_return > 0
+            and downside_capture_ratio <= MAX_DOWNSIDE_CAPTURE_RATIO
+            and drawdown_compression_ratio is not None
+            and drawdown_compression_ratio <= MAX_DRAWDOWN_COMPRESSION_RATIO
+        ),
+    }
 
 
 def _discard_reasons(summary):
@@ -581,7 +647,9 @@ def summarize_category(category, universe, evaluations):
     if not units:
         raise ValueError(f"类别{category}没有可评估ETF")
     values = list(units.values())
-    profit_factors = [item["profit_factor"] for item in values if item["profit_factor"]]
+    profit_factors = [
+        item["profit_factor"] for item in values if item["profit_factor"] is not None
+    ]
     expectancies = [item["expectancy"] for item in values if item["expectancy"] is not None]
     returns = [item["return"] for item in values]
     summary = {
@@ -593,6 +661,7 @@ def summarize_category(category, universe, evaluations):
         "drawdown": min(item["drawdown"] for item in values),
         "exposure": fmean(item["exposure"] for item in values),
         "completed": sum(item["completed"] for item in values),
+        "carry_in_completed": sum(item["carry_in_completed"] for item in values),
         "open": sum(item["open"] for item in values),
         "expectancy": fmean(expectancies) if expectancies else None,
         "profit_factor": fmean(profit_factors) if profit_factors else None,
@@ -625,6 +694,7 @@ def select_category_leader(category, candidates):
         candidate
         for candidate in candidates
         if category in candidate.get("development", {})
+        and candidate.get("research_category", category) == category
     ]
     if not eligible:
         return None
@@ -846,12 +916,16 @@ def holdout_start_date(universe):
     return reference[-holdout_days]["trade_date"]
 
 
-def _global_score(candidate):
-    scores = [summary["score"] for summary in candidate["development"].values()]
-    return fmean(scores) if scores else float("-inf")
-
-
-def _new_candidate(candidate_id, round_number, entry, exit_expression, origin, universe, stop_date):
+def _new_candidate(
+    candidate_id,
+    round_number,
+    research_category,
+    entry,
+    exit_expression,
+    origin,
+    universe,
+    stop_date,
+):
     evaluations = evaluate_universe(
         universe, entry, exit_expression, stop_date=stop_date
     )
@@ -862,6 +936,7 @@ def _new_candidate(candidate_id, round_number, entry, exit_expression, origin, u
     return {
         "candidate_id": candidate_id,
         "round": round_number,
+        "research_category": research_category,
         "origin": origin,
         "entry_expression": entry,
         "exit_expression": exit_expression,
@@ -874,7 +949,12 @@ def _new_candidate(candidate_id, round_number, entry, exit_expression, origin, u
 def _round_candidates(existing, round_number, rng):
     if round_number == 1:
         return _seed_expressions()
-    ranked = sorted(existing, key=_global_score, reverse=True)
+    category = existing[0]["research_category"]
+    ranked = sorted(
+        existing,
+        key=lambda candidate: candidate["development"][category]["score"],
+        reverse=True,
+    )
     parents = ranked[: max(2, min(8, len(ranked)))]
     proposals = []
     for attempt in range(96):
@@ -905,53 +985,62 @@ def _fallback_proposals():
 
 
 def run_research(universe, rounds=50, *, random_seed=20261127):
-    """确定性演化可解释因子策略，并在固定留出段后统一报告。"""
+    """按类别独立演化可解释因子策略，并在固定留出段后统一报告。"""
     if not isinstance(rounds, int) or rounds < 1:
         raise ValueError("研究轮数必须为正整数")
     if not universe:
         raise ValueError("研究ETF集合不能为空")
     holdout_start = holdout_start_date(universe)
-    signatures, candidates, round_records = set(), [], []
+    categories = _categories(universe)
+    signatures_by_category = {category: set() for category in categories}
+    candidates_by_category = {category: [] for category in categories}
+    candidates, round_records = [], []
     for round_number in range(1, rounds + 1):
-        rng = random.Random(random_seed + round_number)
-        proposals = [
-            *_round_candidates(candidates, round_number, rng),
-            *_fallback_proposals(),
-        ]
-        candidate_ids = []
-        for entry, exit_expression, origin in proposals:
-            entry = simplify_expression(entry)
-            exit_expression = simplify_expression(exit_expression)
-            signature = _signature(entry, exit_expression)
-            if (
-                signature in signatures
-                or not expression_is_explainable(entry)
-                or not expression_is_explainable(exit_expression)
-            ):
-                continue
-            signatures.add(signature)
-            candidate_id = f"c{len(candidates) + 1:03d}"
-            candidates.append(
-                _new_candidate(
+        category_candidate_ids = {}
+        for category_index, category in enumerate(categories):
+            rng = random.Random(random_seed + round_number * 100 + category_index)
+            proposals = [
+                *_round_candidates(candidates_by_category[category], round_number, rng),
+                *_fallback_proposals(),
+            ]
+            candidate_ids = []
+            for entry, exit_expression, origin in proposals:
+                entry = simplify_expression(entry)
+                exit_expression = simplify_expression(exit_expression)
+                signature = _signature(entry, exit_expression)
+                if (
+                    signature in signatures_by_category[category]
+                    or not expression_is_explainable(entry)
+                    or not expression_is_explainable(exit_expression)
+                ):
+                    continue
+                signatures_by_category[category].add(signature)
+                candidate_id = f"c{len(candidates) + 1:04d}"
+                candidate = _new_candidate(
                     candidate_id,
                     round_number,
+                    category,
                     entry,
                     exit_expression,
                     origin,
                     universe,
                     holdout_start,
                 )
-            )
-            candidate_ids.append(candidate_id)
-            if len(candidate_ids) == 3:
-                break
-        if len(candidate_ids) != 3:
-            raise ValueError("可解释候选不足，无法完成本轮研究")
-        round_records.append({"round": round_number, "candidate_ids": candidate_ids})
+                candidates.append(candidate)
+                candidates_by_category[category].append(candidate)
+                candidate_ids.append(candidate_id)
+                if len(candidate_ids) == 3:
+                    break
+            if len(candidate_ids) != 3:
+                raise ValueError(f"类别{category}的可解释候选不足，无法完成本轮研究")
+            category_candidate_ids[category] = candidate_ids
+        round_records.append(
+            {"round": round_number, "category_candidate_ids": category_candidate_ids}
+        )
 
     leaders = {}
-    for category in _categories(universe):
-        leader = select_category_leader(category, candidates)
+    for category in categories:
+        leader = select_category_leader(category, candidates_by_category[category])
         if leader is None:
             continue
         holdout = summarize_category(
@@ -984,6 +1073,8 @@ def run_research(universe, rounds=50, *, random_seed=20261127):
             "development": leader["development"][category],
             "holdout": holdout,
             "stress": stress,
+            "holdout_defense": defense_evidence(holdout),
+            "stress_defense": defense_evidence(stress),
             "discard_reasons": sorted(
                 set(
                     leader["development"][category]["discard_reasons"]
