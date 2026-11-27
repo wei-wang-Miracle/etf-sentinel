@@ -10,6 +10,10 @@ LOW_PERCENTILE = Decimal(30)
 HIGH_PERCENTILE = Decimal(80)
 EXTREME_FEAR = Decimal(20)
 EXTREME_GREED = Decimal(80)
+ERP_HIGH_PERCENTILE = Decimal(70)
+ERP_LOW_PERCENTILE = Decimal(20)
+DIVIDEND_YIELD_HIGH_PERCENTILE = Decimal(70)
+VALUATION_METRICS = ("pe", "pb", "xilv", "roe", "premium_diff")
 
 
 def _date(value):
@@ -31,8 +35,8 @@ def _empty_truth(day):
 
 
 def _valuation_changes(valuation_rows):
-    """按源日期返回PE/PB的本地历史分位变更，不把无效估值写入状态。"""
-    by_metric = {"pe": [], "pb": []}
+    """按源日期返回五类有效估值的因果本地历史分位变更。"""
+    by_metric = {metric: [] for metric in VALUATION_METRICS}
     for row in valuation_rows:
         metric = row["metric_key"]
         if metric not in by_metric or row.get("value_status") != "valid":
@@ -49,7 +53,7 @@ def _valuation_changes(valuation_rows):
         ):
             if percentile is not None:
                 changes.setdefault(day, {})[metric] = Decimal(str(percentile))
-    return changes
+    return changes, by_metric
 
 
 def _sentiment_changes(sentiment_rows):
@@ -75,7 +79,7 @@ def _sentiment_changes(sentiment_rows):
 
 def build_external_factor_truth(rows, *, valuation_rows=(), sentiment_rows=None):
     """生成严格早于 ETF 当日的外部因子真值及可得性摘要。"""
-    valuation_changes = _valuation_changes(valuation_rows)
+    valuation_changes, valuation_metrics = _valuation_changes(valuation_rows)
     sentiment_changes = (
         _sentiment_changes(sentiment_rows) if sentiment_rows is not None else {}
     )
@@ -101,10 +105,24 @@ def build_external_factor_truth(rows, *, valuation_rows=(), sentiment_rows=None)
         item = _empty_truth(row["trade_date"])
         if latest_percentiles:
             item["valuation_low_percentile"] = any(
-                value <= LOW_PERCENTILE for value in latest_percentiles.values()
+                latest_percentiles.get(metric, Decimal(101)) <= LOW_PERCENTILE
+                for metric in ("pe", "pb")
             )
             item["valuation_high_percentile"] = any(
-                value >= HIGH_PERCENTILE for value in latest_percentiles.values()
+                latest_percentiles.get(metric, Decimal(-1)) >= HIGH_PERCENTILE
+                for metric in ("pe", "pb")
+            )
+            erp_percentile = latest_percentiles.get("premium_diff")
+            item["erp_high_percentile"] = (
+                erp_percentile is not None and erp_percentile >= ERP_HIGH_PERCENTILE
+            )
+            item["erp_low_percentile"] = (
+                erp_percentile is not None and erp_percentile <= ERP_LOW_PERCENTILE
+            )
+            dividend_percentile = latest_percentiles.get("xilv")
+            item["dividend_yield_high"] = (
+                dividend_percentile is not None
+                and dividend_percentile >= DIVIDEND_YIELD_HIGH_PERCENTILE
             )
         if latest_sentiment is not None:
             item["sentiment_extreme_fear"] = latest_sentiment["fear"]
@@ -120,7 +138,19 @@ def build_external_factor_truth(rows, *, valuation_rows=(), sentiment_rows=None)
             "available": valuation_available,
             "first_source_date": str(valuation_days[0]) if valuation_days else None,
             "last_source_date": str(valuation_days[-1]) if valuation_days else None,
-            "as_of_policy": "ETF当日只使用严格早于该日的最近有效PE/PB源观测；源历史可能修订，不代表原时点发布快照。",
+            "metrics": {
+                metric: {
+                    "available": bool(series),
+                    "first_source_date": str(min(day for day, _, _ in series))
+                    if series
+                    else None,
+                    "last_source_date": str(max(day for day, _, _ in series))
+                    if series
+                    else None,
+                }
+                for metric, series in valuation_metrics.items()
+            },
+            "as_of_policy": "ETF当日只使用严格早于该日的最近有效PE、PB、股息率、ROE或股债风险溢价源观测；源历史可能修订，不代表原时点发布快照。",
         },
         "sentiment": (
             {

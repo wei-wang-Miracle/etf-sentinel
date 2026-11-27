@@ -13,6 +13,7 @@ from sqlalchemy import (
     Index,
     Numeric,
     String,
+    Text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -363,9 +364,12 @@ class InstrumentSentimentLink(Base):
     """ETF 与行业恐贪类别的显式核验关联。"""
 
     __tablename__ = "instrument_sentiment_links"
-    __table_args__: ClassVar[dict] = {
-        "comment": "ETF与行业恐贪类别的显式核验关联；未建立关联的ETF不得使用行业恐贪因子"
-    }
+    __table_args__ = (
+        Index("ix_instrument_sentiment_links_category_key", "category_key"),
+        {
+            "comment": "ETF与行业恐贪类别的显式核验关联；未建立关联的ETF不得使用行业恐贪因子"
+        },
+    )
     instrument_code: Mapped[str] = mapped_column(
         ForeignKey("instruments.instrument_code"),
         primary_key=True,
@@ -377,6 +381,7 @@ class InstrumentSentimentLink(Base):
         comment="行业恐贪类别标识，关联sentiment_categories.category_key；与instrument_code组成主键",
     )
     mapping_evidence: Mapped[str] = mapped_column(
+        Text,
         comment="ETF与恐贪类别的核验依据，不根据名称或相关性自动推断"
     )
     verified_date: Mapped[Date] = mapped_column(

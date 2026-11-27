@@ -57,6 +57,17 @@ def test_factor_directory_declares_observable_identity_and_output_type():
         "sentiment_extreme_fear",
         "sentiment_fear_rebound",
         "sentiment_extreme_greed",
+        "erp_high_percentile",
+        "erp_low_percentile",
+        "dividend_yield_high",
+        "above_ma250",
+        "ma120_rising",
+        "adx_trending",
+        "adx_choppy",
+        "deep_drawdown_60d",
+        "consecutive_down_exhaustion",
+        "gap_up_strong",
+        "relative_strength_20d_positive",
     }
     assert "oversold_recovery" not in FACTORS
     assert FACTORS["turning_bottom"]["output_type"] == "event"
@@ -65,7 +76,51 @@ def test_factor_directory_declares_observable_identity_and_output_type():
     assert FACTORS["atr_overbought"]["output_type"] == "state"
     assert FACTORS["wilder_rsi_overbought_turn_down"]["output_type"] == "event"
     assert FACTORS["valuation_low_percentile"]["output_type"] == "state"
+    assert FACTORS["erp_high_percentile"]["output_type"] == "state"
+    assert FACTORS["gap_up_strong"]["output_type"] == "event"
     assert all(item["name"] and item["category"] and item["meaning"] for item in FACTORS.values())
+
+
+def test_long_horizon_and_benchmark_factors_preserve_their_causal_windows():
+    closes = [100.0 + index * 0.2 for index in range(260)]
+    rows = rows_from_closes(closes)
+    benchmark = [
+        {"trade_date": item["trade_date"], "close": 100.0 + index * 0.05}
+        for index, item in enumerate(rows)
+    ]
+
+    truth = factor_truth_rows(rows, {}, benchmark_rows=benchmark)
+
+    assert truth[248]["above_ma250"] is False
+    assert truth[249]["above_ma250"] is True
+    assert truth[-1]["ma120_rising"] is True
+    assert truth[-1]["relative_strength_20d_positive"] is True
+    assert not any(
+        item["relative_strength_20d_positive"]
+        for item in factor_truth_rows(rows, {})
+    )
+
+    changed = [*benchmark]
+    changed[-1] = {**changed[-1], "close": 10_000.0}
+    assert factor_truth_rows(rows, {}, benchmark_rows=changed)[:-1] == truth[:-1]
+
+
+def test_drawdown_exhaustion_adx_and_gap_factors_require_their_own_observable_conditions():
+    closes = [100.0] * 60 + [98.0, 96.0, 94.0, 92.0, 89.0, 92.0]
+    rows = rows_from_closes(closes)
+    rows[-1].update(open=100.0, low=99.0, high=104.0, close=103.0)
+    rows[-2].update(high=98.0, low=88.0)
+
+    truth = factor_truth_rows(rows, {})
+
+    assert truth[-2]["deep_drawdown_60d"] is True
+    assert truth[-2]["consecutive_down_exhaustion"] is True
+    assert truth[-1]["gap_up_strong"] is True
+
+    trending = rows_from_closes([100.0 + index for index in range(40)])
+    trending_truth = factor_truth_rows(trending, {})
+    assert trending_truth[-1]["adx_trending"] is True
+    assert trending_truth[-1]["adx_choppy"] is False
 
 
 def test_reversal_atoms_do_not_require_the_old_composite_recovery_factor():

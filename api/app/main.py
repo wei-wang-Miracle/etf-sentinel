@@ -33,6 +33,7 @@ from app.jobs import (
 from app.models import (
     BacktestSource,
     Candle,
+    IndexCandle,
     IndexValuationDaily,
     Instrument,
     InstrumentIndexLink,
@@ -376,6 +377,20 @@ def candle_factors(code: str, start: date, end: date):
                 .order_by(IndexValuationDaily.trade_date, IndexValuationDaily.metric_key)
             )
         ]
+        benchmark_rows = [
+            {
+                "trade_date": str(item.trade_date),
+                "close": str(item.close_price),
+            }
+            for item in db.scalars(
+                select(IndexCandle)
+                .where(
+                    IndexCandle.index_code == "000300.SH",
+                    IndexCandle.trade_date <= cutoff,
+                )
+                .order_by(IndexCandle.trade_date)
+            )
+        ]
         sentiment_links = list(
             db.scalars(
                 select(InstrumentSentimentLink)
@@ -415,6 +430,7 @@ def candle_factors(code: str, start: date, end: date):
         indicator_rows,
         turning,
         external_truth=external_truth,
+        benchmark_rows=benchmark_rows,
     )
     return {
         "events": [
@@ -429,5 +445,18 @@ def candle_factors(code: str, start: date, end: date):
             "valuation_index_codes": index_codes,
             "sentiment_category_keys": [item.category_key for item in sentiment_links],
             "coverage": external_coverage,
+            "benchmark": {
+                "available": bool(benchmark_rows),
+                "index_code": "000300.SH",
+                "first_source_date": benchmark_rows[0]["trade_date"]
+                if benchmark_rows
+                else None,
+                "last_source_date": benchmark_rows[-1]["trade_date"]
+                if benchmark_rows
+                else None,
+                "reason": None
+                if benchmark_rows
+                else "本地缺少沪深300指数日K，相关强弱因子不可用",
+            },
         },
     }

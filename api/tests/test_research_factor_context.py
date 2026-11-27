@@ -69,3 +69,44 @@ def test_external_factor_truth_ignores_invalid_valuation_and_marks_unmapped_sent
     assert not any(item["sentiment_extreme_fear"] for item in truth)
     assert coverage["valuation"]["available"] is False
     assert coverage["sentiment"] == {"available": False, "reason": "未建立ETF–恐贪类别映射"}
+
+
+def test_external_valuation_uses_all_valid_metrics_strictly_before_the_etf_day():
+    from app.research_factor_context import build_external_factor_truth
+
+    rows = _rows(7)
+    valuation_rows = [
+        {
+            "trade_date": f"2025-01-0{index}",
+            "metric_key": metric,
+            "metric_value": str(value),
+            "value_status": "valid",
+        }
+        for metric in ("premium_diff", "xilv", "roe")
+        for index, value in enumerate((0, 1, 2, 3), start=1)
+    ]
+    valuation_rows.extend(
+        [
+            {
+                "trade_date": "2025-01-10",
+                "metric_key": "xilv",
+                "metric_value": "999",
+                "value_status": "not_applicable",
+            },
+            {
+                "trade_date": "2025-01-10",
+                "metric_key": "premium_diff",
+                "metric_value": "-5",
+                "value_status": "valid",
+            },
+        ]
+    )
+
+    truth, coverage = build_external_factor_truth(rows, valuation_rows=valuation_rows)
+
+    assert truth[1]["erp_low_percentile"] is True
+    assert truth[3]["erp_high_percentile"] is False
+    assert truth[4]["erp_high_percentile"] is True
+    assert truth[4]["dividend_yield_high"] is True
+    assert coverage["valuation"]["metrics"]["premium_diff"]["available"] is True
+    assert coverage["valuation"]["metrics"]["xilv"]["first_source_date"] == "2025-01-01"

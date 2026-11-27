@@ -144,3 +144,24 @@ test("因子标记展开为浮层不推挤日K，支持标签移除与Esc关闭"
   await expect(page.getByRole("button", { name: /因子标记 · 已选 2 项/ })).toBeVisible();
   await expect.poll(async () => (await chartState(page)).markers.map((marker) => marker.name)).toEqual(["阶段顶部确认"]);
 });
+
+test("因子图层按业务分类分组，并提示缺少指数映射的外部背景", async ({ page }) => {
+  await page.route("**/api/candles/510500/factors?*", (route) =>
+    json(route, {
+      events: [], data_cutoff: end, partial: false,
+      external_factor_context: {
+        valuation_index_codes: [],
+        coverage: { valuation: { available: false } },
+        benchmark: { available: false },
+      },
+    }),
+  );
+
+  await page.goto(url);
+  await page.getByRole("button", { name: /因子标记 · 已选 3 项/ }).click();
+  await expect(page.getByRole("group", { name: "结构确认" })).toBeVisible();
+  await expect(page.getByRole("group", { name: "外部估值" })).toBeVisible();
+  await expect(page.getByRole("group", { name: "相对强弱" })).toBeVisible();
+  await page.getByRole("checkbox", { name: /股债高性价比保护/ }).check();
+  await expect(page.getByText("该 ETF 尚未映射指数，外部估值及相对强弱标记不可用")).toBeVisible();
+});

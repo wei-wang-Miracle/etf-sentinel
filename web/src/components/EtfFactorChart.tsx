@@ -15,10 +15,25 @@ type Props = {
   controls?: ReactNode;
 };
 
-type FactorDates = { events: FactorEvent[]; data_cutoff: string | null; partial: boolean; warmup_insufficient: boolean };
+type FactorDates = {
+  events: FactorEvent[];
+  data_cutoff: string | null;
+  partial: boolean;
+  warmup_insufficient: boolean;
+  external_factor_context?: {
+    valuation_index_codes?: string[];
+    coverage?: { valuation?: { available?: boolean } };
+    benchmark?: { available?: boolean };
+  };
+};
 type FactorCatalog = { factors: (FactorIdentity & { chart_visible: boolean; output_type: string })[] };
 const NO_TRADES: NonNullable<Props["trades"]> = [];
 const DEFAULT_FACTORS = ["turning_bottom", "turning_top", "close_above_prior_high"];
+const CATEGORY_ORDER = [
+  "结构确认", "趋势状态", "趋势转折", "趋势走弱", "均线位置", "趋势回踩",
+  "突破事件", "突破确认", "反转确认", "价格确认", "超跌状态", "波动率状态",
+  "兑现状态", "兑现确认", "外部估值", "外部情绪", "全市场环境", "相对强弱",
+];
 
 export default function EtfFactorChart({ history, start, end, theme, instrumentCode, trades = NO_TRADES, controls }: Props) {
   const catalog = useApiResource<FactorCatalog>("/factors");
@@ -41,6 +56,26 @@ export default function EtfFactorChart({ history, start, end, theme, instrumentC
     () => visibleCatalog.find((factor) => factor.id === inspectedId) ?? selectedFactors[0] ?? visibleCatalog[0],
     [visibleCatalog, inspectedId, selectedFactors],
   );
+  const factorGroups = useMemo(() => {
+    const groups = new Map<string, typeof visibleCatalog>();
+    for (const factor of visibleCatalog) {
+      const items = groups.get(factor.category) ?? [];
+      items.push(factor);
+      groups.set(factor.category, items);
+    }
+    return [...groups.entries()].sort(([left], [right]) => {
+      const leftOrder = CATEGORY_ORDER.indexOf(left);
+      const rightOrder = CATEGORY_ORDER.indexOf(right);
+      return (leftOrder < 0 ? CATEGORY_ORDER.length : leftOrder)
+        - (rightOrder < 0 ? CATEGORY_ORDER.length : rightOrder)
+        || left.localeCompare(right, "zh-CN");
+    });
+  }, [visibleCatalog]);
+  const selectedNeedsIndex = selectedFactors.some(
+    (factor) => factor.category === "外部估值" || factor.category === "相对强弱",
+  );
+  const indexUnmapped = selectedNeedsIndex
+    && markers.data?.external_factor_context?.valuation_index_codes?.length === 0;
 
   useEffect(() => {
     if (!open) return;
@@ -86,31 +121,54 @@ export default function EtfFactorChart({ history, start, end, theme, instrumentC
               {catalog.loading && <p className="empty" role="status">正在读取因子目录…</p>}
               {catalog.error && <p className="notice warning">因子目录暂不可用 · {catalog.error} <button type="button" onClick={catalog.retry}>重试目录</button></p>}
               {!!visibleCatalog.length && (
-                <div className="factor-grid">
-                  {visibleCatalog.map((factor) => (
-                    <label
-                      key={factor.id}
-                      className="factor-option"
-                      onMouseEnter={() => setInspectedId(factor.id)}
-                      onFocus={() => setInspectedId(factor.id)}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={visible.includes(factor.id)}
-                        onChange={(event) => {
-                          const checked = event.target.checked;
-                          setVisible((ids) => checked ? [...ids, factor.id] : ids.filter((id) => id !== factor.id));
-                          setInspectedId(factor.id);
-                        }}
-                      />
-                      <span className="factor-option-meta">
-                        <span>{factor.name}</span>
-                        <span className="factor-option-cat">{factor.category}</span>
-                      </span>
-                    </label>
+                <div className="factor-groups">
+                  {factorGroups.map(([category, factors]) => (
+                    <section className="factor-group" role="group" aria-label={category} key={category}>
+                      <div className="factor-group-header">
+                        <strong>{category}</strong>
+                        <span>
+                          <button
+                            type="button"
+                            aria-label={`选择 ${category} 全部`}
+                            disabled={factors.every((factor) => visible.includes(factor.id))}
+                            onClick={() => setVisible((ids) => [...new Set([...ids, ...factors.map((factor) => factor.id)])])}
+                          >全选</button>
+                          <button
+                            type="button"
+                            aria-label={`清空 ${category}`}
+                            disabled={!factors.some((factor) => visible.includes(factor.id))}
+                            onClick={() => setVisible((ids) => ids.filter((id) => !factors.some((factor) => factor.id === id)))}
+                          >清空</button>
+                        </span>
+                      </div>
+                      <div className="factor-grid">
+                        {factors.map((factor) => (
+                          <label
+                            key={factor.id}
+                            className="factor-option"
+                            onMouseEnter={() => setInspectedId(factor.id)}
+                            onFocus={() => setInspectedId(factor.id)}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={visible.includes(factor.id)}
+                              onChange={(event) => {
+                                const checked = event.target.checked;
+                                setVisible((ids) => checked ? [...ids, factor.id] : ids.filter((id) => id !== factor.id));
+                                setInspectedId(factor.id);
+                              }}
+                            />
+                            <span className="factor-option-meta">
+                              <span>{factor.name}</span>
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                    </section>
                   ))}
                 </div>
               )}
+              {indexUnmapped && <p className="factor-context-warning">该 ETF 尚未映射指数，外部估值及相对强弱标记不可用 <AppLink href={dataManagementUrl("instruments")}>前往标的配置</AppLink></p>}
               <div className="factor-meaning-bar">
                 {inspectedFactor ? (
                   <>

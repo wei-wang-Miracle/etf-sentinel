@@ -8,11 +8,13 @@ export const instruments = ["510500", "512100"].map((code, index) => ({
 }));
 export const factorCatalog = {
   factors: [
-    { id: "turning_bottom", name: "阶段底部确认" },
-    { id: "turning_top", name: "阶段顶部确认" },
-    { id: "volume_breakout_up", name: "放量向上突破" },
-    { id: "close_above_prior_high", name: "收盘收复昨高" },
-  ].map((factor) => ({ ...factor, category: "结构确认", meaning: "仅用于观察。", chart_visible: true, output_type: "event" })),
+    { id: "turning_bottom", name: "阶段底部确认", category: "结构确认" },
+    { id: "turning_top", name: "阶段顶部确认", category: "结构确认" },
+    { id: "volume_breakout_up", name: "放量向上突破", category: "突破确认" },
+    { id: "close_above_prior_high", name: "收盘收复昨高", category: "反转确认" },
+    { id: "erp_high_percentile", name: "股债高性价比保护", category: "外部估值" },
+    { id: "relative_strength_20d_positive", name: "相对沪深300跑赢", category: "相对强弱" },
+  ].map((factor) => ({ ...factor, meaning: "仅用于观察。", chart_visible: true, output_type: "event" })),
 };
 export const catalog = {
   instruments: instruments.map((item) => ({ instrument_code: item.code, instrument_name: item.name,

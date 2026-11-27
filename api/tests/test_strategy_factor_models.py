@@ -1,6 +1,7 @@
 import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
+from sqlalchemy import Text
 
 from app.models import Base
 from app.research_factors import FACTORS, STRATEGIES
@@ -55,6 +56,10 @@ def test_research_factor_directory_has_matching_database_columns_and_comments():
     assert set(sentiment_link_table.primary_key.columns.keys()) == {
         "instrument_code",
         "category_key",
+    }
+    assert isinstance(sentiment_link_table.c.mapping_evidence.type, Text)
+    assert "ix_instrument_sentiment_links_category_key" in {
+        index.name for index in sentiment_link_table.indexes
     }
     assert all({factor_id for factor_id, _ in strategy["factors"]} <= set(FACTORS) for strategy in STRATEGIES.values())
 

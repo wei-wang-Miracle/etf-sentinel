@@ -2,7 +2,16 @@
 
 from statistics import fmean, pstdev
 
-from app.indicators import prior_close_margin, volume_ratio, wilder14
+from app.indicators import (
+    consecutive_down_count,
+    drawdown_from_peak,
+    excess_return,
+    prior_close_margin,
+    rolling_sma,
+    volume_ratio,
+    wilder14,
+    wilder_adx14,
+)
 from app.strategies import features
 
 FACTORS = {
@@ -180,6 +189,72 @@ FACTORS = {
         "output_type": "state",
         "meaning": "关联指数此前最近可得PE或PB本地回看分位不低于80%。",
     },
+    "erp_high_percentile": {
+        "name": "股债高性价比保护",
+        "category": "外部估值",
+        "output_type": "state",
+        "meaning": "关联指数此前最近可得股债风险溢价本地回看分位不低于70%。",
+    },
+    "erp_low_percentile": {
+        "name": "股债性价比偏低",
+        "category": "外部估值",
+        "output_type": "state",
+        "meaning": "关联指数此前最近可得股债风险溢价本地回看分位不高于20%。",
+    },
+    "dividend_yield_high": {
+        "name": "高股息率保护",
+        "category": "外部估值",
+        "output_type": "state",
+        "meaning": "关联指数此前最近可得股息率本地回看分位不低于70%。",
+    },
+    "above_ma250": {
+        "name": "年线多头区间",
+        "category": "趋势状态",
+        "output_type": "state",
+        "meaning": "含息收盘价严格高于当日MA250；不足250根交易日不标记。",
+    },
+    "ma120_rising": {
+        "name": "半年线向上",
+        "category": "趋势状态",
+        "output_type": "state",
+        "meaning": "当日MA120严格高于五个交易日前；不足125根交易日不标记。",
+    },
+    "adx_trending": {
+        "name": "趋势形成状态",
+        "category": "趋势状态",
+        "output_type": "state",
+        "meaning": "Wilder ADX14不低于25，且+DI14高于-DI14。",
+    },
+    "adx_choppy": {
+        "name": "无趋势震荡状态",
+        "category": "趋势状态",
+        "output_type": "state",
+        "meaning": "Wilder ADX14低于18，表示价格方向性不足。",
+    },
+    "deep_drawdown_60d": {
+        "name": "60日深度回撤状态",
+        "category": "超跌状态",
+        "output_type": "state",
+        "meaning": "含息收盘相对60日内最高收盘回撤10%至35%。",
+    },
+    "consecutive_down_exhaustion": {
+        "name": "连跌耗竭观察",
+        "category": "超跌状态",
+        "output_type": "state",
+        "meaning": "含息收盘连续下跌不少于4个交易日。",
+    },
+    "gap_up_strong": {
+        "name": "强势跳空高开",
+        "category": "突破确认",
+        "output_type": "event",
+        "meaning": "当日低点较昨高跳空至少0.3倍ATR14，且收盘位于有效振幅上半区。",
+    },
+    "relative_strength_20d_positive": {
+        "name": "相对沪深300跑赢",
+        "category": "相对强弱",
+        "output_type": "state",
+        "meaning": "若本地沪深300指数同日序列完整，ETF过去20日含息收益至少跑赢1.5个百分点。",
+    },
     "sentiment_extreme_fear": {
         "name": "行业极度恐惧",
         "category": "外部情绪",
@@ -204,6 +279,9 @@ EXTERNAL_FACTOR_IDS = frozenset(
     {
         "valuation_low_percentile",
         "valuation_high_percentile",
+        "erp_high_percentile",
+        "erp_low_percentile",
+        "dividend_yield_high",
         "sentiment_extreme_fear",
         "sentiment_fear_rebound",
         "sentiment_extreme_greed",
@@ -277,6 +355,14 @@ VOLATILITY_CONTRACTING_RATIO = 0.8
 VOLATILITY_EXPANDING_RATIO = 1.2
 TREND_STRENGTH_ATR = 1.0
 PULLBACK_DISTANCE_ATR = 0.5
+ADX_TRENDING_MIN = 25.0
+ADX_CHOPPY_MAX = 18.0
+DEEP_DRAWDOWN_MIN = -0.35
+DEEP_DRAWDOWN_MAX = -0.10
+CONSECUTIVE_DOWN_MIN = 4
+GAP_UP_ATR_MIN = 0.3
+RELATIVE_STRENGTH_WINDOW = 20
+RELATIVE_STRENGTH_MIN = 0.015
 
 
 def _percentile(values, ratio):
@@ -302,7 +388,13 @@ def _external_truth_rows(rows, external_truth):
     return output
 
 
-def factor_truth_rows(rows, turning, dividends=(), external_truth=None):
+def factor_truth_rows(
+    rows,
+    turning,
+    dividends=(),
+    external_truth=None,
+    benchmark_rows=None,
+):
     """对升序行情计算逐日因子真值，供离线策略研究组合既有因子。"""
     if any(kind not in ("bottom", "top") for kind in turning.values()):
         raise ValueError("顶底事件类型无效")
@@ -334,9 +426,12 @@ def factor_truth_rows(rows, turning, dividends=(), external_truth=None):
         fmean(values[index - 59 : index + 1]) if index >= 59 else None
         for index in range(len(values))
     ]
+    ma120 = [rolling_sma(values, index, 120) for index in range(len(values))]
+    ma250 = [rolling_sma(values, index, 250) for index in range(len(values))]
 
-    atrs, rsis = [], []
+    atrs, rsis, adxs, plus_dis, minus_dis = [], [], [], [], []
     atr = gain = loss = 0.0
+    adx_state = {}
     for index, row in enumerate(rows):
         value = values[index]
         previous = values[index - 1] if index else value
@@ -349,6 +444,28 @@ def factor_truth_rows(rows, turning, dividends=(), external_truth=None):
             if index >= 14 and gain + loss > 0
             else None
         )
+        previous_high = highs[index - 1] if index else highs[index]
+        previous_low = lows[index - 1] if index else lows[index]
+        plus_di, minus_di, adx, adx_state = wilder_adx14(
+            previous_high,
+            previous_low,
+            previous,
+            highs[index],
+            lows[index],
+            value,
+            index,
+            adx_state,
+        )
+        plus_dis.append(plus_di)
+        minus_dis.append(minus_di)
+        adxs.append(adx)
+
+    benchmark_by_date = {
+        str(item["trade_date"]): float(item["close"])
+        for item in (benchmark_rows or ())
+        if item.get("trade_date") is not None and item.get("close") is not None
+    }
+    benchmark_values = [benchmark_by_date.get(row["trade_date"]) for row in rows]
 
     external_rows = _external_truth_rows(rows, external_truth)
     returns = [
@@ -408,6 +525,30 @@ def factor_truth_rows(rows, turning, dividends=(), external_truth=None):
         truth["atr_oversold"] = atr_oversold
         truth["wilder_rsi_oversold"] = rsi_oversold
         truth["ma60_rising"] = index >= 64 and ma60[index] > ma60[index - 5]
+        truth["above_ma250"] = ma250[index] is not None and value > ma250[index]
+        truth["ma120_rising"] = (
+            index >= 124
+            and ma120[index] is not None
+            and ma120[index - 5] is not None
+            and ma120[index] > ma120[index - 5]
+        )
+        truth["adx_trending"] = (
+            adxs[index] is not None
+            and plus_dis[index] is not None
+            and minus_dis[index] is not None
+            and adxs[index] >= ADX_TRENDING_MIN
+            and plus_dis[index] > minus_dis[index]
+        )
+        truth["adx_choppy"] = adxs[index] is not None and adxs[index] < ADX_CHOPPY_MAX
+        drawdown = drawdown_from_peak(values, index, 60)
+        truth["deep_drawdown_60d"] = (
+            index >= 59
+            and drawdown is not None
+            and DEEP_DRAWDOWN_MIN <= drawdown <= DEEP_DRAWDOWN_MAX
+        )
+        truth["consecutive_down_exhaustion"] = (
+            consecutive_down_count(values, index) >= CONSECUTIVE_DOWN_MIN
+        )
 
         position = (
             (value - lows[index]) / (highs[index] - lows[index])
@@ -415,6 +556,24 @@ def factor_truth_rows(rows, turning, dividends=(), external_truth=None):
             else 0
         )
         truth["strong_close"] = index >= 20 and position >= 0.6
+        truth["gap_up_strong"] = (
+            index >= 1
+            and atr > 0
+            and lows[index] - highs[index - 1] >= GAP_UP_ATR_MIN * atr
+            and position >= 0.5
+        )
+        truth["relative_strength_20d_positive"] = (
+            benchmark_values[index] is not None
+            and index >= RELATIVE_STRENGTH_WINDOW
+            and benchmark_values[index - RELATIVE_STRENGTH_WINDOW] is not None
+            and excess_return(
+                values,
+                benchmark_values,
+                index,
+                RELATIVE_STRENGTH_WINDOW,
+            )
+            >= RELATIVE_STRENGTH_MIN
+        )
         truth["close_above_prior_high"] = index >= 1 and value > highs[index - 1]
         truth["recovery_volume_band"] = (
             ratio is not None
@@ -505,9 +664,21 @@ def factor_truth_rows(rows, turning, dividends=(), external_truth=None):
     return output
 
 
-def calculate_factor_events(rows, turning, dividends=(), external_truth=None):
+def calculate_factor_events(
+    rows,
+    turning,
+    dividends=(),
+    external_truth=None,
+    benchmark_rows=None,
+):
     """对升序行情计算观察事件及状态进入日。"""
-    truth_rows = factor_truth_rows(rows, turning, dividends, external_truth=external_truth)
+    truth_rows = factor_truth_rows(
+        rows,
+        turning,
+        dividends,
+        external_truth=external_truth,
+        benchmark_rows=benchmark_rows,
+    )
     output, active_states = [], set()
     for truth in truth_rows:
         for factor_id, definition in FACTORS.items():

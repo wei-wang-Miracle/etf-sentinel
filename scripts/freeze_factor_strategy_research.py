@@ -106,20 +106,20 @@ def main():
     from dotenv import load_dotenv
 
     load_dotenv(ROOT / ".env")
-    from sqlalchemy import select
-
     from app.algorithm_templates import turning_events, turning_profile
     from app.db import Session, engine
     from app.factor_strategy_snapshot import build_factor_snapshot_item
     from app.models import (
         BacktestSource,
         Candle,
+        IndexCandle,
         IndexValuationDaily,
         Instrument,
         InstrumentIndexLink,
         InstrumentSentimentLink,
         SentimentDaily,
     )
+    from sqlalchemy import select
 
     if engine.url.host not in ("localhost", "127.0.0.1", "::1"):
         raise ValueError("分类因子策略研究冻结只允许读取本地数据库")
@@ -214,6 +214,20 @@ def main():
                         .order_by(SentimentDaily.trade_date)
                     )
                 ]
+            benchmark_rows = [
+                {
+                    "trade_date": str(item.trade_date),
+                    "close": str(item.close_price),
+                }
+                for item in db.scalars(
+                    select(IndexCandle)
+                    .where(
+                        IndexCandle.index_code == "000300.SH",
+                        IndexCandle.trade_date <= candles[-1].date,
+                    )
+                    .order_by(IndexCandle.trade_date)
+                )
+            ]
             turning = turning_events(
                 rows,
                 [
@@ -248,6 +262,7 @@ def main():
                         item.category_key for item in sentiment_links
                     ],
                     "sentiment_rows": sentiment_rows,
+                    "benchmark_rows": benchmark_rows,
                 },
             )
             universe[code] = item
