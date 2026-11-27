@@ -4,11 +4,13 @@ import os
 import re
 import threading
 from contextlib import asynccontextmanager
-from datetime import date
+from datetime import date, timedelta
+from decimal import InvalidOperation
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert
 
 from app.account_routes import router as account_router
 from app.algorithm_templates import SHARED_WARMUP_BARS, turning_events, turning_profile
@@ -18,7 +20,7 @@ from app.backtest_data import (
     validate_market,
 )
 from app.backtest_routes import router as backtest_router
-from app.collection import now
+from app.collection import fetch_rows, now, validate_row
 from app.db import Session
 from app.index_valuation_routes import router as index_valuation_router
 from app.jobs import launch, next_run, recover_interrupted, scheduler
@@ -68,6 +70,12 @@ app.include_router(strategy_lab_router)
 app.include_router(strategy_workbench_router)
 
 
+class InstrumentCreate(BaseModel):
+    """仅接收 ETF 证券代码。"""
+
+    code: str = Field(pattern=r"^[0-9]{6}$")
+
+
 class InstrumentUpdate(BaseModel):
     """标的采集开关与回补起点。"""
 
@@ -112,6 +120,41 @@ def instruments():
                 }
             )
         return result
+
+
+@app.post("/instruments", status_code=201)
+def create_instrument(body: InstrumentCreate):
+    """用 ETF 行情源确认代码，登记后启动现有行情任务。"""
+    code = body.code
+    with Session() as db:
+        if db.get(Instrument, code):
+            raise HTTPException(409, "该 ETF 已在标的配置中")
+
+    end = now().date() - timedelta(days=1)
+    start = end - timedelta(days=29)
+    try:
+        rows = fetch_rows(code, start, end)
+    except ValueError as exc:
+        raise HTTPException(502, f"无法确认 ETF 代码：{exc}") from None
+    if not rows:
+        raise HTTPException(422, "数据源近 30 日未返回该代码的 ETF 行情，请核对代码或稍后重试")
+    try:
+        latest = max(rows, key=lambda row: validate_row(row, code, start, end)["date"])
+    except (ValueError, InvalidOperation):
+        raise HTTPException(502, "数据源返回的 ETF 行情未通过校验，请稍后重试") from None
+
+    name = latest.get("STOCK_NAME")
+    statement = insert(Instrument).values(code=code)
+    if isinstance(name, str) and name.strip():
+        statement = statement.values(name=name)
+    with Session() as db:
+        created = db.scalar(
+            statement.on_conflict_do_nothing(index_elements=[Instrument.code]).returning(Instrument.code)
+        )
+        if created is None:
+            raise HTTPException(409, "该 ETF 已在标的配置中")
+        db.commit()
+    return {"code": code, "run_id": launch()}
 
 
 @app.put("/instruments/{code}")

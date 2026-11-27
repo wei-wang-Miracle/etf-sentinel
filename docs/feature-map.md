@@ -42,7 +42,7 @@
 | 前端视觉精修 | 工程基础 | 已实现 | 统一导航线条图标、筛选控件、间距和图注字号；中性选中态、窄屏换行；不改变业务口径 | [设计契约](design-contract.md#前端视觉精修)、[共享样式](../web/src/styles/global.css) |
 | 数据库语义与注释规范 | 工程基础 | 已实现 | 原地重命名迁移，不删除行情 | [数据库说明](database.md) |
 | 本地一键启动 | 工程基础 | 已实现 | Docker仅运行PostgreSQL；本机前后端支持start/restart、进程互斥与安全清理 | [启动脚本](../scripts/start-local.sh) |
-| 23只 ETF 统一标的配置 | 数据基础 | 已实现 | 20只宽基 ETF，以及 518880 华安黄金 ETF、515880 国泰中证全指通信设备ETF和 560780 广发中证半导体材料设备ETF；支持设置采集开关和起点、查看行情覆盖范围。新增两只复用通用顶底参数，未纳入指数估值、国家队或宽基专项研究范围 | [配置页](../web/src/pages/Instruments.tsx)、[迁移0017](../api/migrations/versions/0017_add_etf_instruments.py)、[功能说明](daily-data.md) |
+| ETF 统一标的配置 | 数据基础 | 已实现 | 预置 23 只；输入六位代码，ETF 行情源确认后登记并尝试启动任务1；可查采集记录和入库区间，直达日 K 观察因子。不自动建立估值或国家队映射、不创建或启用策略 | [配置页](../web/src/pages/Instruments.tsx)、[标的接口](../api/app/main.py)、[功能说明](daily-data.md) |
 | 定时历史日行情与权益批量核验 | 数据基础 | 已实现 | 行情仅采集启用标的；任务1随后核验全部配置ETF权益，逐只提交并分别记录；权益失败不回滚行情；PostgreSQL、ChatBI、分区间恢复与互斥 | [采集](../api/app/collection.py)、[调度](../api/app/jobs.py)、[说明](daily-data.md)、[迁移](../api/migrations/versions/0001_daily_data.py) |
 | 日 K 与成交量展示 | 投研分析 | 已实现 | 依赖本地行情；以前复权 OHLC 连续展示已核验份额折算，MA5/10/20/30/60基于展示序列，成交量保留源数值；不提供实时行情 | [行情页](../web/src/pages/Market.tsx)、[图表](../web/src/components/KLine.tsx) |
 | 行情因子观察 | 投研分析 | 已实现 | 11 项可观察事件或状态，默认顶底、允许同日叠加、键盘读数，显示权益覆盖和缺失状态；开关只影响图层 | [因子目录](../api/app/research_factors.py)、[行情接口](../api/app/main.py)、[图层](../web/src/components/EtfFactorChart.tsx)、[顶底说明](turning-points.md) |

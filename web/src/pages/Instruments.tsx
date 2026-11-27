@@ -1,5 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
+import AppLink from "../components/AppLink";
 import { api, type Instrument } from "../lib/api";
+import { dataManagementUrl } from "../lib/navigation";
+import { journeyUrl } from "../lib/strategyJourney";
 
 function InstrumentRow({
   item,
@@ -81,6 +84,7 @@ function InstrumentRow({
         <button disabled={!dirty || busy || !start} onClick={save}>
           {busy ? "保存中" : "保存"}
         </button>
+        <span className="subtext"><AppLink href={journeyUrl("etfs", item.code, { scope: "all", tab: "price" })}>查看因子</AppLink></span>
         {message && (
           <span
             className={`subtext ${failed ? "danger-text" : "success-text"}`}
@@ -99,6 +103,10 @@ export default function Instruments({ embedded = false }: { embedded?: boolean }
   const [search, setSearch] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [code, setCode] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [addError, setAddError] = useState("");
+  const [added, setAdded] = useState<{ code: string; run_id: number | null }>();
   async function load() {
     setError("");
     try {
@@ -112,6 +120,23 @@ export default function Instruments({ embedded = false }: { embedded?: boolean }
   useEffect(() => {
     void load();
   }, []);
+  async function add(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setAdding(true);
+    setAdded(undefined);
+    setAddError("");
+    try {
+      const result = await api<{ code: string; run_id: number | null }>("/instruments", "POST", { code });
+      setAdded(result);
+      setCode("");
+      setSearch(result.code);
+      await load();
+    } catch (e) {
+      setAddError((e as Error).message);
+    } finally {
+      setAdding(false);
+    }
+  }
   const keyword = search.trim().toLowerCase();
   const visibleRows = rows.filter((item) =>
     `${item.code}${item.name}`.toLowerCase().includes(keyword),
@@ -125,9 +150,13 @@ export default function Instruments({ embedded = false }: { embedded?: boolean }
         </div>
         <button onClick={load}>刷新状态</button>
       </header>
-      <div className="notice">
-        国家队 18 只基金 已纳入统一研究范围。停用只停止后续采集，已有行情保留；调整起始日期后，在定时任务页运行采集。
-      </div>
+      {added && (
+        <div className="notice" role="status">
+          {added.code} 已新增，{added.run_id === null ? "采集任务正在运行，本标的将在下次运行时纳入" : `已启动采集与核验（#${added.run_id}）`}
+          <AppLink href={dataManagementUrl("jobs", "etf", added.code)}>查看采集记录</AppLink>
+        </div>
+      )}
+      {addError && <div className="alert" role="alert">{addError}</div>}
       {error && (
         <div className="alert" role="alert">
           {error}
@@ -135,6 +164,15 @@ export default function Instruments({ embedded = false }: { embedded?: boolean }
         </div>
       )}
       <section className="panel">
+        <div className="panel-header">
+          <form className="date-controls" onSubmit={add}>
+            <label>ETF 代码
+              <input className="mono" type="text" inputMode="numeric" pattern="[0-9]{6}" size={8}
+                maxLength={6} required value={code} disabled={adding} onChange={(e) => setCode(e.target.value)} />
+            </label>
+            <button className="primary" type="submit" disabled={adding}>{adding ? "确认代码中…" : "新增 ETF"}</button>
+          </form>
+        </div>
         <div className="panel-header">
           <h2>
             研究标的 <span className="muted">/ {visibleRows.length}{keyword ? `（共 ${rows.length}）` : ""}</span>
@@ -184,11 +222,11 @@ export default function Instruments({ embedded = false }: { embedded?: boolean }
           </div>
         )}
         {!loading && !error && !rows.length && (
-          <div className="empty">尚未初始化标的，请检查数据库迁移。</div>
+          <div className="empty">尚无研究标的。</div>
         )}
       </section>
       <footer className="footnote">
-        名称由数据源返回后更新。采集起点早于上市日时，空响应会保留查询记录，不生成虚拟行情。
+        停用只停止后续行情采集，已有行情保留。采集起点早于上市日时，空响应只保留查询记录。
       </footer>
     </>
   );

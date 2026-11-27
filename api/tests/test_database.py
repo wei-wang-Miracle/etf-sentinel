@@ -6,11 +6,12 @@ import time
 from datetime import date, datetime
 from decimal import Decimal
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select, text
 
-from app import collection, jobs
+from app import backtest_data, collection, jobs, main
 from app.collection import TZ, collect, now
 from app.db import Session, engine
 from app.main import app
@@ -177,6 +178,118 @@ def test_config_and_local_candle_api():
         client.get("/candles/510500?start=2026-06-03&end=2026-06-01").status_code == 422
     )
     assert client.get("/instruments").json()[0]["count"] == 1
+
+
+@pytest.mark.parametrize("code", ["51050", "５１０５０１", "abcd12"])
+def test_add_etf_rejects_invalid_codes(code):
+    assert TestClient(app).post("/instruments", json={"code": code}).status_code == 422
+
+
+def test_add_etf_does_not_overwrite_existing_settings(monkeypatch):
+    monkeypatch.delenv("CHATBI_TOKEN", raising=False)
+    client = TestClient(app)
+    before = client.get("/instruments").json()
+    assert client.post("/instruments", json={"code": "512100"}).status_code == 409
+    assert client.get("/instruments").json() == before
+
+
+@pytest.fixture
+def etf_probe(monkeypatch):
+    monkeypatch.setenv("CHATBI_TOKEN", "test")
+    monkeypatch.setattr(main, "now", collection.now)
+    calls = []
+
+    def mock_source(rows):
+        def post(*args, params, json, **kwargs):
+            calls.append(json)
+            assert params["api_path"] == "daily_ohlcv_etf"
+            return httpx.Response(200, json={"success": True, "data": rows})
+
+        monkeypatch.setattr(collection.httpx, "post", post)
+        return calls
+
+    return mock_source
+
+
+@pytest.mark.parametrize(
+    "probe_rows, expected_status",
+    [([], 422), (source("510501", date(2026, 6, 2), date(2026, 6, 2)), 502)],
+)
+def test_add_etf_requires_valid_source_evidence(etf_probe, probe_rows, expected_status):
+    etf_probe(probe_rows)
+    client = TestClient(app)
+    assert client.post("/instruments", json={"code": "510502"}).status_code == expected_status
+    assert "510502" not in {item["code"] for item in client.get("/instruments").json()}
+    assert client.get("/job").json()["runs"] == []
+
+
+def test_add_etf_while_job_is_busy(monkeypatch, etf_probe):
+    rows = source("510502", date(2026, 6, 2), date(2026, 6, 2))
+    rows[0].pop("STOCK_NAME")
+    etf_probe(rows)
+    monkeypatch.setattr(main, "launch", lambda: None)
+    client = TestClient(app)
+    response = client.post("/instruments", json={"code": "510502"})
+    assert response.status_code == 201
+    assert response.json() == {"code": "510502", "run_id": None}
+    assert client.get("/instruments").json()[1]["name"] == "名称待采集"
+    assert client.get("/candles/510502/factors?start=2026-05-01&end=2026-06-02").json()["data_cutoff"] is None
+
+
+def test_new_etf_runs_task_one_and_produces_observable_factor_events(monkeypatch, etf_probe):
+    code, cutoff = "510502", date(2026, 6, 2)
+    calls = etf_probe(source(code, cutoff, cutoff))
+    sessions, _ = backtest_data.trading_days(date(2025, 12, 1), cutoff)
+    days = [date.fromisoformat(day) for day in sessions]
+
+    def market(code, start, end):
+        return [
+            source(code, day, day, "1.5" if day < cutoff else "1.9")[0]
+            for day in days if start <= day <= end
+        ]
+
+    def equity(code):
+        return {
+            "actions": {"dividends": [], "splits": []},
+            "source_url": f"https://example.com/{code}",
+            "source_html": "测试权益资料",
+            "source_sha256": "f" * 64,
+            "collected_at": collection.now(),
+        }
+
+    monkeypatch.setattr(jobs, "collect", lambda run: collect(run, market, equity))
+    client = TestClient(app)
+    response = client.post("/instruments", json={"code": code})
+    assert response.status_code == 201
+    assert response.json()["code"] == code
+    assert calls[0]["stockcodelist"] == [code]
+    assert calls[0]["end_date"] == str(cutoff)
+    run_id = response.json()["run_id"]
+    for _ in range(100):
+        with engine.connect() as conn:
+            if conn.scalar(text("SELECT pg_try_advisory_lock(:key)"), {"key": jobs.LOCK_ID}):
+                conn.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": jobs.LOCK_ID})
+                break
+        time.sleep(0.02)
+    else:
+        pytest.fail("采集任务未结束")
+    [run] = client.get("/job").json()["runs"]
+    assert (run["id"], run["status"]) == (run_id, "success")
+    assert any(
+        log["kind"] == "equity" and log["code"] == code and log["status"] == "success"
+        for log in run["logs"]
+    )
+    [item] = [row for row in client.get("/instruments").json() if row["code"] == code]
+    assert item["name"] == "测试标的" and item["enabled"]
+    assert item["start_date"] == "2020-01-01" and item["last_date"] == str(cutoff)
+    candles = client.get(f"/candles/{code}?start={cutoff}&end={cutoff}")
+    assert candles.status_code == 200 and len(candles.json()) == 1
+    response = client.get(f"/candles/{code}/factors?start={cutoff}&end={cutoff}")
+    assert response.status_code == 200, response.json()
+    factors = response.json()
+    assert factors["data_cutoff"] == str(cutoff) and not factors["partial"]
+    assert not factors["warmup_insufficient"]
+    assert "box_breakout_up" in {event["factor_id"] for event in factors["events"]}
 
 
 def test_running_job_exclusion(monkeypatch):
