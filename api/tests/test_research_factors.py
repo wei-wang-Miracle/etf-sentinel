@@ -2,7 +2,7 @@ from datetime import date, timedelta
 
 import pytest
 
-from app.research_factors import FACTORS, calculate_factor_events
+from app.research_factors import FACTORS, calculate_factor_events, factor_truth_rows
 
 
 def rows_from_closes(closes, *, volumes=None, highs=None, lows=None):
@@ -91,6 +91,29 @@ def test_separates_wilder_oversold_from_atr_oversold_with_no_price_breakout():
     events = calculate_factor_events(rows, {})
     assert {item["factor_id"] for item in events} == {"wilder_rsi_oversold"}
     assert events[0]["trade_date"] == rows[14]["trade_date"]
+
+
+def test_factor_truth_rows_keep_state_active_and_events_on_their_day_only():
+    rows = rows_from_closes([10.0] * 14 + [9.99] * 9)
+    turning = {rows[17]["trade_date"]: "bottom"}
+
+    truth = factor_truth_rows(rows, turning)
+
+    assert len(truth) == len(rows)
+    assert truth[14]["trade_date"] == rows[14]["trade_date"]
+    assert truth[14]["wilder_rsi_oversold"] is True
+    assert truth[15]["wilder_rsi_oversold"] is True
+    assert truth[17]["turning_bottom"] is True
+    assert truth[18]["turning_bottom"] is False
+    assert all(isinstance(item[factor_id], bool) for item in truth for factor_id in FACTORS)
+
+    events = calculate_factor_events(rows, turning)
+    rsi_days = [
+        event["trade_date"]
+        for event in events
+        if event["factor_id"] == "wilder_rsi_oversold"
+    ]
+    assert rsi_days == [rows[14]["trade_date"]]
 
 
 def test_unknown_turning_event_kind_is_rejected():

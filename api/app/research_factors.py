@@ -130,8 +130,8 @@ RECOVERY_VOLUME_RANGE = (0.8, 2.5)
 RECOVERY_POSITION_MIN = 0.55
 
 
-def calculate_factor_events(rows, turning, dividends=()):
-    """对升序行情计算观察事件及状态进入日。"""
+def factor_truth_rows(rows, turning, dividends=()):
+    """对升序行情计算逐日因子真值，供离线策略研究组合既有因子。"""
     if any(kind not in ("bottom", "top") for kind in turning.values()):
         raise ValueError("顶底事件类型无效")
     if not rows:
@@ -159,7 +159,7 @@ def calculate_factor_events(rows, turning, dividends=()):
         for index in range(len(values))
     ]
 
-    output, states, oversold = [], set(), []
+    output, oversold = [], []
     atr = gain = loss = 0.0
     for index, row in enumerate(rows):
         day = row["trade_date"]
@@ -168,29 +168,27 @@ def calculate_factor_events(rows, turning, dividends=()):
         atr, gain, loss = wilder14(
             previous, value, highs[index], lows[index], index, atr, gain, loss
         )
+        truth = {factor_id: False for factor_id in FACTORS}
         if kind := turning.get(day):
-            factor_id = "turning_bottom" if kind == "bottom" else "turning_top"
-            output.append({"factor_id": factor_id, "trade_date": day})
+            truth["turning_bottom" if kind == "bottom" else "turning_top"] = True
 
-        if (
+        truth["ma5_cross_ma20_up"] = (
             index >= 20
             and ma5[index] is not None
             and ma20[index] is not None
             and ma5[index - 1] <= ma20[index - 1]
             and ma5[index] > ma20[index]
-        ):
-            output.append({"factor_id": "ma5_cross_ma20_up", "trade_date": day})
+        )
 
         margin = prior_close_margin(values, index, BOX_WINDOW)
         breakout = margin is not None and margin > 0
-        if breakout:
-            output.append({"factor_id": "box_breakout_up", "trade_date": day})
+        truth["box_breakout_up"] = breakout
 
         ratio = volume_ratio(volumes, index, VOLUME_WINDOW)
-        if breakout and ratio is not None and ratio >= BREAKOUT_VOLUME_MIN:
-            output.append({"factor_id": "volume_breakout_up", "trade_date": day})
-        if breakout and atr > 0 and margin > 0.2 * atr:
-            output.append({"factor_id": "atr_box_breakout", "trade_date": day})
+        truth["volume_breakout_up"] = (
+            breakout and ratio is not None and ratio >= BREAKOUT_VOLUME_MIN
+        )
+        truth["atr_box_breakout"] = breakout and atr > 0 and margin > 0.2 * atr
 
         atr_oversold = (
             ma20[index] is not None
@@ -200,26 +198,17 @@ def calculate_factor_events(rows, turning, dividends=()):
         rsi_oversold = (
             index >= 14 and gain + loss > 0 and 100 * gain / (gain + loss) <= 35
         )
-        for factor_id, active in (
-            ("atr_oversold", atr_oversold),
-            ("wilder_rsi_oversold", rsi_oversold),
-            ("ma60_rising", index >= 64 and ma60[index] > ma60[index - 5]),
-        ):
-            if active and factor_id not in states:
-                output.append({"factor_id": factor_id, "trade_date": day})
-            if active:
-                states.add(factor_id)
-            else:
-                states.discard(factor_id)
+        truth["atr_oversold"] = atr_oversold
+        truth["wilder_rsi_oversold"] = rsi_oversold
+        truth["ma60_rising"] = index >= 64 and ma60[index] > ma60[index - 5]
 
         position = (
             (value - lows[index]) / (highs[index] - lows[index])
             if highs[index] > lows[index]
             else 0
         )
-        if index >= 20 and position >= 0.6:
-            output.append({"factor_id": "strong_close", "trade_date": day})
-        if (
+        truth["strong_close"] = index >= 20 and position >= 0.6
+        truth["oversold_recovery"] = (
             any(oversold[-3:])
             and value > highs[index - 1]
             and ma20[index] is not None
@@ -227,8 +216,27 @@ def calculate_factor_events(rows, turning, dividends=()):
             and ratio is not None
             and RECOVERY_VOLUME_RANGE[0] <= ratio <= RECOVERY_VOLUME_RANGE[1]
             and position >= RECOVERY_POSITION_MIN
-        ):
-            output.append({"factor_id": "oversold_recovery", "trade_date": day})
+        )
         oversold.append(atr_oversold or rsi_oversold)
+        output.append({"trade_date": day, **truth})
 
+    return output
+
+
+def calculate_factor_events(rows, turning, dividends=()):
+    """对升序行情计算观察事件及状态进入日。"""
+    truth_rows = factor_truth_rows(rows, turning, dividends)
+    output, active_states = [], set()
+    for truth in truth_rows:
+        for factor_id, definition in FACTORS.items():
+            active = truth[factor_id]
+            if definition["output_type"] == "event" and active:
+                output.append({"factor_id": factor_id, "trade_date": truth["trade_date"]})
+            elif definition["output_type"] == "state":
+                if active and factor_id not in active_states:
+                    output.append({"factor_id": factor_id, "trade_date": truth["trade_date"]})
+                if active:
+                    active_states.add(factor_id)
+                else:
+                    active_states.discard(factor_id)
     return output
