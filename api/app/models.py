@@ -118,7 +118,7 @@ class Job(Base):
     id: Mapped[int] = mapped_column(
         "job_id",
         primary_key=True,
-        comment="采集任务唯一编号；1为ETF日行情，2为行业恐贪，3为国家队持仓比例，4为指数估值与指数日行情，5为策略日计划",
+        comment="采集任务唯一编号；1为ETF日行情，2为行业恐贪，3为国家队持仓比例，4为指数估值与指数日行情，5为策略日计划，6为全市场恐贪与五维环境因子，7为ETF档案与份额流",
     )
     enabled: Mapped[bool] = mapped_column(
         "schedule_enabled", default=True, comment="是否启用每日调度；不禁止手动触发"
@@ -147,7 +147,7 @@ class Run(Base):
     job_id: Mapped[int] = mapped_column(
         ForeignKey("jobs.job_id"),
         default=1,
-        comment="所属采集任务编号，关联jobs.job_id；1为ETF，2为行业恐贪，3为国家队持仓比例，4为指数估值与指数日行情，5为策略日计划",
+        comment="所属采集任务编号，关联jobs.job_id；1为ETF，2为行业恐贪，3为国家队持仓比例，4为指数估值与指数日行情，5为策略日计划，6为全市场恐贪与五维环境因子，7为ETF档案与份额流",
     )
     status: Mapped[str] = mapped_column(
         "run_status",
@@ -255,6 +255,71 @@ class SentimentDaily(Base):
     )
     collected_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), comment="本系统本条日数据最近采集时间，带时区时间戳"
+    )
+
+
+class MarketFearGreedDaily(Base):
+    """全市场恐贪总分的源日频观测。"""
+
+    __tablename__ = "market_fear_greed_daily"
+    __table_args__: ClassVar[dict] = {
+        "comment": "全市场恐贪指数源日频序列；零分有效，不从当前快照推断历史情绪标签"
+    }
+    trade_date: Mapped[Date] = mapped_column(
+        primary_key=True,
+        comment="数据源交易日期，按源值保存，不统一截为北京时间昨日",
+    )
+    fear_greed_score: Mapped[Decimal] = mapped_column(
+        Numeric(8, 4),
+        comment="全市场恐贪总分，闭区间0至100，零为有效值",
+    )
+    source_label: Mapped[str | None] = mapped_column(
+        String(32),
+        comment="源最新快照情绪标签；仅源日期与总分完全匹配时写入，其余历史日期为空",
+    )
+    collected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        comment="本条首次入库或源值实际修订的本地采集时间，带时区；未变化不重写",
+    )
+
+
+class MarketRegimeFactorDaily(Base):
+    """全市场五维环境子因子的源日频观测。"""
+
+    __tablename__ = "market_regime_factor_daily"
+    __table_args__ = (
+        Index("ix_market_regime_factor_daily_trade_date", "trade_date"),
+        {
+            "comment": "全市场恐贪五维环境子因子源日频序列；源分位仅供展示，不作为历史策略分位"
+        },
+    )
+    factor_key: Mapped[str] = mapped_column(
+        String(32),
+        primary_key=True,
+        comment="源子因子标识：volatility、bx、premium、wz、strength；与trade_date组成主键",
+    )
+    trade_date: Mapped[Date] = mapped_column(
+        primary_key=True,
+        comment="数据源交易日期，按源值保存；与factor_key组成主键",
+    )
+    factor_name: Mapped[str] = mapped_column(
+        String(100), comment="源中文名称，不自行重命名或猜测指标含义"
+    )
+    raw_value: Mapped[Decimal] = mapped_column(
+        Numeric(24, 6),
+        comment="源原始读数，允许正负数；具体单位随factor_key和源口径保留，不擅自换算",
+    )
+    source_pct_year: Mapped[Decimal | None] = mapped_column(
+        Numeric(8, 4),
+        comment="源返回的近一年分位，范围0至100；仅供观察对照，不作为历史固定时点分位；可空",
+    )
+    source_pct_all: Mapped[Decimal | None] = mapped_column(
+        Numeric(8, 4),
+        comment="源返回的全历史分位，范围0至100；仅供观察对照，不作为历史固定时点分位；可空",
+    )
+    collected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        comment="本条首次入库或字段实际修订的本地采集时间，带时区；未变化不重写",
     )
 
 

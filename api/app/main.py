@@ -30,6 +30,7 @@ from app.jobs import (
     recover_interrupted,
     scheduler,
 )
+from app.market_sentiment_routes import router as market_sentiment_router
 from app.models import (
     BacktestSource,
     Candle,
@@ -39,6 +40,8 @@ from app.models import (
     InstrumentIndexLink,
     InstrumentSentimentLink,
     Job,
+    MarketFearGreedDaily,
+    MarketRegimeFactorDaily,
     ResearchFactor,
     ResearchStrategyFactor,
     Run,
@@ -62,6 +65,7 @@ async def lifespan(app):
     recover_interrupted(3)
     recover_interrupted(4)
     recover_interrupted(5)
+    recover_interrupted(6)
     stop = threading.Event()
     thread = threading.Thread(target=scheduler, args=(stop,), daemon=True)
     thread.start()
@@ -76,6 +80,7 @@ app.include_router(backtest_router)
 app.include_router(sentiment_router)
 app.include_router(national_team_router)
 app.include_router(index_valuation_router)
+app.include_router(market_sentiment_router)
 app.include_router(research_router)
 app.include_router(review_router)
 app.include_router(strategy_lab_router)
@@ -414,6 +419,32 @@ def candle_factors(code: str, start: date, end: date):
                     .order_by(SentimentDaily.trade_date)
                 )
             ]
+        market_rows = [
+            {
+                "trade_date": str(item.trade_date),
+                "fear_greed_score": str(item.fear_greed_score),
+            }
+            for item in db.scalars(
+                select(MarketFearGreedDaily)
+                .where(MarketFearGreedDaily.trade_date <= cutoff)
+                .order_by(MarketFearGreedDaily.trade_date)
+            )
+        ]
+        market_regime_rows = [
+            {
+                "factor_key": item.factor_key,
+                "trade_date": str(item.trade_date),
+                "raw_value": str(item.raw_value),
+            }
+            for item in db.scalars(
+                select(MarketRegimeFactorDaily)
+                .where(MarketRegimeFactorDaily.trade_date <= cutoff)
+                .order_by(
+                    MarketRegimeFactorDaily.factor_key,
+                    MarketRegimeFactorDaily.trade_date,
+                )
+            )
+        ]
 
     turning = turning_events(
         indicator_rows,
@@ -425,6 +456,8 @@ def candle_factors(code: str, start: date, end: date):
         indicator_rows,
         valuation_rows=valuation_rows,
         sentiment_rows=sentiment_rows,
+        market_rows=market_rows,
+        market_regime_rows=market_regime_rows,
     )
     events = calculate_factor_events(
         indicator_rows,

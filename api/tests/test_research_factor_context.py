@@ -110,3 +110,30 @@ def test_external_valuation_uses_all_valid_metrics_strictly_before_the_etf_day()
     assert truth[4]["dividend_yield_high"] is True
     assert coverage["valuation"]["metrics"]["premium_diff"]["available"] is True
     assert coverage["valuation"]["metrics"]["xilv"]["first_source_date"] == "2025-01-01"
+
+
+def test_market_regime_factors_use_only_strictly_prior_market_observations():
+    from app.research_factor_context import build_external_factor_truth
+
+    rows = _rows(4)
+    truth, coverage = build_external_factor_truth(
+        rows,
+        market_rows=[
+            {"trade_date": "2025-01-01", "fear_greed_score": "20"},
+            {"trade_date": "2025-01-03", "fear_greed_score": "80"},
+        ],
+        market_regime_rows=[
+            {"factor_key": "volatility", "trade_date": "2025-01-01", "raw_value": "23"},
+            {"factor_key": "premium", "trade_date": "2025-01-01", "raw_value": "-11"},
+            {"factor_key": "strength", "trade_date": "2025-01-01", "raw_value": "0.8"},
+        ],
+    )
+
+    assert truth[0]["market_fear_extreme"] is False
+    assert truth[1]["market_fear_extreme"] is True
+    assert truth[1]["market_ivix_high"] is True
+    assert truth[1]["market_breadth_weak"] is True
+    assert truth[1]["market_futures_deep_discount"] is True
+    assert truth[3]["market_greed_extreme"] is True
+    assert coverage["market_regime"]["available"] is True
+    assert coverage["market_regime"]["first_source_date"] == "2025-01-01"

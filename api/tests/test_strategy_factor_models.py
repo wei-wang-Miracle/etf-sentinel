@@ -20,6 +20,8 @@ def test_factor_and_strategy_tables_replace_algorithm_version_storage():
         "strategy_comparison_factors",
         "strategy_signals",
         "strategy_execution_links",
+        "market_fear_greed_daily",
+        "market_regime_factor_daily",
     } <= tables.keys()
     assert not {
         "saved_strategies",
@@ -62,6 +64,14 @@ def test_research_factor_directory_has_matching_database_columns_and_comments():
         index.name for index in sentiment_link_table.indexes
     }
     assert all({factor_id for factor_id, _ in strategy["factors"]} <= set(FACTORS) for strategy in STRATEGIES.values())
+    assert {
+        "market_fear_extreme",
+        "market_greed_extreme",
+        "market_ivix_high",
+        "market_ivix_calm",
+        "market_breadth_weak",
+        "market_futures_deep_discount",
+    } <= set(FACTORS)
 
 
 def test_legacy_overfit_multifactor_is_not_a_current_strategy():

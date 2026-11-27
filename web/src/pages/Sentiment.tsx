@@ -41,6 +41,24 @@ export type SentimentDaily = {
   close_price: number | null;
   collected_at: string;
 };
+export type MarketRegimePoint = {
+  trade_date: string;
+  factor_name: string;
+  raw_value: number;
+  source_pct_year: number | null;
+  source_pct_all: number | null;
+  collected_at: string;
+};
+export type MarketSentimentSeries = {
+  fear_greed: { trade_date: string; fear_greed_score: number; source_label: string | null; collected_at: string }[];
+  regime_factors: Record<string, MarketRegimePoint[]>;
+};
+export type MarketSentimentOverview = {
+  latest: { trade_date: string | null; fear_greed_score: number | null; source_label: string | null; changes: Record<string, number | null> };
+  coverage: { first_source_date: string | null; last_source_date: string | null; count: number };
+  regime_factors: Record<string, { factor_name: string | null; raw_value: number | null; trade_date: string | null; first_source_date: string | null; last_source_date: string | null; count: number; source_pct_year: number | null; source_pct_all: number | null }>;
+  source: string;
+};
 type Daily = SentimentDaily;
 const today = () =>
   new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Shanghai" });
@@ -221,6 +239,58 @@ export function SentimentTrend({ rows, theme }: { rows: Daily[]; theme: string }
     />
   );
 }
+
+export function MarketSentimentTrend({
+  rows,
+  theme,
+}: {
+  rows: MarketSentimentSeries;
+  theme: string;
+}) {
+  const element = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!element.current) return;
+    const chart = echarts.init(element.current);
+    const palette = readChartPalette();
+    const scores = new Map(rows.fear_greed.map((item) => [item.trade_date, item]));
+    const volatility = new Map((rows.regime_factors.volatility ?? []).map((item) => [item.trade_date, item]));
+    const days = [...new Set([...scores.keys(), ...volatility.keys()])].sort();
+    chart.setOption({
+      animation: false,
+      aria: { enabled: true, description: "全市场恐贪分数与50ETF期权波动率双轴历史图，缺失源日期不补零。" },
+      textStyle: { color: palette.muted, fontFamily: palette.fontFamily },
+      tooltip: {
+        trigger: "axis",
+        axisPointer: { type: "line", label: { backgroundColor: palette.border, color: palette.ink } },
+        backgroundColor: palette.surface,
+        borderColor: palette.border,
+        textStyle: { color: palette.ink, fontFamily: palette.fontFamily, fontSize: 12 },
+        formatter: (raw: unknown) => {
+          const day = (raw as Array<{ axisValue?: string }>)[0]?.axisValue ?? "";
+          const score = scores.get(day)?.fear_greed_score;
+          const ivix = volatility.get(day)?.raw_value;
+          return `<div style="font-weight:600;margin-bottom:4px">${escapeHtml(day)}</div><div>全市场恐贪 ${score == null ? "—" : score.toFixed(2)}</div><div>50ETF波指 ${ivix == null ? "—" : ivix.toFixed(2)}</div>`;
+        },
+      },
+      grid: { left: element.current.clientWidth < 500 ? 40 : 55, right: element.current.clientWidth < 500 ? 60 : 88, top: 32, bottom: 65 },
+      xAxis: { type: "category", data: days, axisLine: { lineStyle: { color: palette.border } }, axisTick: { show: false }, axisLabel: { color: palette.muted, fontFamily: palette.fontFamily, fontSize: 12 } },
+      yAxis: [
+        { type: "value", name: "恐贪分数", min: 0, max: 100, interval: 20, nameTextStyle: { color: palette.fear, fontFamily: palette.fontFamily, fontSize: 12 }, axisLabel: { color: palette.muted, fontFamily: palette.fontFamily, fontSize: 12 }, splitLine: { lineStyle: { color: palette.border, opacity: 0.45 } } },
+        { type: "value", name: "iVIX", scale: true, nameTextStyle: { color: palette.chart3, fontFamily: palette.fontFamily, fontSize: 12 }, axisLabel: { color: palette.chart3, fontFamily: palette.fontFamily, fontSize: 12 }, splitLine: { show: false } },
+      ],
+      dataZoom: [{ type: "inside" }, { type: "slider", height: 18, bottom: 8, borderColor: palette.border, textStyle: { color: palette.muted, fontFamily: palette.fontFamily }, fillerColor: palette.primarySoft }],
+      series: [
+        { type: "line", name: "全市场恐贪", yAxisIndex: 0, showSymbol: false, symbol: "none", connectNulls: false, lineStyle: { width: 2.5 }, data: days.map((day) => scores.get(day)?.fear_greed_score ?? null) },
+        { type: "line", name: "50ETF波指", yAxisIndex: 1, showSymbol: false, symbol: "none", connectNulls: false, lineStyle: { color: palette.chart3, width: 1.8, type: "dashed" }, data: days.map((day) => volatility.get(day)?.raw_value ?? null) },
+      ],
+    });
+    const observer = new ResizeObserver(() => chart.resize());
+    observer.observe(element.current);
+    return () => { observer.disconnect(); chart.dispose(); };
+  }, [rows, theme]);
+  return <div ref={element} className="sentiment-chart" role="img" aria-label="全市场恐贪分数与50ETF期权波动率双轴历史图" />;
+}
+
 export default function Sentiment({
   theme,
   goJobs,

@@ -35,6 +35,21 @@ export const holdings = { as_of: "2026-11-06", items: instruments.map((item) => 
   market_value: 5000, cost_price: 4, latest_close_date: "2026-11-06",
 })), summary: { holding_count: 2, configured_only: true } };
 export const job = { enabled: true, time: "08:30", next_run: "2026-11-09T00:30:00Z", source_configured: true, runs: [] };
+export const marketSentimentOverview = {
+  latest: { trade_date: "2026-11-06", fear_greed_score: 20, source_label: "恐惧", changes: { one_day: -2, one_week: -5, one_month: -10 } },
+  coverage: { first_source_date: "2020-08-03", last_source_date: "2026-11-06", count: 1533 },
+  regime_factors: {
+    volatility: { factor_name: "指数波动：50ETF期权波动率", raw_value: 23, trade_date: "2026-11-06", first_source_date: "2025-11-28", last_source_date: "2026-11-06", count: 242, source_pct_year: 80, source_pct_all: 90 },
+    bx: { factor_name: "避险天堂：股债回报差", raw_value: -1.2, trade_date: "2026-11-06", first_source_date: "2025-11-28", last_source_date: "2026-11-06", count: 242, source_pct_year: 20, source_pct_all: 30 },
+    premium: { factor_name: "升贴水率：沪深300股指期货升贴水", raw_value: -11, trade_date: "2026-11-06", first_source_date: "2025-11-28", last_source_date: "2026-11-06", count: 242, source_pct_year: 10, source_pct_all: 20 },
+    wz: { factor_name: "两市成交额", raw_value: 1200000, trade_date: "2026-11-06", first_source_date: "2025-11-28", last_source_date: "2026-11-06", count: 242, source_pct_year: 60, source_pct_all: 50 },
+    strength: { factor_name: "股价强度：创新高个股数量占比", raw_value: 0.8, trade_date: "2026-11-06", first_source_date: "2025-11-28", last_source_date: "2026-11-06", count: 242, source_pct_year: 15, source_pct_all: 20 },
+  }, source: "韭圈 · fear-greed",
+};
+export const marketSentimentSeries = {
+  fear_greed: [{ trade_date: "2026-11-05", fear_greed_score: 22, source_label: null, collected_at: "2026-11-06T00:00:00Z" }, { trade_date: "2026-11-06", fear_greed_score: 20, source_label: "恐惧", collected_at: "2026-11-06T00:00:00Z" }],
+  regime_factors: Object.fromEntries(Object.entries(marketSentimentOverview.regime_factors).map(([key, item]) => [key, [{ trade_date: "2026-11-05", factor_name: item.factor_name, raw_value: item.raw_value, source_pct_year: item.source_pct_year, source_pct_all: item.source_pct_all, collected_at: "2026-11-06T00:00:00Z" }]])),
+};
 export const candles = Array.from({ length: 80 }, (_, index) => {
   const date = new Date(Date.UTC(2026, 7, 1 + index)).toISOString().slice(0, 10);
   return { date, open: 5, high: 5.3, low: 4.8, close: 5 + index / 100, volume: 100000,
@@ -69,6 +84,8 @@ export async function mockApi(page: Page) {
   await page.route("**/api/**", async (route) => {
     const request = route.request(), url = new URL(request.url()), path = url.pathname.slice(4);
     if (path === "/instruments") return json(route, instruments);
+    if (path === "/market-sentiment/overview") return json(route, marketSentimentOverview);
+    if (path.startsWith("/market-sentiment/series")) return json(route, marketSentimentSeries);
     if (path === "/account/holdings") return json(route, holdings);
     if (path === "/account/sync/status") return json(route, { latest: null, runs: [] });
     if (path.startsWith("/account/review/")) return json(route, { actual: { status: "not_applicable", reasons: ["测试：尚无可核算的真实成交"] },

@@ -255,6 +255,42 @@ FACTORS = {
         "output_type": "state",
         "meaning": "若本地沪深300指数同日序列完整，ETF过去20日含息收益至少跑赢1.5个百分点。",
     },
+    "market_fear_extreme": {
+        "name": "全市场极度恐惧",
+        "category": "全市场环境",
+        "output_type": "state",
+        "meaning": "此前最近可得全市场恐贪总分不高于25。",
+    },
+    "market_greed_extreme": {
+        "name": "全市场极度贪婪",
+        "category": "全市场环境",
+        "output_type": "state",
+        "meaning": "此前最近可得全市场恐贪总分不低于75。",
+    },
+    "market_ivix_high": {
+        "name": "50ETF波指高位",
+        "category": "全市场环境",
+        "output_type": "state",
+        "meaning": "此前最近可得50ETF期权波动率不低于22，或本地历史样本充足时处于高分位。",
+    },
+    "market_ivix_calm": {
+        "name": "50ETF波指低波平稳",
+        "category": "全市场环境",
+        "output_type": "state",
+        "meaning": "此前最近可得50ETF期权波动率不高于16，且未出现快速上升。",
+    },
+    "market_breadth_weak": {
+        "name": "全A创新高广度极弱",
+        "category": "全市场环境",
+        "output_type": "state",
+        "meaning": "此前最近可得创新高个股占比不高于1%。",
+    },
+    "market_futures_deep_discount": {
+        "name": "股指期货深度贴水",
+        "category": "全市场环境",
+        "output_type": "state",
+        "meaning": "此前最近可得沪深300股指期货年化升贴水率不高于-10%。",
+    },
     "sentiment_extreme_fear": {
         "name": "行业极度恐惧",
         "category": "外部情绪",
@@ -285,6 +321,12 @@ EXTERNAL_FACTOR_IDS = frozenset(
         "sentiment_extreme_fear",
         "sentiment_fear_rebound",
         "sentiment_extreme_greed",
+        "market_fear_extreme",
+        "market_greed_extreme",
+        "market_ivix_high",
+        "market_ivix_calm",
+        "market_breadth_weak",
+        "market_futures_deep_discount",
     }
 )
 

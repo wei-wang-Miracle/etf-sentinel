@@ -130,10 +130,14 @@ def build_factor_snapshot_item(
     valuation_rows = list(context.get("valuation_rows") or [])
     sentiment_rows = context.get("sentiment_rows")
     benchmark_rows = list(context.get("benchmark_rows") or [])
+    market_rows = list(context.get("market_rows") or [])
+    market_regime_rows = list(context.get("market_regime_rows") or [])
     external_truth, external_coverage = build_external_factor_truth(
         normalized_rows,
         valuation_rows=valuation_rows,
         sentiment_rows=sentiment_rows,
+        market_rows=market_rows,
+        market_regime_rows=market_regime_rows,
     )
     item = {
         "code": code,
@@ -153,6 +157,8 @@ def build_factor_snapshot_item(
             ),
             "sentiment_rows": sentiment_rows,
             "benchmark_rows": benchmark_rows,
+            "market_rows": market_rows,
+            "market_regime_rows": market_regime_rows,
             "availability": external_coverage,
         },
         "factor_truth": factor_truth_rows(

@@ -117,6 +117,8 @@ def main():
         Instrument,
         InstrumentIndexLink,
         InstrumentSentimentLink,
+        MarketFearGreedDaily,
+        MarketRegimeFactorDaily,
         SentimentDaily,
     )
     from sqlalchemy import select
@@ -228,6 +230,40 @@ def main():
                     .order_by(IndexCandle.trade_date)
                 )
             ]
+            market_rows = [
+                {
+                    "trade_date": str(item.trade_date),
+                    "fear_greed_score": str(item.fear_greed_score),
+                    "collected_at": item.collected_at.isoformat(),
+                }
+                for item in db.scalars(
+                    select(MarketFearGreedDaily)
+                    .where(MarketFearGreedDaily.trade_date <= candles[-1].date)
+                    .order_by(MarketFearGreedDaily.trade_date)
+                )
+            ]
+            market_regime_rows = [
+                {
+                    "factor_key": item.factor_key,
+                    "trade_date": str(item.trade_date),
+                    "raw_value": str(item.raw_value),
+                    "source_pct_year": str(item.source_pct_year)
+                    if item.source_pct_year is not None
+                    else None,
+                    "source_pct_all": str(item.source_pct_all)
+                    if item.source_pct_all is not None
+                    else None,
+                    "collected_at": item.collected_at.isoformat(),
+                }
+                for item in db.scalars(
+                    select(MarketRegimeFactorDaily)
+                    .where(MarketRegimeFactorDaily.trade_date <= candles[-1].date)
+                    .order_by(
+                        MarketRegimeFactorDaily.factor_key,
+                        MarketRegimeFactorDaily.trade_date,
+                    )
+                )
+            ]
             turning = turning_events(
                 rows,
                 [
@@ -263,6 +299,8 @@ def main():
                     ],
                     "sentiment_rows": sentiment_rows,
                     "benchmark_rows": benchmark_rows,
+                    "market_rows": market_rows,
+                    "market_regime_rows": market_regime_rows,
                 },
             )
             universe[code] = item

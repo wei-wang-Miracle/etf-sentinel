@@ -177,3 +177,12 @@ test("长区间叠加真实操作自动对齐同步起点，我的ETF列表提�
   await expect.poll(() => reviewUrl).toContain("start=2025-01-20");
   await expect(page.getByText(/真实操作仅叠加账户同步起点/)).toBeVisible();
 });
+
+test("无行业映射的ETF仍可观察全市场温度与波指", async ({ page }) => {
+  await page.goto("/?page=etfs&code=510500&detail=overview&tab=sentiment&sentiment_scope=market");
+
+  await expect(page.getByRole("button", { name: "全市场温度与波指", exact: true })).toBeVisible();
+  await expect(page.getByText("全市场恐贪分", { exact: true })).toBeVisible();
+  await expect(page.getByText("50ETF期权波动率", { exact: true })).toBeVisible();
+  await expect(page.getByText(/子因子自 2025-11-28 起本地累积/)).toBeVisible();
+});

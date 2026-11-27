@@ -9,6 +9,7 @@ from sqlalchemy import select, text
 from app.collection import collect, now
 from app.db import Session, engine
 from app.index_collection import collect_indices
+from app.market_sentiment import collect_market_sentiment
 from app.models import Job, Run
 from app.national_team import collect_national_team
 from app.sentiment import collect_sentiment
@@ -30,7 +31,14 @@ def launch(trigger="manual", job_id=1):
     """持有独立数据库连接锁直到任务结束，跨进程防止重入。"""
     from app.strategy_lab import collect_signals
 
-    collectors = {5: collect_signals, 1: collect, 2: collect_sentiment, 3: collect_national_team, 4: collect_indices}
+    collectors = {
+        1: collect,
+        2: collect_sentiment,
+        3: collect_national_team,
+        4: collect_indices,
+        5: collect_signals,
+        6: collect_market_sentiment,
+    }
     if job_id not in collectors:
         raise ValueError("未知采集任务")
     lock_id = LOCK_ID + job_id - 1
@@ -125,7 +133,7 @@ def recover_interrupted(job_id=1):
 
 
 def scheduler(stop):
-    """独立锁定五类任务配置，每天最多触发一次；仅行情需要凭据。"""
+    """独立锁定各类任务配置，每天最多触发一次；仅行情需要凭据。"""
     while not stop.is_set():
         try:
             with Session() as db:

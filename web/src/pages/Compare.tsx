@@ -4,6 +4,8 @@ import ChartCaption from "../components/ChartCaption";
 import { journeyUrl } from "../lib/strategyJourney";
 import { api } from "../lib/api";
 import { dateAgo, metrics, number, useResearchQuery } from "../lib/research";
+import { useApiResource } from "../lib/useApiResource";
+import type { MarketSentimentOverview } from "./Sentiment";
 import ResearchChart, {
   ResearchHeatmap,
   type LineSeries,
@@ -79,6 +81,9 @@ export default function Compare({ theme }: { theme: string }) {
   const [ascending, setAscending] = useState(false);
   const [view, setView] = useState("series");
   const selections = useRef<Record<string, string>>({});
+  const marketOverview = useApiResource<MarketSentimentOverview>(
+    dimension === "sentiment" ? "/market-sentiment/overview" : null,
+  );
   useEffect(() => {
     const controller = new AbortController();
     setResult(null);
@@ -218,6 +223,15 @@ export default function Compare({ theme }: { theme: string }) {
                   <strong>{result.meta.unit}</strong>
                 </div>
               </div>
+              {dimension === "sentiment" && marketOverview.data && (
+                <div className="quote-strip" aria-label="全市场温度与波指背景">
+                  <div><span>全市场恐贪</span><strong className="mono">{number(marketOverview.data.latest.fear_greed_score, 1)}</strong></div>
+                  <div><span>50ETF波指</span><strong className="mono">{number(marketOverview.data.regime_factors.volatility?.raw_value, 2)}</strong></div>
+                  <div><span>期指升贴水</span><strong className="mono">{number(marketOverview.data.regime_factors.premium?.raw_value, 2)}%</strong></div>
+                  <div><span>创新高占比</span><strong className="mono">{number(marketOverview.data.regime_factors.strength?.raw_value, 2)}%</strong></div>
+                  <AppLink href="?page=etfs&detail=overview&tab=sentiment&sentiment_scope=market">查看全市场图表</AppLink>
+                </div>
+              )}
               {(dimension === "valuation" || dimension !== "sentiment") && (
                 <p className="muted">
                   {dimension === "valuation" ? `独立关联指数 ${result.universe.independent_sources ?? 0} 个` : ""}

@@ -9,7 +9,7 @@ export default function Jobs({
   initialTask?: string;
 }) {
   const [query, update] = useResearchQuery({ task: initialTask });
-  const tasks = [["etf", "基金日行情"], ["sentiment", "行业恐贪"], ["national-team", "国家队持仓"], ["index-valuations", "指数估值"], ["strategy-signals", "策略日计划"]];
+  const tasks = [["etf", "基金日行情"], ["sentiment", "行业恐贪"], ["market-sentiment", "全市场温度"], ["national-team", "国家队持仓"], ["index-valuations", "指数估值"], ["strategy-signals", "策略日计划"]];
   const task = tasks.some(([key]) => key === query.task) ? query.task : "etf";
   return (
     <>
@@ -20,7 +20,7 @@ export default function Jobs({
   );
 }
 function TaskPanel({ task }: { task: string }) {
-  const path = task === "strategy-signals" ? "/strategy-lab/job" : task === "index-valuations" ? "/index-valuations/job" : task === "national-team" ? "/national-team/job" : task === "sentiment" ? "/sentiment/job" : "/job";
+  const path = task === "strategy-signals" ? "/strategy-lab/job" : task === "index-valuations" ? "/index-valuations/job" : task === "national-team" ? "/national-team/job" : task === "market-sentiment" ? "/market-sentiment/job" : task === "sentiment" ? "/sentiment/job" : "/job";
   const [job, setJob] = useState<Job | null>(null);
   const [time, setTime] = useState("01:00");
   const [enabled, setEnabled] = useState(true);
@@ -117,7 +117,7 @@ function TaskPanel({ task }: { task: string }) {
         <div className="panel-header">
           <h2>{task === "strategy-signals" ? "观察策略日计划" : task === "index-valuations"
             ? "指数估值与指数日K采集"
-            : task === "national-team" ? "国家队持仓比例采集" : task === "sentiment" ? "行业恐贪采集" : "基金日行情与权益资料核验"}</h2>
+            : task === "national-team" ? "国家队持仓比例采集" : task === "market-sentiment" ? "全市场温度采集" : task === "sentiment" ? "行业恐贪采集" : "基金日行情与权益资料核验"}</h2>
           <span
             className={`badge ${running ? "info" : job?.enabled ? "success" : "neutral"}`}
           >
@@ -171,6 +171,8 @@ function TaskPanel({ task }: { task: string }) {
               ? "采集源页面 18 只基金估算持仓比例，固定 2026-01-01 基准，全历史核验并增量写入。"
               : task === "sentiment"
               ? "首次回填五年，后续增量入库并重查最近七日修订。"
+              : task === "market-sentiment"
+              ? "全市场恐贪总分自2020-08起增量核验；五维子因子只返回近一年滚动窗口，按日累积且不删除本地旧历史。"
               : "行情采集截至昨日：启用标的首次按月回补，后续重查最近七日；随后核验全部配置 ETF 分红与折算资料。"}{" "}
             同一任务禁止重复触发。
           </p>

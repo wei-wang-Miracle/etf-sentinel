@@ -14,6 +14,20 @@ ERP_HIGH_PERCENTILE = Decimal(70)
 ERP_LOW_PERCENTILE = Decimal(20)
 DIVIDEND_YIELD_HIGH_PERCENTILE = Decimal(70)
 VALUATION_METRICS = ("pe", "pb", "xilv", "roe", "premium_diff")
+MARKET_REGIME_FACTORS = (
+    "market_ivix_high",
+    "market_ivix_calm",
+    "market_breadth_weak",
+    "market_futures_deep_discount",
+)
+MARKET_REGIME_KEYS = ("volatility", "premium", "strength")
+MARKET_IVIX_HIGH = Decimal(22)
+MARKET_IVIX_CALM = Decimal(16)
+MARKET_IVIX_FAST_EXPANSION_RATIO = Decimal("1.1")
+MARKET_BREADTH_WEAK = Decimal(1)
+MARKET_FUTURES_DEEP_DISCOUNT = Decimal(-10)
+MARKET_EXTREME_FEAR = Decimal(25)
+MARKET_EXTREME_GREED = Decimal(75)
 
 
 def _date(value):
@@ -77,16 +91,81 @@ def _sentiment_changes(sentiment_rows):
     return changes
 
 
-def build_external_factor_truth(rows, *, valuation_rows=(), sentiment_rows=None):
+def _market_regime_changes(market_rows, market_regime_rows):
+    """将原始全市场观测转换为仅由当日及更早数据决定的状态变更。"""
+    market_scores = {}
+    for row in market_rows:
+        day = _date(row["trade_date"])
+        score = _decimal(row["fear_greed_score"])
+        if not Decimal(0) <= score <= Decimal(100):
+            raise ValueError("全市场恐贪分数超出有效范围")
+        if day in market_scores and market_scores[day] != score:
+            raise ValueError("全市场恐贪日期重复")
+        market_scores[day] = score
+
+    by_key = {key: [] for key in MARKET_REGIME_KEYS}
+    for row in market_regime_rows:
+        key = row["factor_key"]
+        if key in by_key:
+            by_key[key].append((_date(row["trade_date"]), _decimal(row["raw_value"])))
+
+    changes = {}
+    regime_days = set()
+    for key, series in by_key.items():
+        ordered = sorted(series)
+        if len({day for day, _ in ordered}) != len(ordered):
+            raise ValueError("全市场环境子因子日期重复")
+        values, previous = [], None
+        for day, value in ordered:
+            values.append(value)
+            regime_days.add(day)
+            item = changes.setdefault(day, {})
+            if key == "volatility":
+                percentile = (
+                    Decimal(100)
+                    * sum(prior < value for prior in values[-252:])
+                    / len(values[-252:])
+                )
+                item["market_ivix_high"] = value >= MARKET_IVIX_HIGH or (
+                    len(values) >= 120 and percentile >= Decimal(80)
+                )
+                item["market_ivix_calm"] = value <= MARKET_IVIX_CALM and (
+                    previous is None
+                    or value <= previous * MARKET_IVIX_FAST_EXPANSION_RATIO
+                )
+                previous = value
+            elif key == "strength":
+                item["market_breadth_weak"] = value <= MARKET_BREADTH_WEAK
+            elif key == "premium":
+                item["market_futures_deep_discount"] = (
+                    value <= MARKET_FUTURES_DEEP_DISCOUNT
+                )
+    return market_scores, changes, regime_days
+
+
+def build_external_factor_truth(
+    rows,
+    *,
+    valuation_rows=(),
+    sentiment_rows=None,
+    market_rows=(),
+    market_regime_rows=(),
+):
     """生成严格早于 ETF 当日的外部因子真值及可得性摘要。"""
     valuation_changes, valuation_metrics = _valuation_changes(valuation_rows)
     sentiment_changes = (
         _sentiment_changes(sentiment_rows) if sentiment_rows is not None else {}
     )
+    market_changes, regime_changes, regime_days = _market_regime_changes(
+        market_rows, market_regime_rows
+    )
     valuation_days = sorted(valuation_changes)
     sentiment_days = sorted(sentiment_changes)
-    valuation_cursor = sentiment_cursor = 0
-    latest_percentiles, latest_sentiment = {}, None
+    market_days = sorted(market_changes)
+    regime_change_days = sorted(regime_changes)
+    valuation_cursor = sentiment_cursor = market_cursor = regime_cursor = 0
+    latest_percentiles, latest_sentiment, latest_market = {}, None, None
+    latest_regime = {factor_id: False for factor_id in MARKET_REGIME_FACTORS}
     pending_rebound = False
     truth = []
 
@@ -101,6 +180,15 @@ def build_external_factor_truth(rows, *, valuation_rows=(), sentiment_rows=None)
             latest_sentiment = sentiment_changes[source_day]
             pending_rebound = pending_rebound or latest_sentiment["rebound"]
             sentiment_cursor += 1
+        while market_cursor < len(market_days) and market_days[market_cursor] < day:
+            latest_market = market_changes[market_days[market_cursor]]
+            market_cursor += 1
+        while (
+            regime_cursor < len(regime_change_days)
+            and regime_change_days[regime_cursor] < day
+        ):
+            latest_regime.update(regime_changes[regime_change_days[regime_cursor]])
+            regime_cursor += 1
 
         item = _empty_truth(row["trade_date"])
         if latest_percentiles:
@@ -129,10 +217,15 @@ def build_external_factor_truth(rows, *, valuation_rows=(), sentiment_rows=None)
             item["sentiment_extreme_greed"] = latest_sentiment["greed"]
             item["sentiment_fear_rebound"] = pending_rebound
             pending_rebound = False
+        if latest_market is not None:
+            item["market_fear_extreme"] = latest_market <= MARKET_EXTREME_FEAR
+            item["market_greed_extreme"] = latest_market >= MARKET_EXTREME_GREED
+        item.update(latest_regime)
         truth.append(item)
 
     valuation_available = bool(valuation_changes)
     sentiment_available = bool(sentiment_changes)
+    market_source_days = set(market_days) | regime_days
     coverage = {
         "valuation": {
             "available": valuation_available,
@@ -162,5 +255,34 @@ def build_external_factor_truth(rows, *, valuation_rows=(), sentiment_rows=None)
             if sentiment_rows is not None
             else {"available": False, "reason": "未建立ETF–恐贪类别映射"}
         ),
+        "market_regime": {
+            "available": bool(market_source_days),
+            "first_source_date": str(min(market_source_days))
+            if market_source_days
+            else None,
+            "last_source_date": str(max(market_source_days))
+            if market_source_days
+            else None,
+            "factors": {
+                key: {
+                    "available": bool(series),
+                    "first_source_date": str(min(day for day, _ in series))
+                    if series
+                    else None,
+                    "last_source_date": str(max(day for day, _ in series))
+                    if series
+                    else None,
+                }
+                for key, series in {
+                    key: [
+                        (_date(row["trade_date"]), _decimal(row["raw_value"]))
+                        for row in market_regime_rows
+                        if row["factor_key"] == key
+                    ]
+                    for key in ("volatility", "bx", "premium", "wz", "strength")
+                }.items()
+            },
+            "as_of_policy": "ETF当日只使用严格早于该日的全市场恐贪与五维源观测；源全历史分位不参与策略真值。",
+        },
     }
     return truth, coverage

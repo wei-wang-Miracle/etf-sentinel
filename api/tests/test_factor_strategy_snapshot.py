@@ -140,6 +140,37 @@ def test_factor_snapshot_passes_optional_benchmark_rows_to_factor_truth_without_
     assert item["factor_context"]["benchmark_rows"][0]["trade_date"] == "2025-01-02"
 
 
+def test_factor_snapshot_preserves_market_regime_observations_and_coverage():
+    from app.factor_strategy_snapshot import build_factor_snapshot_item
+
+    rows = [row("2025-01-02", 10), row("2025-01-03", 10.1)]
+    item, coverage = build_factor_snapshot_item(
+        code="510300",
+        name="沪深300ETF",
+        rows=rows,
+        actions={"dividends": [], "splits": []},
+        indices=["000300.SH"],
+        source={"market_source": "本地行情"},
+        turning={},
+        factor_context={
+            "market_rows": [
+                {"trade_date": "2025-01-02", "fear_greed_score": "20"}
+            ],
+            "market_regime_rows": [
+                {
+                    "factor_key": "volatility",
+                    "trade_date": "2025-01-02",
+                    "raw_value": "23",
+                }
+            ],
+        },
+    )
+
+    assert item["factor_context"]["market_rows"][0]["trade_date"] == "2025-01-02"
+    assert item["factor_truth"][1]["market_fear_extreme"] is True
+    assert coverage["external"]["market_regime"]["available"] is True
+
+
 def test_freeze_only_allows_explicit_three_source_suspension_audit():
     script = Path(__file__).resolve().parents[2] / "scripts" / "freeze_factor_strategy_research.py"
     spec = importlib.util.spec_from_file_location("freeze_factor_strategy_research", script)
