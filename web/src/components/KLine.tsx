@@ -20,7 +20,6 @@ echarts.use([
   MarkPointComponent,
   CanvasRenderer,
 ]);
-import ChartReadout from "./ChartReadout";
 import type { Candle } from "../lib/api";
 import type { DailyAccount } from "../lib/backtests";
 import {
@@ -317,11 +316,12 @@ export default function KLine({
             return (factorsByDate.get(date) ?? []).map((factor, index) => {
               const top = factor.factor_id === "turning_top";
               const bottom = factor.factor_id === "turning_bottom";
-              const color = top ? palette.chart4 : bottom ? palette.chart3 : palette.chart2;
-              return { name: factor.name, value: bottom ? "底确" : top ? "顶确" : factor.name,
+              const recovery = factor.factor_id === "oversold_recovery";
+              const color = top ? palette.chart4 : bottom ? palette.chart3 : recovery ? palette.chart5 : palette.chart2;
+              return { name: factor.name, value: bottom ? "底确" : top ? "顶确" : recovery ? "止跌" : factor.name,
                 coord: [date, top ? candle.high : candle.low], symbol: top || bottom ? "triangle" : factor.output_type === "state" ? "circle" : "diamond", symbolSize: 12,
-                symbolRotate: top ? 180 : 0, symbolOffset: [0, top ? -10 : 10 + index * 12],
-                itemStyle: { color }, label: { show: top || bottom, position: top ? "top" : "bottom", color, fontSize: 12, fontWeight: 600, textBorderColor: palette.surface, textBorderWidth: 3 },
+                symbolRotate: top ? 180 : 0, symbolOffset: [0, top ? -10 : 10 + index * 14],
+                itemStyle: { color }, label: { show: top || bottom || recovery, position: top ? "top" : "bottom", color, fontSize: 12, fontWeight: 600, textBorderColor: palette.surface, textBorderWidth: 3 },
                 tooltip: { formatter: () => `${escapeHtml(factor.name)} · ${escapeHtml(date)}` },
               };
             });
@@ -429,34 +429,12 @@ export default function KLine({
       if (node) echarts.getInstanceByDom(node)?.dispose();
     };
   }, []);
-  const candleByDate = new Map(rows.map(row => [row.date, row]));
-  const holdingByDate = new Map((holdings ?? []).map(row => [row.trade_date, row.estimated_holding_pct]));
-  const positionByDate = new Map((positions ?? []).map((row) => [row.trade_date, row]));
-  const maByDate = new Map<string, Record<string, string>>();
-  MA_WINDOWS.forEach(window => movingAverage(maRows.map(row => Number(row.close)), window).forEach((value, index) => {
-    const values = maByDate.get(maRows[index].date) ?? {};
-    values[`MA${window}`] = value == null ? "—" : formatPrice(value);
-    maByDate.set(maRows[index].date, values);
-  }));
-  const readout = [...new Set([...candleByDate.keys(), ...holdingByDate.keys()])].sort().map(date => {
-    const row = candleByDate.get(date);
-    const values: Record<string, string> = { "开盘（元）": row ? String(row.open) : "—", "最高（元）": row ? String(row.high) : "—", "最低（元）": row ? String(row.low) : "—", "收盘（元）": row ? String(row.close) : "—", "成交量": row ? String(row.volume) : "—", ...maByDate.get(date) };
-    if (positionMode) {
-      delete values["成交量"];
-      Object.assign(values, positionReadout(positionByDate.get(date)));
-    }
-    if (holdings) { const ratio = holdingByDate.get(date); values["国家队估算比例"] = ratio == null ? "—" : `${ratio}%`; }
-    const records = trades.filter(item => item.trade_date === date);
-    if (records.length) values["操作标记"] = records.map(item => `${item.source === "simulation" ? "模拟" : "真实记录"}${item.side === "buy" ? "买入" : "卖出"} ${item.quantity}份 @ ${item.price}`).join("；");
-    for (const factor of factorsByDate.get(date) ?? []) values[factor.name] = factor.meaning;
-    return { date, values };
-  });
   function resetZoom() {
     if (!element.current) return;
     echarts.getInstanceByDom(element.current)?.dispatchAction({ type: "dataZoom", start: 0, end: 100 });
   }
   return (
-    <> <div
+    <><div
       className={`kline ${holdings ? "holdings-comparison-chart" : ""}`}
       ref={element}
       role="img"
@@ -465,6 +443,6 @@ export default function KLine({
           ? "基金日K与国家队估算持仓比例同图双轴对照，共享日期与缩放，缺失不补零"
           : `${indexPoints ? "指数" : "基金"}日K、MA5至MA60均线与${positionMode ? "每日收盘模拟仓位" : "成交量"}，可滚轮缩放，悬停查看同日数值`
       }
-    /><ChartReadout rows={readout} onResetZoom={rows.length ? resetZoom : undefined} /></>
+    />{rows.length > 0 && <div className="chart-aux-bar"><button type="button" className="chart-reset-zoom" onClick={resetZoom}>重置缩放</button></div>}</>
   );
 }

@@ -20,8 +20,7 @@ test("图表维度横向标签支持键盘切换和刷新恢复，按需读取�
   await expect(page).toHaveURL(/tab=funds/);
   await page.reload();
   await expect(page.getByRole("tab", { name: "国家队", exact: true })).toHaveAttribute("aria-selected", "true");
-  await page.getByText("键盘日期读数", { exact: true }).click();
-  await expect(page.locator(".readout-values")).toContainText("0%");
+  await expect(page.getByText("0.00%", { exact: true })).toBeVisible();
 });
 
 test("常规口径提示收在图表下方，不占据指标与图表层级", async ({ page }) => {
@@ -74,17 +73,6 @@ test("390像素下图表保留至少350像素宽，主导航带文字", async ({
   expect(box.y).toBeLessThanOrEqual(640);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
   await expect(page.locator("nav .nav-text").first()).toBeVisible();
-});
-
-test("日K提供可键盘操作的日期读数，不能只靠悬停", async ({ page }) => {
-  await page.goto(detailUrl);
-  await page.getByText("键盘日期读数", { exact: true }).click();
-  const select = page.getByLabel("读数日期", { exact: true });
-  await expect(select).toBeVisible();
-  const last = await select.inputValue();
-  await page.getByRole("button", { name: "上一日", exact: true }).click();
-  await expect(select).not.toHaveValue(last);
-  await expect(page.getByText(/收盘（元）/).last()).toBeVisible();
 });
 
 test("启用策略尚未生成信号时不能提示无策略", async ({ page }) => {

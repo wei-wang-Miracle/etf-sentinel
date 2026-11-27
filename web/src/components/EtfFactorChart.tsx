@@ -18,7 +18,7 @@ type Props = {
 type FactorDates = { events: FactorEvent[]; data_cutoff: string | null; partial: boolean; warmup_insufficient: boolean };
 type FactorCatalog = { factors: (FactorIdentity & { chart_visible: boolean; output_type: string })[] };
 const NO_TRADES: NonNullable<Props["trades"]> = [];
-const DEFAULT_FACTORS = ["turning_bottom", "turning_top"];
+const DEFAULT_FACTORS = ["turning_bottom", "turning_top", "oversold_recovery"];
 
 export default function EtfFactorChart({ history, start, end, theme, instrumentCode, trades = NO_TRADES, controls }: Props) {
   const catalog = useApiResource<FactorCatalog>("/factors");
@@ -78,7 +78,7 @@ export default function EtfFactorChart({ history, start, end, theme, instrumentC
               <div className="factor-popover-header">
                 <strong>可观察因子图层</strong>
                 <div className="factor-popover-actions">
-                  <button type="button" onClick={() => setVisible(DEFAULT_FACTORS)}>仅看顶底</button>
+                  <button type="button" onClick={() => setVisible(DEFAULT_FACTORS)}>恢复默认</button>
                   <button type="button" disabled={!visible.length} onClick={() => setVisible([])}>清空</button>
                   <button type="button" onClick={() => { setOpen(false); triggerRef.current?.focus(); }}>收起</button>
                 </div>

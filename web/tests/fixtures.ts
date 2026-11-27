@@ -11,6 +11,7 @@ export const factorCatalog = {
     { id: "turning_bottom", name: "阶段底部确认" },
     { id: "turning_top", name: "阶段顶部确认" },
     { id: "volume_breakout_up", name: "放量向上突破" },
+    { id: "oversold_recovery", name: "超跌后止跌修复" },
   ].map((factor) => ({ ...factor, category: "结构确认", meaning: "仅用于观察。", chart_visible: true, output_type: "event" })),
 };
 export const catalog = {

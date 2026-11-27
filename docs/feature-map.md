@@ -45,7 +45,7 @@
 | ETF 统一标的配置 | 数据基础 | 已实现 | 预置 23 只；输入六位代码，ETF 行情源确认后登记并尝试启动任务1；可查采集记录和入库区间，直达日 K 观察因子。不自动建立估值或国家队映射、不创建或启用策略 | [配置页](../web/src/pages/Instruments.tsx)、[标的接口](../api/app/main.py)、[功能说明](daily-data.md) |
 | 定时历史日行情与权益批量核验 | 数据基础 | 已实现 | 行情仅采集启用标的；任务1随后核验全部配置ETF权益，逐只提交并分别记录；权益失败不回滚行情；PostgreSQL、ChatBI、分区间恢复与互斥 | [采集](../api/app/collection.py)、[调度](../api/app/jobs.py)、[说明](daily-data.md)、[迁移](../api/migrations/versions/0001_daily_data.py) |
 | 日 K 与成交量展示 | 投研分析 | 已实现 | 依赖本地行情；以前复权 OHLC 连续展示已核验份额折算，MA5/10/20/30/60基于展示序列，成交量保留源数值；不提供实时行情 | [行情页](../web/src/pages/Market.tsx)、[图表](../web/src/components/KLine.tsx) |
-| 行情因子观察 | 投研分析 | 已实现 | 11 项可观察事件或状态，默认顶底、允许同日叠加、键盘读数，显示权益覆盖和缺失状态；开关只影响图层 | [因子目录](../api/app/research_factors.py)、[行情接口](../api/app/main.py)、[图层](../web/src/components/EtfFactorChart.tsx)、[顶底说明](turning-points.md) |
+| 行情因子观察 | 投研分析 | 已实现 | 11 项可观察事件或状态，默认阶段顶底与超跌后止跌修复、允许同日叠加，显示权益覆盖和缺失状态；开关只影响图层 | [因子目录](../api/app/research_factors.py)、[行情接口](../api/app/main.py)、[图层](../web/src/components/EtfFactorChart.tsx)、[顶底说明](turning-points.md) |
 | ETF顶底参数模板与历史检验 | 策略研究 | 已实现 | 20只宽基ETF按跟踪指数映射六类固定参数模板，属于统一顶底因子的敏感度差异，不提供第二套前端算法或来源切换；50轮历史研究总体58.1%（61/105），近期观察不足以证明80% | [指标说明](turning-points.md)、[50轮分类检验](turning-points-validation.md)、[算法模板](../api/app/algorithm_templates.py) |
 | 当前策略分配与盘前计划 | 策略研究 | 已实现 | 显式采用后生成后续计划，按策略分配和执行日保留首份，历史计划及人工交易核对保留证据；迁移0018清理旧策略域 | [信号](../api/app/strategy_lab.py)、[迁移0018](../api/migrations/versions/0018_strategy_factor_architecture.py) |
 | 宽基 ETF 箱体突破优化验证 | 策略研究 | 已实现 | 30 轮离线候选，共用回测引擎；20 只 ETF 的留出验证暂无标的达到 80% 胜率门槛 | [验证报告](range-breakout-validation.md)、[复现脚本](../scripts/research_range_breakout.py) |

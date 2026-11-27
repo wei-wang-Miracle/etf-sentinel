@@ -125,13 +125,18 @@ export default function ResearchObject({ theme, code, summary, loading, error, r
                     : <SentimentTrend rows={sentiment!} theme={theme} />}
             </>}
       </div>
-      <ChartCaption title={`${summary.object.name} · ${code} · 日频`} meta={`${start} 至 ${end} · ${source}${tab === "price" ? " · 前复权 OHLC 展示；顶底确认使用因果复权价格" : tab === "funds" ? " · 复权口径未确认" : ""}`} />
+      <ChartCaption title={`来源：${source}`} meta={tab === "price" ? "前复权 OHLC" : tab === "funds" ? "复权口径未确认" : "日频"} />
       <details className="research-evidence"><summary>数据来源与使用边界</summary>
         {summary.warnings.map(message => <p key={message}>{message}</p>)}
-        <p>最新摘要按各自源日期展示，不代表所选历史时点已知；图表仅展示所选日期区间。数据截止日期保留在各指标旁。</p>
-        <p>行情来源：财通证券。行情标签页以源复权收盘比率生成前复权 OHLC，消除已核验份额折算带来的图形断层；顶底确认按交易日可得的因果复权价格计算。个人记录为本地只读同步，未确认成交所属日前的标记仅用于核对。国家队为固定基准估算比例，零份额下为空；恐贪保留源类别和标签，不推断分类阈值。</p>
-        <p>估值来源：韭圈；本地分位以截至各日十日历年有效样本统计，显示区间不改变回看窗口。修订历史不冒充原时点可得数据。</p>
-        <AppLink href={journeyUrl("etfs", code, { auxiliary: "compare", dimension: tab === "funds" ? "holdings" : tab === "price" ? "trend" : tab, start, end })}>进入跨 ETF 对比</AppLink>
+        {tab === "price" ? (
+          <p>行情取自财通证券历史日频数据，按源复权收盘比率前复权展示；个人成交标记仅作叠加核对。</p>
+        ) : tab === "valuation" ? (
+          <p>估值取自韭圈，本地分位按截至当日的十日历年有效样本统计，切换显示区间不改变统计窗口。</p>
+        ) : tab === "funds" ? (
+          <p>国家队比例为固定基准估算值，不代表真实持仓；零份额时显示为空。</p>
+        ) : (
+          <p>行业恐贪保留源类别与标签作为市场背景参考，不直接映射为单只 ETF 买卖信号。</p>
+        )}
       </details>
     </>}
     </Tabs>

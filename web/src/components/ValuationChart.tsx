@@ -9,7 +9,6 @@ import {
   LegendComponent,
 } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
-import ChartReadout from "./ChartReadout";
 import { readChartPalette } from "../lib/chart";
 import type { ValuationPoint } from "../pages/IndexValuations";
 import type { Candle } from "../lib/api";
@@ -183,6 +182,6 @@ export default function ValuationChart({
       ref={element}
       role="img"
       aria-label={`${title}、指数点位与本地回看分位，可缩放及悬停查看`}
-    /><ChartReadout rows={rows.map(row => ({ date: row.trade_date, values: { [title]: row.value == null ? "—" : `${row.value} ${unit}`, "本地十年回看分位": row.local_percentile == null ? "—" : `${row.local_percentile}%`, "指数收盘点位": String(candles.find(item => item.date === row.trade_date)?.close ?? "—") } }))} onResetZoom={resetZoom} /></>
+    /><div className="chart-aux-bar"><button type="button" className="chart-reset-zoom" onClick={resetZoom}>重置缩放</button></div></>
   );
 }

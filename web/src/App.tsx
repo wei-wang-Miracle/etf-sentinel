@@ -135,10 +135,6 @@ export default function App() {
         <main id="workspace-main">
           {page === "strategies" ? <MyStrategies theme={theme} /> : page === "data" ? <DataManagement /> : new URLSearchParams(location.search).get("auxiliary") === "compare" ? <Compare theme={theme} /> : <MyEtfs theme={theme} />}
         </main>
-        <div className="workspace-footer">
-          <span>投研工作台</span>
-          <span>数据有来源，研究可追溯</span>
-        </div>
       </div>
     </div>
   );

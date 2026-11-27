@@ -218,8 +218,13 @@ export default function Compare({ theme }: { theme: string }) {
                   <strong>{result.meta.unit}</strong>
                 </div>
               </div>
-              {dimension === "valuation" && <p className="muted">独立关联指数来源 {result.universe.independent_sources ?? 0} 个；ETF行数不代表独立信息数量。</p>}
-              {dimension !== "sentiment" && <p className="muted">持仓快照：{result.universe.holdings_as_of ?? "尚未同步"}；快照日期不等于当前实时持仓。研究资金每只50,000元，实际持仓按同步记录。</p>}
+              {(dimension === "valuation" || dimension !== "sentiment") && (
+                <p className="muted">
+                  {dimension === "valuation" ? `独立关联指数 ${result.universe.independent_sources ?? 0} 个` : ""}
+                  {dimension === "valuation" ? " · " : ""}
+                  {dimension !== "sentiment" ? `持仓快照：${result.universe.holdings_as_of ?? "未同步"}` : ""}
+                </p>
+              )}
               {result.items.length === 0 && dimension !== "factors" && <div className="empty">{scope === "held" && dimension !== "sentiment" ? "暂无当前正持仓ETF，请同步账户或选择全部配置。" : "当前范围暂无数据。"}</div>}
               {result.warnings.map((message) => (
                 <p className="muted" key={message}>
@@ -391,13 +396,9 @@ export default function Compare({ theme }: { theme: string }) {
                 </>
               )}
               <ChartCaption
-                title={`${dimensions[dimension]} · 日频 · ${result.meta.unit}`}
-                meta={`${result.start} 至 ${result.end} · ${result.meta.source} · 查看时间 ${new Date().toLocaleString("zh-CN")}`}
+                title={`来源：${result.meta.source}`}
+                meta={`${result.start} 至 ${result.end} · ${result.meta.unit}`}
               />
-              <p className="muted">
-                来源：{result.meta.source} · {result.meta.stale_rule} ·
-                仅供研究，不构成投资建议。
-              </p>
             </>
           )
         )}

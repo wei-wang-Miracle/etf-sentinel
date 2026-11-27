@@ -59,17 +59,15 @@ test("仓位柱显示空仓、持续半仓及缺失日，固定百分比轴并�
   expect(zoomed.zoom[0].end).toBe(60);
 });
 
-test("悬停与键盘读数展示同日份额市值现金，缺失不冒充空仓", async ({ page }) => {
+test("悬停展示同日份额市值现金，缺失不冒充空仓", async ({ page }) => {
   await openComparison(page);
   await chartState(page, { type: "showTip", seriesIndex: 0, dataIndex: 1 });
   for (const text of ["收盘模拟仓位 48.00%", "持有份额 4,800 份", "持仓市值 24,000.00 元", "剩余现金 26,000.00 元"]) await expect(page.locator(".kline").last()).toContainText(text);
-  const readout = page.locator(".kline + .chart-readout").last();
-  await readout.getByText("键盘日期读数", { exact: true }).click();
-  await readout.getByLabel("读数日期").selectOption(days[4]);
-  await expect(readout).toContainText("0.00%（空仓）");
-  await readout.getByLabel("读数日期").selectOption(days[5]);
-  await expect(readout).toContainText("缺失");
-  await expect(readout).not.toContainText("0.00%");
+  await chartState(page, { type: "showTip", seriesIndex: 0, dataIndex: 4 });
+  await expect(page.locator(".kline").last()).toContainText("0.00%（空仓）");
+  await chartState(page, { type: "showTip", seriesIndex: 0, dataIndex: 5 });
+  await expect(page.locator(".kline").last()).toContainText("缺失");
+  await expect(page.locator(".kline").last()).not.toContainText("0.00%");
 });
 
 test("切换策略同步仓位，叠加真实标记不改模拟仓位，无成交仍显示账本", async ({ page }) => {
@@ -108,10 +106,8 @@ for (const [theme, width] of [["light", 1440], ["dark", 390]] as const) {
 test("旧快照缺少市值字段不推算，已有仓位及零现金仍可阅读", async ({ page }) => {
   const legacy = { ...half, account: { ...half.account, daily: half.account.daily.map(({ market_value: _marketValue, ...row }) => ({ ...row, cash: "0" })) } };
   await openComparison(page, { ...snapshot, tracks: [legacy] });
-  const readout = page.locator(".kline + .chart-readout").last();
-  await readout.getByText("键盘日期读数", { exact: true }).click();
-  await readout.getByLabel("读数日期").selectOption(days[1]);
-  await expect(readout.locator(".readout-values > div").filter({ hasText: "持仓市值" })).toContainText("缺失");
-  await expect(readout.locator(".readout-values > div").filter({ hasText: "剩余现金" })).toContainText("0.00 元");
-  await expect(readout).toContainText("48.00%");
+  await chartState(page, { type: "showTip", seriesIndex: 0, dataIndex: 1 });
+  await expect(page.locator(".kline").last()).toContainText("持仓市值 缺失");
+  await expect(page.locator(".kline").last()).toContainText("剩余现金 0.00 元");
+  await expect(page.locator(".kline").last()).toContainText("48.00%");
 });

@@ -1,7 +1,7 @@
 export default function ChartCaption({
   title,
   meta,
-  disclaimer = "仅供研究，不构成投资建议",
+  disclaimer = "",
 }: {
   title: string;
   meta: string;
@@ -11,9 +11,9 @@ export default function ChartCaption({
     <div className="chart-caption">
       <span>
         <strong>{title}</strong>
-        <span> · {meta}</span>
+        {meta ? <span> · {meta}</span> : null}
       </span>
-      <span className="chart-disclaimer">{disclaimer}</span>
+      {disclaimer ? <span className="chart-disclaimer">{disclaimer}</span> : null}
     </div>
   );
 }

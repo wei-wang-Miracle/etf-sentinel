@@ -232,9 +232,7 @@ export default function EtfReview({ theme, fixedObject = false }: { theme: strin
         </label>
         <button disabled={refreshingSource} onClick={() => void refreshSource()}>{refreshingSource ? "更新中…" : "更新本标的权益资料"}</button>
       </div>
-      <p className="muted">
-        仅在有对账依据时确认；确认只用于本次核算，不修改源数据，也不能替代同步、T+1、费用和数量检查。
-      </p>
+      <p className="muted">仅在有对账依据时确认，不修改源数据。</p>
       {loading ? (
         <div className="empty" role="status">
           正在核验完整历史…
@@ -326,16 +324,11 @@ export default function EtfReview({ theme, fixedObject = false }: { theme: strin
               </>
             )}
             {candles.length > 0 && (
-              <>
-                <KLine rows={candles} trades={result.markers} theme={theme} />
-                <p className="muted">
-                  原始日K，复权口径未确认；买卖标记使用委托日，未确认成交日期前仅供核对，不代表精确成交时刻。
-                </p>
-              </>
+              <KLine rows={candles} trades={result.markers} theme={theme} />
             )}
             <ChartCaption
-              title={`${code} · 真实项目日频复盘`}
-              meta={`${result.start} 至 ${result.end} · 本地账户累计委托及财通证券收盘／公开权益 · 现金流金额非净值 · 查看时间 ${new Date().toLocaleString("zh-CN")}`}
+              title={`${code} · 原始日 K 与委托标记`}
+              meta={`${result.start} 至 ${result.end} · 复权口径未确认`}
             />
             <details>
               <summary>数据质量与核算依据</summary>
@@ -461,8 +454,7 @@ export default function EtfReview({ theme, fixedObject = false }: { theme: strin
             ))}
           </div>
           <p className="muted">
-            {research.note} · 已保存实验 {research.experiment_ids.join("、")}
-            ，可在策略回测页查看并以快照复算。仅供研究，不构成投资建议。
+            已保存实验 {research.experiment_ids.join("、")}，可在策略回测页复算。
           </p>
         </>
       )}

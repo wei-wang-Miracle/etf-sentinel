@@ -10,7 +10,6 @@ import {
 } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
 import { api, stamp } from "../lib/api";
-import ChartReadout from "../components/ChartReadout";
 import ChartCaption from "../components/ChartCaption";
 import { escapeHtml, chartStamp, readChartPalette } from "../lib/chart";
 
@@ -214,12 +213,12 @@ export function SentimentTrend({ rows, theme }: { rows: Daily[]; theme: string }
     };
   }, [rows, theme]);
   return (
-    <><div
+    <div
       ref={element}
       className="sentiment-chart"
       role="img"
       aria-label="恐贪分数与指数点位双轴历史图，左轴分数0至100，右轴指数点位，共享日期和缩放"
-    /><ChartReadout rows={rows.map(row => ({ date: row.trade_date, values: { "恐贪分数": String(row.fear_greed_score), "指数点位": row.close_price == null ? "—" : String(row.close_price) } }))} /></>
+    />
   );
 }
 export default function Sentiment({

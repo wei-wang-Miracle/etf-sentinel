@@ -58,7 +58,7 @@ export default function DailySignals({ code, compact = false, catalog }: { code?
   </section>;
 
   return <section className="signals-workspace" aria-label="每日信号与执行记录">
-    <div className="signal-heading"><div><h2>每日信号</h2><p className="muted">{job.loading ? "任务状态读取中" : job.error ? "任务状态未取得" : !job.data?.enabled ? "每日自动运行已暂停" : job.data.next_run ? `下次任务：${stamp(job.data.next_run)}` : "下次运行时间待核验"} · 北京时间 · 不自动下单</p></div><button disabled={busy || signals.loading || !activeKnown || !hasActive} onClick={() => void generate()}>{busy ? "核验数据并计算…" : "检查并生成盘前信号"}</button></div>
+    <div className="signal-heading"><div><h2>每日信号</h2><p className="muted">{job.loading ? "任务状态读取中" : job.error ? "任务状态未取得" : !job.data?.enabled ? "每日自动运行已暂停" : job.data.next_run ? `下次任务：${stamp(job.data.next_run)}` : "下次运行时间待核验"} · 北京时间</p></div><button disabled={busy || signals.loading || !activeKnown || !hasActive} onClick={() => void generate()}>{busy ? "核验数据并计算…" : "检查并生成盘前信号"}</button></div>
     {shown.length > 0 && <p className="context-note">{summaryText}</p>}
     <div className="signal-controls"><div className="segmented" role="group" aria-label="信号记录范围"><button aria-pressed={view === "current"} onClick={() => setView("current")}>适用计划</button><button aria-pressed={view === "history"} onClick={() => setView("history")}>历史记录</button></div><AppLink href={dataManagementUrl("jobs", "strategy-signals", code)}>检查信号任务</AppLink></div>
     {error && <p className="alert" role="alert">{error}</p>}
@@ -82,20 +82,19 @@ export default function DailySignals({ code, compact = false, catalog }: { code?
           {!isCurrent && <p className="notice warning">这是历史计划，或所属算法已不再启用；仅用于复盘，不作为今天的操作指令。</p>}
           <dl className="journey-metrics"><div><dt>适用交易日</dt><dd>{row.execution_date}</dd></div><div><dt>数据截止</dt><dd>{row.data_cutoff}</dd></div><div><dt>生成时间</dt><dd>{stamp(row.generated_at)}</dd></div><div><dt>事件状态</dt><dd>{row.plan.new_trigger == null ? "待核验" : row.plan.new_trigger ? "本次新触发" : "延续上一轮目标"}</dd></div></dl>
           <p className="signal-reason">{row.plan.reason}</p>
-          {row.plan.new_trigger === false && <p className="muted">沿用本轮参考份额；不是今天新触发的买卖事件，持续持有不每日按价调仓。</p>}
+          {row.plan.new_trigger === false && <p className="muted">延续上一轮仓位状态。</p>}
           {hasModel && <section aria-label="模型仓位参考">
             <dl className="journey-metrics"><div><dt>模型参考成本</dt><dd>{number(model.model_entry_price)}{model.model_entry_price == null ? "" : " 元"}</dd></div>
               <div><dt>模型持有收益</dt><dd>{percent(safeModelReturn)}</dd></div>
               <div><dt>模型状态起始日</dt><dd>{model.model_state_start ?? "—"}</dd></div>
             </dl>
-            <p className="muted">模型持有收益是模拟估算值，不代表真实账户收益。</p>
-            {typeof model.model_basis === "string" && <p className="muted">{model.model_basis}</p>}
+            <p className="muted">模拟估算，非真实账户收益{typeof model.model_basis === "string" ? ` · ${model.model_basis}` : ""}</p>
           </section>}
           <dl className="journey-metrics"><div><dt>参考目标</dt><dd>{quantityUnknown || row.plan.target_quantity == null ? "方向已计算，数量待核验" : `${number(row.plan.target_quantity, 0)} 份`}</dd></div><div><dt>真实／可用份额</dt><dd>{quantityUnknown ? "尚无完整仓位证据" : `${number(row.plan.actual_quantity, 0)}／${number(row.plan.available_quantity, 0)}`}</dd></div></dl>
-          {row.plan.funding_check_required && <p className="notice warning">买入前须人工核验可用现金，研究本金不代表实际可用资金。</p>}
+          {row.plan.funding_check_required && <p className="notice warning">买入前请核验真实可用现金。</p>}
           {(row.plan.warnings ?? []).map((warning, index) => <p className="notice warning" key={index}>{warning}</p>)}
           {row.plan.conditions && <details><summary>算法因子状态与当时数值</summary>{(["buy", "sell"] as const).map((group) => <section key={group}><h4>{group === "buy" ? "买入" : "卖出"}判断</h4>{row.plan.conditions?.[group].length ? row.plan.conditions[group].map((item, index) => <p key={index}>{item.label}：{item.satisfied == null ? "未知" : item.satisfied ? "满足" : "不满足"}；当时数值 {item.value ?? "缺失"}</p>) : <p className="muted">无因子记录</p>}</section>)}</details>}
-          <details><summary>仓位与生成依据</summary><p>{row.plan.position_basis ?? "仓位依据待核验"} · 日计划 #{row.id}</p><p>计划不等于订单或成交，累计委托只作为匹配候选；卖出以可用份额为约束。</p></details>
+          <details><summary>仓位与生成依据</summary><p>{row.plan.position_basis ?? "仓位依据待核验"} · 日计划 #{row.id}</p></details>
           {!quantityUnknown && <ExecutionForm signal={row} refresh={refresh} report={setError} />}
           {row.skip_note && <p>主动跳过：{row.skip_note}</p>}
           {row.execution.links.map((link) => <p key={link.id} className={link.source_revised ? "notice warning" : "muted"}>已关联委托 {link.entrust_no} · {link.confirmed_trade_date} · {link.source_revised ? "源数量已修订，请重新核对" : link.confirmation_note}</p>)}

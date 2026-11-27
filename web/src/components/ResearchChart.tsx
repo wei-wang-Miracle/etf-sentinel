@@ -10,7 +10,6 @@ import {
   AriaComponent,
 } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
-import ChartReadout from "./ChartReadout";
 import { readChartPalette } from "../lib/chart";
 
 echarts.use([
@@ -107,7 +106,7 @@ export default function ResearchChart({
       ref={element}
       role="img"
       aria-label={`${unit}时序对比，缺失不连线，支持缩放和悬停`}
-    /><ChartReadout rows={[...new Set(series.flatMap(row => row.points.map(([day]) => day)))].sort().map(date => ({ date, values: Object.fromEntries(series.map(row => { const value = row.points.find(([day]) => day === date)?.[1]; return [row.name, value == null ? "—" : `${value.toFixed(2)} ${unit}`]; })) }))} onResetZoom={resetZoom} /></>
+    /><div className="chart-aux-bar"><button type="button" className="chart-reset-zoom" onClick={resetZoom}>重置缩放</button></div></>
   ) : (
     <div className="empty">所选对象在此区间无可绘制序列</div>
   );

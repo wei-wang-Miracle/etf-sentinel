@@ -116,7 +116,7 @@ export default function AlgorithmBacktest({ catalog, code, algorithm, range, the
         </fieldset>}
         {!!available.length && !choices.length && <p className="notice warning">请至少选择一套算法后再运行回测。</p>}
         <div className="journey-section-heading algorithm-run">
-          <p className="muted">统一口径：本金 ¥50,000，佣金万分之一，最低佣金 ¥0，滑点 5 基点。收盘判定，下一交易日开盘模拟成交。</p>
+          <p className="muted">统一口径：¥50,000 本金 · 佣金万一 · 滑点 5bp · 次日开盘成交</p>
           <button className="primary" type="submit" disabled={busy || !!saving || !ready}>{busy ? "正在计算…" : "运行回测"}</button>
         </div>
       </form>
@@ -127,7 +127,7 @@ export default function AlgorithmBacktest({ catalog, code, algorithm, range, the
     {historical.loading && <p className="notice" role="status">正在读取回测快照…</p>}
     {historical.error && <p className="notice warning" role="alert">{historical.error} <button onClick={historical.retry}>重试</button></p>}
     {pending && !historicalId && !stale && <section ref={confirmRef} tabIndex={-1} className="notice" aria-label="确认采用策略">
-      <p>{assignment && assignment.strategy_id !== pending.strategy_id ? "替换当前策略为" : "采用"}「{pending.name}」用于 <span className="mono">{code}</span> 的后续盘前信号。历史计划保留，不会下单。</p>
+      <p>{assignment && assignment.strategy_id !== pending.strategy_id ? "替换当前策略为" : "采用"}「{pending.name}」用于 <span className="mono">{code}</span> 的后续盘前信号（保留历史计划）。</p>
       <div className="journey-actions"><button className="primary" disabled={!!saving} onClick={() => void adopt()}>确认采用</button><button disabled={!!saving} onClick={() => setPending(undefined)}>取消</button></div>
     </section>}
     <div ref={resultRef}>

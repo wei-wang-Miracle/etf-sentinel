@@ -99,7 +99,7 @@ export default function StrategyComparison({ result, theme, renderAdoption }: {
     <div className="journey-section-heading"><div><h2>同一只 ETF，比较不同算法</h2><p className="muted mono">{code} · {start} 至 {end} · 研究本金 {number(result.settings.initial_cash)} 元</p></div><button disabled={verifying} onClick={() => void verify()}>{verifying ? "复算中…" : "核验这次比较"}</button></div>
     {!result.complete && <p className="notice warning">本次比较不完整，失败对象保留如下；不能将失败当作零收益。</p>}
     {verification && <p className={verifyFailed ? "notice warning" : "notice"} role={verifyFailed ? "alert" : "status"}>{verification}</p>}
-    <p className="notice">行情数据截止：{result.data_cutoff ?? "未提供"}。{result.note ?? "历史结果为回测模拟，不代表实际收益。"} 实验模板的历史拟合不证明未来达到 80% 胜率。</p>
+    <p className="notice">数据截止：{result.data_cutoff ?? "未提供"} · {result.note ?? "历史回测模拟，不代表实际收益。"}</p>
     <div className="strategy-matrix" role="region" aria-label="算法指标对照滚动区域" tabIndex={0}><table aria-label="算法指标对照"><thead><tr><th>比较指标</th>{result.tracks.map((row) => <th key={row.key}>{row.name}<p className="muted">{row.strategy_id === "hold" ? "持有参照" : "历史回测模拟"}</p></th>)}</tr></thead><tbody>
       {metricRows.map(([label, value]) => <tr key={label}><th scope="row">{label}</th>{result.tracks.map((row) => <td key={row.key}>{value(row)}</td>)}</tr>)}
       <tr><th scope="row">模拟交易解释</th>{result.tracks.map((row) => <td key={row.key}>{row.account ? <button onClick={() => { setSelected(row.key); setTradeIndex(0); tradePanel.current?.focus({ preventScroll: true }); tradePanel.current?.scrollIntoView({ block: "start" }); }} aria-pressed={track?.key === row.key}>查看买卖点</button> : "计算失败"}</td>)}</tr>
@@ -111,13 +111,13 @@ export default function StrategyComparison({ result, theme, renderAdoption }: {
     <section className="panel">
       <div className="panel-header"><h2>资金曲线与回撤</h2><div className="journey-actions"><button aria-pressed={field === "nav"} onClick={() => setField("nav")}>研究净值</button><button aria-pressed={field === "drawdown"} onClick={() => setField("drawdown")}>回撤</button></div></div>
       <ResearchChart theme={theme} unit={field === "nav" ? "净值" : "%"} series={tracks.map((row) => ({ name: `${row.name} · 模拟`, points: row.account!.daily.map((day) => [day.trade_date, day[field] * (field === "nav" ? 1 : 100)]) }))} />
-      <ChartCaption title="同 ETF 算法对比" meta={`${code} · ${start}—${end} · 同区间、本金、成本和输入快照；最大回撤为阶段高点之后的最大跌幅`} />
+      <ChartCaption title="净值与回撤对比" meta={`${code} · ${start}—${end}`} />
     </section>
     <section ref={tradePanel} tabIndex={-1} className="panel algorithm-trade-panel">
       <div className="panel-header"><h2>{track?.name ?? "策略"} · 模拟买卖点</h2><label className="switch"><input type="checkbox" checked={showActual} onChange={(e) => setShowActual(e.target.checked)} />叠加真实操作</label></div>
       {candles.length ? <KLine rows={candles} theme={theme} positions={track?.account?.daily ?? []} onTrade={setTradeIndex} trades={klineTrades} /> : <div className="empty">本次比较未取得有效行情快照，无法绘制日 K</div>}
       {track?.account && !track.account.daily.some((day) => day.position_weight != null && Number.isFinite(day.position_weight)) && <p className="muted" role="status">模拟仓位账本缺失，无法展示每日仓位。</p>}
-      <ChartCaption title={`${code} · 日 K、买卖点与模拟仓位`} meta="财通证券原始日行情的本次保存快照 · 复权口径未确认 · 模拟为三角标记，真实为图钉标记；真实标记日期为累计委托所属日，待核验；副图为每日收盘模拟仓位＝持仓市值÷账户总资产（含保留现金与应收分红），缺失不补零；叠加真实操作不改变模拟仓位" />
+      <ChartCaption title="模拟买卖点与收盘仓位" meta="三角为模拟成交，图钉为真实委托；副图为每日收盘模拟仓位占比" />
       {track?.account?.trades.length ? <div className="journey-inset"><label>逐次交易解释 <select value={tradeIndex} onChange={(e) => setTradeIndex(Number(e.target.value))}>{track.account.trades.map((row, index) => <option key={index} value={index}>{row.trade_date} · {row.side === "buy" ? "买入" : "卖出"} · {row.quantity} 份</option>)}</select></label>{trade && <p>信号日 <span className="mono">{trade.signal_date ?? "区间首日参照"}</span> → 模拟执行 <span className="mono">{trade.trade_date}</span>；{trade.reason}；价格 {trade.price} 元，佣金 {trade.commission} 元。</p>}</div> : <p className="journey-inset muted">这条策略在所选区间没有模拟成交。</p>}
     </section>
     <details className="panel journey-inset">

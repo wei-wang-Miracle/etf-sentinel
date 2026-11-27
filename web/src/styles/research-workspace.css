@@ -40,6 +40,11 @@ button[aria-pressed="true"], button[role="tab"][aria-selected="true"] { backgrou
 .object-actions { display: flex; gap: 10px; align-items: end; }
 .object-selector { display: flex; flex-direction: row; align-items: center; gap: 8px; font-size: 13px; color: var(--color-ink-muted); }
 .object-selector select { max-width: 250px; }
+@media (max-width: 1200px) and (min-width: 601px) {
+ .object-actions { gap: 8px; }
+ .object-actions .button-link { padding: 6px 10px; }
+ .object-selector select { max-width: 165px; }
+}
 .evidence-strip { width: 100%; display: flex; gap: 8px 20px; flex-wrap: wrap; color: var(--color-ink-muted); font-size: 13px; border-bottom: 1px solid var(--color-border); padding-bottom: 10px; }
 .research-controls { display: flex; align-items: end; flex-wrap: wrap; gap: 10px; }
 .research-tab-controls { display: flex; align-items: end; flex-wrap: wrap; gap: 8px 16px; }
@@ -56,13 +61,8 @@ button[aria-pressed="true"], button[role="tab"][aria-selected="true"] { backgrou
 .dossier-chart .kline, .dossier-chart .sentiment-chart { height: 480px; width: 100%; }
 .chart-local-controls { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
 .chart-local-controls label { display: flex; gap: 6px; align-items: center; }
-.chart-readout, .research-evidence { border-top: 1px solid var(--color-border); padding: 10px 0; margin-top: 8px; }
+.research-evidence { border-top: 1px solid var(--color-border); padding: 10px 0; margin-top: 8px; }
 summary { cursor: pointer; min-height: 32px; color: var(--color-ink-muted); }
-.readout-controls { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; }
-.readout-controls label { display: flex; flex-direction: column; }
-.readout-values { display: flex; gap: 12px 24px; flex-wrap: wrap; }
-.readout-values dd { margin: 0; font-family: var(--font-mono); }
-.readout-values dt { color: var(--color-ink-muted); }
 .research-evidence p { margin: 8px 0; color: var(--color-ink-muted); }
 .turning-controls { justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px 12px; margin-bottom: 2px; position: relative; }
 .factor-toolbar-left { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; flex: 1 1 auto; }
@@ -90,7 +90,10 @@ summary { cursor: pointer; min-height: 32px; color: var(--color-ink-muted); }
 .factor-option-cat { font-size: 12px; color: var(--color-ink-muted); }
 .factor-meaning-bar { padding: 10px 14px; border-top: 1px solid var(--color-border); background: var(--color-surface); font-size: 12px; line-height: 1.6; color: var(--color-ink-muted); border-radius: 0 0 8px 8px; }
 .factor-meaning-bar strong { color: var(--color-ink); margin-right: 6px; }
-.chart-reset-zoom { min-height: 32px; padding: 2px 10px; font-size: 12px; }
+.chart-reset-zoom { min-height: 28px; padding: 2px 10px; font-size: 12px; }
+.chart-aux-bar { display: flex; justify-content: flex-end; margin-top: 6px; }
+.job-rule-details { padding: 8px 16px; border-top: 1px solid var(--color-border); font-size: 12px; color: var(--color-ink-muted); }
+.job-rule-details p { margin-top: 6px; line-height: 1.65; }
 .turning-controls > label, .factor-toolbar-right label { min-height: 24px; display: inline-flex; align-items: center; gap: 6px; }
 .turning-controls > label > input, .factor-toolbar-right label > input { min-height: 0; }
 @media (max-width: 680px) {
