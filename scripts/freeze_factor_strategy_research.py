@@ -4,13 +4,14 @@ import argparse
 import hashlib
 import json
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "api"))
 
 MIN_ROWS = 67
+MIN_SUSPENSION_AUDIT_SOURCES = 3
 
 
 def digest(path):
@@ -22,7 +23,7 @@ def write(path, value):
 
 
 def _verified_suspensions_for(code, report_data, actual_days):
-    """基于三源对比审计报告核验缺失日是否确为全网一致无交易的停牌日。"""
+    """只放行三方报告逐日确认均无成交的真实停牌日。"""
     from app.backtest_data import trading_days
 
     if not actual_days:
@@ -38,20 +39,32 @@ def _verified_suspensions_for(code, report_data, actual_days):
     if not item or item.get("status") != "ok":
         raise ValueError(f"{code} 未通过免费源验证报告，不能放行停牌日 {missing}")
 
-    cross = item.get("cross_check") or {}
-    peers = cross.get("peers") or {}
-    if not peers:
-        raise ValueError(f"{code} 缺少可用横向对照源，不能放行停牌日 {missing}")
-
-    peer_present_missing = {
-        day
-        for peer_info in peers.values()
-        for day in (peer_info.get("primary_missing_dates") or [])
+    audit = (item.get("cross_check") or {}).get("suspension_audit") or {}
+    source_count = audit.get("available_source_count")
+    if not isinstance(source_count, int) or source_count < MIN_SUSPENSION_AUDIT_SOURCES:
+        raise ValueError(
+            f"{code} 停牌审计可用源不足三方，不能放行停牌日 {missing}"
+        )
+    verified = {
+        record.get("trade_date")
+        for record in audit.get("verified_suspensions") or []
+        if isinstance(record, dict)
+        and isinstance(record.get("trade_date"), str)
+        and len(record.get("sources") or []) >= MIN_SUSPENSION_AUDIT_SOURCES
     }
-    unverified = [day for day in missing if day in peer_present_missing]
+    unverified = [day for day in missing if day not in verified]
     if unverified:
-        raise ValueError(f"{code} 缺失交易日 {unverified} 在其他可用源有交易记录，拒绝放行")
+        raise ValueError(f"{code} 缺失交易日 {unverified} 未经三方逐日审计确认，拒绝放行")
     return tuple(missing)
+
+
+def research_window_dates(start_date, end_date):
+    """将命令行窗口解析为数据库日期，拒绝倒置区间。"""
+    start = date.fromisoformat(start_date)
+    end = date.fromisoformat(end_date) if end_date else None
+    if end is not None and end < start:
+        raise ValueError("研究截止日期不能早于起始日期")
+    return start, end
 
 
 def main():
@@ -63,6 +76,11 @@ def main():
         help="研究样本起始日期 YYYY-MM-DD（默认 2019-01-01）",
     )
     parser.add_argument(
+        "--end-date",
+        default=None,
+        help="研究样本截止日期 YYYY-MM-DD；默认读取本地已核验行情的最新日期",
+    )
+    parser.add_argument(
         "--verification-report",
         type=Path,
         default=ROOT / ".local" / "free-history-verification.json",
@@ -72,6 +90,12 @@ def main():
     directory = args.directory.resolve()
     if directory.exists():
         parser.error("冻结目录已存在，不能覆盖")
+    try:
+        research_start_date, research_end_date = research_window_dates(
+            args.start_date, args.end_date
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
 
     report_data = (
         json.loads(args.verification_report.read_text())
@@ -87,7 +111,15 @@ def main():
     from app.algorithm_templates import turning_events, turning_profile
     from app.db import Session, engine
     from app.factor_strategy_snapshot import build_factor_snapshot_item
-    from app.models import BacktestSource, Candle, Instrument, InstrumentIndexLink
+    from app.models import (
+        BacktestSource,
+        Candle,
+        IndexValuationDaily,
+        Instrument,
+        InstrumentIndexLink,
+        InstrumentSentimentLink,
+        SentimentDaily,
+    )
 
     if engine.url.host not in ("localhost", "127.0.0.1", "::1"):
         raise ValueError("分类因子策略研究冻结只允许读取本地数据库")
@@ -101,7 +133,11 @@ def main():
             candles = list(
                 db.scalars(
                     select(Candle)
-                    .where(Candle.code == code, Candle.date >= args.start_date)
+                    .where(
+                        Candle.code == code,
+                        Candle.date >= research_start_date,
+                        *([Candle.date <= research_end_date] if research_end_date else []),
+                    )
                     .order_by(Candle.date)
                 )
             )
@@ -136,6 +172,48 @@ def main():
             actual_days = [row["trade_date"] for row in rows]
             suspensions = _verified_suspensions_for(code, report_data, actual_days)
             actions = source.corporate_actions
+            valuation_index_codes = indices if len(indices) == 1 else []
+            valuation_rows = [
+                {
+                    "trade_date": str(item.trade_date),
+                    "metric_key": item.metric_key,
+                    "metric_value": str(item.metric_value),
+                    "value_status": item.value_status,
+                    "collected_at": item.collected_at.isoformat(),
+                }
+                for item in db.scalars(
+                    select(IndexValuationDaily)
+                    .where(
+                        IndexValuationDaily.index_code.in_(valuation_index_codes),
+                        IndexValuationDaily.trade_date <= candles[-1].date,
+                    )
+                    .order_by(IndexValuationDaily.trade_date, IndexValuationDaily.metric_key)
+                )
+            ]
+            sentiment_links = list(
+                db.scalars(
+                    select(InstrumentSentimentLink)
+                    .where(InstrumentSentimentLink.instrument_code == code)
+                    .order_by(InstrumentSentimentLink.category_key)
+                )
+            )
+            sentiment_rows = None
+            if len(sentiment_links) == 1:
+                sentiment_rows = [
+                    {
+                        "trade_date": str(item.trade_date),
+                        "fear_greed_score": str(item.fear_greed_score),
+                        "collected_at": item.collected_at.isoformat(),
+                    }
+                    for item in db.scalars(
+                        select(SentimentDaily)
+                        .where(
+                            SentimentDaily.category_key == sentiment_links[0].category_key,
+                            SentimentDaily.trade_date <= candles[-1].date,
+                        )
+                        .order_by(SentimentDaily.trade_date)
+                    )
+                ]
             turning = turning_events(
                 rows,
                 [
@@ -163,6 +241,14 @@ def main():
                 turning=turning,
                 start_date=args.start_date,
                 verified_suspensions=suspensions,
+                factor_context={
+                    "valuation_index_codes": valuation_index_codes,
+                    "valuation_rows": valuation_rows,
+                    "sentiment_category_keys": [
+                        item.category_key for item in sentiment_links
+                    ],
+                    "sentiment_rows": sentiment_rows,
+                },
             )
             universe[code] = item
             coverage[code] = item_coverage
@@ -174,7 +260,7 @@ def main():
     write(
         input_path,
         {
-            "version": "factor-strategy-snapshot-v1.1.0",
+            "version": "factor-strategy-snapshot-v1.2.0",
             "start_date": args.start_date,
             "universe": universe,
             "excluded": excluded,
@@ -186,13 +272,15 @@ def main():
             ROOT / "scripts/freeze_factor_strategy_research.py",
             ROOT / "api/app/factor_strategy_snapshot.py",
             ROOT / "api/app/research_factors.py",
+            ROOT / "api/app/research_factor_context.py",
             ROOT / "api/app/algorithm_templates.py",
+            ROOT / "api/app/free_market_sources.py",
         )
     }
     write(
         directory / "manifest.json",
         {
-            "version": "factor-strategy-snapshot-v1.1.0",
+            "version": "factor-strategy-snapshot-v1.2.0",
             "created_at": datetime.now(UTC).isoformat(),
             "start_date": args.start_date,
             "input_sha256": digest(input_path),

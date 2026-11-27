@@ -9,7 +9,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 
-from app.backtest_data import _transition_split_multiplier
+from app.backtest_data import _transition_split_multiplier, trading_days
 
 # 分级顺序：优先东财（全历史、含成交额、与权益同源），备用新浪（精度一致），兜底腾讯（全历史分段）
 SOURCE_TIERS = ("eastmoney", "sina", "tencent")
@@ -28,6 +28,41 @@ _SINA_URL = (
     "CN_MarketData.getKLineData"
 )
 _TENCENT_URL = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
+
+
+def audited_suspensions(source_series):
+    """列出共同覆盖区间内所有可用源均无交易的交易日，供冻结严格放行。"""
+    available = {
+        name: rows
+        for name, rows in source_series.items()
+        if rows
+    }
+    if not available:
+        return {
+            "available_source_count": 0,
+            "sources": [],
+            "calendar_version": None,
+            "verified_suspensions": [],
+        }
+    source_dates = {
+        name: {row["trade_date"] for row in rows}
+        for name, rows in available.items()
+    }
+    common_start = max(max(min(days) for days in source_dates.values()), str(MIN_CALENDAR_DATE))
+    common_end = min(max(days) for days in source_dates.values())
+    expected, calendar_version = trading_days(common_start, common_end)
+    all_observed = set().union(*source_dates.values())
+    sources = sorted(available)
+    return {
+        "available_source_count": len(sources),
+        "sources": sources,
+        "calendar_version": calendar_version,
+        "verified_suspensions": [
+            {"trade_date": day, "sources": sources}
+            for day in expected
+            if day not in all_observed
+        ],
+    }
 
 
 def market_codes(code):
@@ -573,6 +608,8 @@ def collect_and_verify_history(
                 f"{candidate_name} 缺少第二可用源且无本地重叠锚，拒绝孤立入库"
             )
             continue
+
+        cross["suspension_audit"] = audited_suspensions(fetched)
 
         return {
             "code": code,

@@ -36,7 +36,7 @@ STRESS_COSTS = {
     "minimum_commission": 5,
     "slippage_bps": 10,
 }
-RESEARCH_VERSION = "factor-strategy-research-v1.2.0"
+RESEARCH_VERSION = "factor-strategy-research-v1.4.0"
 HOLDOUT_RATIO = 0.2
 MIN_HOLDOUT_DAYS = 60
 MIN_COMPLETED_TRADES = 5
@@ -48,6 +48,49 @@ MAX_DRAWDOWN_COMPRESSION_RATIO = 0.5
 MAX_DRAWDOWN = -0.12
 MIN_PROFIT_FACTOR = 1.25
 MAX_EXPLANATION_CHARS = 100
+
+# 因子只有一个可计算身份，但研究表达式必须遵守其因果方向：入场用于发现
+# 趋势/反转机会，退出用于兑现、转弱和风险收缩，避免把买点反向当成卖点。
+ENTRY_FACTOR_IDS = frozenset(
+    {
+        "turning_bottom",
+        "ma5_cross_ma20_up",
+        "box_breakout_up",
+        "volume_breakout_up",
+        "atr_oversold",
+        "wilder_rsi_oversold",
+        "ma60_rising",
+        "strong_close",
+        "atr_box_breakout",
+        "close_above_prior_high",
+        "recovery_volume_band",
+        "below_ma20",
+        "close_position_positive",
+        "lower_shadow_support",
+        "volatility_contracting",
+        "ma20_ma60_bullish",
+        "trend_pullback_near_ma20",
+        "valuation_low_percentile",
+        "sentiment_extreme_fear",
+        "sentiment_fear_rebound",
+    }
+)
+EXIT_FACTOR_IDS = frozenset(
+    {
+        "turning_top",
+        "atr_overbought",
+        "wilder_rsi_overbought_turn_down",
+        "close_cross_ma10_down",
+        "ma5_cross_ma10_down",
+        "ma5_cross_ma20_down",
+        "high_volume_stall",
+        "upper_shadow_rejection",
+        "atr_volatility_high",
+        "volatility_expanding",
+        "valuation_high_percentile",
+        "sentiment_extreme_greed",
+    }
+)
 
 
 def _positive_days(value):
@@ -575,7 +618,7 @@ def _category_score(summary):
             + (profit_factor - 1) * 15
             + expectancy * 120
             + summary["return"] * 25
-            - abs(summary["drawdown"]) * 60
+            - abs(summary["drawdown"]) * 120
         )
         * (0.4 + 0.6 * sample_weight)
         * (0.3 + 0.7 * unit_ratio),
@@ -633,7 +676,10 @@ def _discard_reasons(summary):
         reasons.append(f"胜率低于{MIN_WIN_RATE:.0%}门槛")
     if (summary["expectancy"] or 0) <= 0:
         reasons.append("成本后单笔期望不为正")
-    if (summary["profit_factor"] or 0) < MIN_PROFIT_FACTOR:
+    if (
+        summary["profit_factor"] is not None
+        and summary["profit_factor"] < MIN_PROFIT_FACTOR
+    ):
         reasons.append(f"利润因子低于{MIN_PROFIT_FACTOR}")
     if summary["return"] <= 0:
         reasons.append("窗口绝对收益不为正")
@@ -644,6 +690,35 @@ def _discard_reasons(summary):
     elif not summary["cross_unit_pass"]:
         reasons.append("独立单位胜率与正收益覆盖不足一半")
     return reasons
+
+
+def _stress_discard_reasons(summary):
+    """压力成本只复核胜率、期望、利润因子与回撤，不重复普通成本样本门槛。"""
+    reasons = []
+    win_rate = summary.get("win_rate")
+    if win_rate is None or win_rate < MIN_WIN_RATE:
+        reasons.append(f"胜率低于{MIN_WIN_RATE:.0%}门槛")
+    if (summary["expectancy"] or 0) <= 0:
+        reasons.append("成本后单笔期望不为正")
+    if (
+        summary["profit_factor"] is not None
+        and summary["profit_factor"] < MIN_PROFIT_FACTOR
+    ):
+        reasons.append(f"利润因子低于{MIN_PROFIT_FACTOR}")
+    if summary["drawdown"] < MAX_DRAWDOWN:
+        reasons.append(f"最大回撤低于{MAX_DRAWDOWN:.0%}门槛")
+    return reasons
+
+
+def release_gate_reasons(*, development, development_stress, holdout, holdout_stress):
+    """汇总四组不可偷看的发布门禁，保留窗口与成本来源以便审计。"""
+    checks = (
+        ("开发段普通成本", _discard_reasons(development)),
+        ("开发段压力成本", _stress_discard_reasons(development_stress)),
+        ("留出段普通成本", _discard_reasons(holdout)),
+        ("留出段压力成本", _stress_discard_reasons(holdout_stress)),
+    )
+    return [f"{label}：{reason}" for label, reasons in checks for reason in reasons]
 
 
 def summarize_category(category, universe, evaluations):
@@ -774,34 +849,42 @@ def _simplify_expression(expression):
     return deduplicated[0] if len(deduplicated) == 1 else {"op": operator, "items": deduplicated}
 
 
-def _has_disallowed_structure(expression):
-    """禁止时间算子同类套娃，及禁止对单日离散事件因子套连续成立。"""
+def _has_disallowed_structure(expression, parent_operator=None):
+    """限制否定位置、时间套娃和离散事件连续成立，保持表达式可人工复核。"""
     operator = expression["op"]
     if operator == "factor":
         return False
     if operator in {"all", "any"}:
-        return any(_has_disallowed_structure(item) for item in expression["items"])
+        return any(
+            _has_disallowed_structure(item, operator) for item in expression["items"]
+        )
     if operator == "not":
-        return _has_disallowed_structure(expression["expression"])
+        return (
+            parent_operator != "all"
+            or _has_disallowed_structure(expression["expression"], operator)
+        )
     if operator in {"within", "consecutive"}:
         child = expression["expression"]
         if child["op"] in {"within", "consecutive"}:
             return True
-        if (
-            operator == "consecutive"
-            and child["op"] == "factor"
-            and FACTORS[child["factor_id"]]["output_type"] == "event"
+        if operator == "consecutive" and (
+            child["op"] != "factor"
+            or FACTORS[child["factor_id"]]["output_type"] != "state"
         ):
             return True
-        return _has_disallowed_structure(child)
-    return _has_disallowed_structure(expression["first"]) or _has_disallowed_structure(
-        expression["then"]
-    )
+        return _has_disallowed_structure(child, operator)
+    return _has_disallowed_structure(
+        expression["first"], operator
+    ) or _has_disallowed_structure(expression["then"], operator)
 
 
 def expression_is_explainable(expression, *, role="any"):
     """以可读中文说明及结构防作弊规则限制候选表达式边界。"""
     simplified = simplify_expression(expression)
+    if role == "entry" and not _expression_factor_ids(simplified) <= ENTRY_FACTOR_IDS:
+        return False
+    if role == "exit" and not _expression_factor_ids(simplified) <= EXIT_FACTOR_IDS:
+        return False
     if role == "entry" and simplified["op"] == "not":
         return False
     if _has_disallowed_structure(simplified):
@@ -818,9 +901,32 @@ def _signature(entry_expression, exit_expression):
     )
 
 
-def _seed_expressions():
-    return [
+def _exit_seed(exit_factor_ids):
+    priorities = (
+        "turning_top",
+        "wilder_rsi_overbought_turn_down",
+        "close_cross_ma10_down",
+        "ma5_cross_ma10_down",
+        "ma5_cross_ma20_down",
+        "high_volume_stall",
+        "upper_shadow_rejection",
+    )
+    factor_id = next(
+        (candidate for candidate in priorities if candidate in exit_factor_ids),
+        min(exit_factor_ids),
+    )
+    return _factor(factor_id)
+
+
+def _seed_expressions(entry_factor_ids, exit_factor_ids):
+    """只以类别开发段中实际出现的因子创建可解释先验种子。"""
+    available = frozenset(entry_factor_ids)
+    if not available or not exit_factor_ids:
+        return []
+    exit_expression = _exit_seed(exit_factor_ids)
+    seeds = (
         (
+            {"atr_box_breakout", "ma60_rising", "strong_close"},
             {
                 "op": "all",
                 "items": [
@@ -829,23 +935,41 @@ def _seed_expressions():
                     _factor("strong_close"),
                 ],
             },
-            _factor("turning_top"),
             "透明种子：趋势突破",
         ),
         (
             {
+                "atr_oversold",
+                "wilder_rsi_oversold",
+                "close_above_prior_high",
+                "recovery_volume_band",
+                "below_ma20",
+                "close_position_positive",
+            },
+            {
                 "op": "after",
                 "first": {
                     "op": "any",
-                    "items": [_factor("atr_oversold"), _factor("wilder_rsi_oversold")],
+                    "items": [
+                        _factor("atr_oversold"),
+                        _factor("wilder_rsi_oversold"),
+                    ],
                 },
-                "then": _factor("oversold_recovery"),
+                "then": {
+                    "op": "all",
+                    "items": [
+                        _factor("close_above_prior_high"),
+                        _factor("recovery_volume_band"),
+                        _factor("below_ma20"),
+                        _factor("close_position_positive"),
+                    ],
+                },
                 "days": 3,
             },
-            _factor("turning_top"),
             "透明种子：超跌修复",
         ),
         (
+            {"turning_bottom", "ma5_cross_ma20_up", "strong_close"},
             {
                 "op": "all",
                 "items": [
@@ -858,9 +982,25 @@ def _seed_expressions():
                     _factor("strong_close"),
                 ],
             },
-            _factor("turning_top"),
             "透明种子：底部转折",
         ),
+        (
+            {"trend_pullback_near_ma20", "ma20_ma60_bullish", "strong_close"},
+            {
+                "op": "all",
+                "items": [
+                    _factor("trend_pullback_near_ma20"),
+                    _factor("ma20_ma60_bullish"),
+                    _factor("strong_close"),
+                ],
+            },
+            "透明种子：趋势回踩",
+        ),
+    )
+    return [
+        (entry, exit_expression, origin)
+        for required, entry, origin in seeds
+        if required <= available
     ]
 
 
@@ -877,7 +1017,8 @@ def _factor_paths(expression, path=()):
     if operator in {"not", "within", "consecutive"}:
         return _factor_paths(expression["expression"], (*path, "expression"))
     return _factor_paths(expression["first"], (*path, "first")) + _factor_paths(
-        expression["then"], (*path, "then"))
+        expression["then"], (*path, "then")
+    )
 
 
 def _replace_path(value, path, replacement):
@@ -902,38 +1043,56 @@ def _prune_expression(expression, rng):
     return json.loads(json.dumps(rng.choice(candidates))) if candidates else expression
 
 
-def _mutate_expression(expression, rng):
-    """在不改变因子身份的前提下变换组合结构。"""
-    factor_id = rng.choice(tuple(FACTORS))
-    operation = rng.choice(
-        ("all", "any", "not", "within", "consecutive", "after", "replace", "prune")
+def _mutate_expression(expression, factor_ids, rng):
+    """在类别可用因子范围内生成符合反作弊边界的表达式变异。"""
+    available = tuple(sorted(factor_ids))
+    if not available:
+        raise ValueError("没有可变异的类别因子")
+    state_factor_ids = tuple(
+        factor_id
+        for factor_id in available
+        if FACTORS[factor_id]["output_type"] == "state"
     )
+    operations = ["all", "any", "not", "within", "after", "replace", "prune"]
+    if state_factor_ids:
+        operations.append("consecutive")
+    factor_id = rng.choice(available)
+    operation = rng.choice(operations)
     copied = json.loads(json.dumps(expression))
     if operation == "all":
         return {"op": "all", "items": [copied, _factor(factor_id)]}
     if operation == "any":
         return {"op": "any", "items": [copied, _factor(factor_id)]}
     if operation == "not":
-        return {"op": "not", "expression": copied}
-    if operation == "within":
         return {
+            "op": "all",
+            "items": [
+                copied,
+                {"op": "not", "expression": _factor(factor_id)},
+            ],
+        }
+    if operation == "within":
+        temporal = {
             "op": "within",
-            "expression": copied,
+            "expression": _factor(factor_id),
             "days": rng.choice((2, 3, 5, 8)),
         }
+        return {"op": rng.choice(("all", "any")), "items": [copied, temporal]}
     if operation == "consecutive":
-        return {
+        temporal = {
             "op": "consecutive",
-            "expression": copied,
+            "expression": _factor(rng.choice(state_factor_ids)),
             "days": rng.choice((2, 3, 5)),
         }
+        return {"op": rng.choice(("all", "any")), "items": [copied, temporal]}
     if operation == "after":
-        return {
+        temporal = {
             "op": "after",
             "first": _factor(factor_id),
-            "then": copied,
+            "then": _factor(rng.choice(available)),
             "days": rng.choice((2, 3, 5, 8)),
         }
+        return {"op": rng.choice(("all", "any")), "items": [copied, temporal]}
     if operation == "replace":
         return _replace_path(copied, rng.choice(_factor_paths(copied)), _factor(factor_id))
     return _prune_expression(copied, rng)
@@ -948,9 +1107,38 @@ def _crossover(first, second, rng):
         ],
     }
 
-
 def _categories(universe):
     return sorted({item["category"] for item in universe.values()} - {"未分类"})
+
+
+def _has_development_window(item, stop_date):
+    dates = [row["trade_date"] for row in item["rows"]]
+    begin = RISK_BASELINE["warmup"] + 1
+    return begin < bisect_left(dates, stop_date)
+
+
+def _category_development_universe(category, universe, stop_date):
+    """只保留在开发段已经完成预热并拥有有效研究窗口的标的。"""
+    return {
+        code: item
+        for code, item in universe.items()
+        if item["category"] == category and _has_development_window(item, stop_date)
+    }
+
+
+def category_factor_ids(category, universe, stop_date):
+    """返回类别开发段至少真实触发一次的因子，未覆盖外部数据不会污染候选池。"""
+    factor_ids = set()
+    for item in _category_development_universe(category, universe, stop_date).values():
+        for truth in item["factor_truth"]:
+            if truth["trade_date"] >= stop_date:
+                break
+            factor_ids.update(
+                factor_id
+                for factor_id in FACTORS
+                if truth.get(factor_id, False)
+            )
+    return factor_ids
 
 
 def holdout_start_date(universe):
@@ -984,10 +1172,13 @@ def _new_candidate(
     evaluations = evaluate_universe(
         universe, entry, exit_expression, stop_date=stop_date
     )
-    development = {
-        category: summarize_category(category, universe, evaluations)
-        for category in _categories(universe)
-    }
+    development = summarize_category(research_category, universe, evaluations)
+    stress_evaluations = evaluate_universe(
+        universe, entry, exit_expression, stop_date=stop_date, costs=STRESS_COSTS
+    )
+    development_stress = summarize_category(
+        research_category, universe, stress_evaluations
+    )
     return {
         "candidate_id": candidate_id,
         "round": round_number,
@@ -997,13 +1188,16 @@ def _new_candidate(
         "exit_expression": exit_expression,
         "entry_text": render_expression(entry),
         "exit_text": render_expression(exit_expression),
-        "development": development,
+        "development": {research_category: development},
+        "development_stress": {research_category: development_stress},
     }
 
 
-def _round_candidates(existing, round_number, rng):
+def _round_candidates(
+    existing, round_number, entry_factor_ids, exit_factor_ids, rng
+):
     if round_number == 1:
-        return _seed_expressions()
+        return _seed_expressions(entry_factor_ids, exit_factor_ids)
     category = existing[0]["research_category"]
     ranked = sorted(
         existing,
@@ -1016,10 +1210,10 @@ def _round_candidates(existing, round_number, rng):
         parent = rng.choice(parents)
         entry, exit_expression = parent["entry_expression"], parent["exit_expression"]
         if attempt % 3 == 0:
-            entry = _mutate_expression(entry, rng)
+            entry = _mutate_expression(entry, entry_factor_ids, rng)
             origin = f"{parent['candidate_id']}：入场结构变异"
         elif attempt % 3 == 1:
-            exit_expression = _mutate_expression(exit_expression, rng)
+            exit_expression = _mutate_expression(exit_expression, exit_factor_ids, rng)
             origin = f"{parent['candidate_id']}：退出结构变异"
         else:
             other = rng.choice(parents)
@@ -1032,11 +1226,10 @@ def _round_candidates(existing, round_number, rng):
     return proposals
 
 
-def _fallback_proposals():
-    for entry_id in FACTORS:
-        for exit_id in FACTORS:
-            if entry_id != exit_id:
-                yield _factor(entry_id), _factor(exit_id), "透明兜底：单因子入场与单因子退出"
+def _fallback_proposals(entry_factor_ids, exit_factor_ids):
+    for entry_id in sorted(entry_factor_ids):
+        for exit_id in sorted(exit_factor_ids):
+            yield _factor(entry_id), _factor(exit_id), "透明兜底：单因子入场与单因子退出"
 
 
 def run_research(universe, rounds=50, *, random_seed=20261127):
@@ -1047,6 +1240,39 @@ def run_research(universe, rounds=50, *, random_seed=20261127):
         raise ValueError("研究ETF集合不能为空")
     holdout_start = holdout_start_date(universe)
     categories = _categories(universe)
+    category_universes = {
+        category: _category_development_universe(category, universe, holdout_start)
+        for category in categories
+    }
+    unavailable_categories = [
+        category for category, items in category_universes.items() if not items
+    ]
+    if unavailable_categories:
+        raise ValueError(
+            f"以下类别在开发段未满足预热或有效窗口要求：{', '.join(unavailable_categories)}"
+        )
+    category_factors = {
+        category: category_factor_ids(category, universe, holdout_start)
+        for category in categories
+    }
+    category_entry_factors = {
+        category: factor_ids & ENTRY_FACTOR_IDS
+        for category, factor_ids in category_factors.items()
+    }
+    category_exit_factors = {
+        category: factor_ids & EXIT_FACTOR_IDS
+        for category, factor_ids in category_factors.items()
+    }
+    empty_role_categories = [
+        category
+        for category in categories
+        if not category_entry_factors[category] or not category_exit_factors[category]
+    ]
+    if empty_role_categories:
+        raise ValueError(
+            "以下类别开发段缺少实际触发的入场或退出因子："
+            f"{', '.join(empty_role_categories)}"
+        )
     signatures_by_category = {category: set() for category in categories}
     candidates_by_category = {category: [] for category in categories}
     candidates, round_records = [], []
@@ -1055,8 +1281,18 @@ def run_research(universe, rounds=50, *, random_seed=20261127):
         for category_index, category in enumerate(categories):
             rng = random.Random(random_seed + round_number * 100 + category_index)
             proposals = [
-                *_round_candidates(candidates_by_category[category], round_number, rng),
-                *_fallback_proposals(),
+                *(
+                    _round_candidates(
+                        candidates_by_category[category],
+                        round_number,
+                        category_entry_factors[category],
+                        category_exit_factors[category],
+                        rng,
+                    )
+                ),
+                *_fallback_proposals(
+                    category_entry_factors[category], category_exit_factors[category]
+                ),
             ]
             candidate_ids = []
             for entry, exit_expression, origin in proposals:
@@ -1078,7 +1314,7 @@ def run_research(universe, rounds=50, *, random_seed=20261127):
                     entry,
                     exit_expression,
                     origin,
-                    universe,
+                    category_universes[category],
                     holdout_start,
                 )
                 candidates.append(candidate)
@@ -1098,10 +1334,7 @@ def run_research(universe, rounds=50, *, random_seed=20261127):
         leader = select_category_leader(category, candidates_by_category[category])
         if leader is None:
             continue
-        dev_codes = set(leader["development"][category]["by_etf"])
-        eligible_universe = {
-            code: item for code, item in universe.items() if code in dev_codes
-        }
+        eligible_universe = category_universes[category]
         holdout = summarize_category(
             category,
             eligible_universe,
@@ -1112,7 +1345,7 @@ def run_research(universe, rounds=50, *, random_seed=20261127):
                 start_date=holdout_start,
             ),
         )
-        stress = summarize_category(
+        holdout_stress = summarize_category(
             category,
             eligible_universe,
             evaluate_universe(
@@ -1123,6 +1356,12 @@ def run_research(universe, rounds=50, *, random_seed=20261127):
                 costs=STRESS_COSTS,
             ),
         )
+        discard_reasons = release_gate_reasons(
+            development=leader["development"][category],
+            development_stress=leader["development_stress"][category],
+            holdout=holdout,
+            holdout_stress=holdout_stress,
+        )
         leaders[category] = {
             "candidate_id": leader["candidate_id"],
             "entry_expression": leader["entry_expression"],
@@ -1130,17 +1369,13 @@ def run_research(universe, rounds=50, *, random_seed=20261127):
             "entry_text": leader["entry_text"],
             "exit_text": leader["exit_text"],
             "development": leader["development"][category],
+            "development_stress": leader["development_stress"][category],
             "holdout": holdout,
-            "stress": stress,
+            "holdout_stress": holdout_stress,
             "holdout_defense": defense_evidence(holdout),
-            "stress_defense": defense_evidence(stress),
-            "discard_reasons": sorted(
-                set(
-                    leader["development"][category]["discard_reasons"]
-                    + holdout["discard_reasons"]
-                    + stress["discard_reasons"]
-                )
-            ),
+            "holdout_stress_defense": defense_evidence(holdout_stress),
+            "discard_reasons": discard_reasons,
+            "qualified": not discard_reasons,
         }
     return {
         "version": RESEARCH_VERSION,
@@ -1148,6 +1383,29 @@ def run_research(universe, rounds=50, *, random_seed=20261127):
         "round_count": rounds,
         "holdout_start": holdout_start,
         "categories": _categories(universe),
+        "category_factor_ids": {
+            category: sorted(factor_ids)
+            for category, factor_ids in category_factors.items()
+        },
+        "category_entry_factor_ids": {
+            category: sorted(factor_ids)
+            for category, factor_ids in category_entry_factors.items()
+        },
+        "category_exit_factor_ids": {
+            category: sorted(factor_ids)
+            for category, factor_ids in category_exit_factors.items()
+        },
+        "eligible_codes": {
+            category: sorted(items) for category, items in category_universes.items()
+        },
+        "excluded_codes": {
+            category: sorted(
+                code
+                for code, item in universe.items()
+                if item["category"] == category and code not in category_universes[category]
+            )
+            for category in categories
+        },
         "unclassified_codes": sorted(
             code for code, item in universe.items() if item["category"] == "未分类"
         ),

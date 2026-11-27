@@ -1,4 +1,7 @@
+import importlib.util
+from datetime import date
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 
@@ -81,3 +84,85 @@ def test_factor_snapshot_allows_verified_suspensions_and_rejects_unverified_gaps
 
     assert item["rows"][0]["trade_date"] == "2026-01-05"
     assert coverage["verified_suspensions"] == ["2026-01-06"]
+
+
+def test_factor_snapshot_keeps_external_context_and_uses_prior_day_truth_only():
+    from app.factor_strategy_snapshot import build_factor_snapshot_item
+
+    rows = [row("2025-01-02", 10), row("2025-01-03", 10.1)]
+    item, coverage = build_factor_snapshot_item(
+        code="510300",
+        name="沪深300ETF",
+        rows=rows,
+        actions={"dividends": [], "splits": []},
+        indices=["000300.SH"],
+        source={"market_source": "本地行情"},
+        turning={},
+        factor_context={
+            "valuation_rows": [
+                {
+                    "trade_date": "2025-01-02",
+                    "metric_key": "pb",
+                    "metric_value": "1.2",
+                    "value_status": "valid",
+                }
+            ],
+            "sentiment_rows": None,
+        },
+    )
+
+    assert item["factor_truth"][0]["valuation_low_percentile"] is False
+    assert item["factor_truth"][1]["valuation_low_percentile"] is True
+    assert item["factor_context"]["valuation_rows"][0]["trade_date"] == "2025-01-02"
+    assert coverage["external"]["valuation"]["available"] is True
+
+
+def test_freeze_only_allows_explicit_three_source_suspension_audit():
+    script = Path(__file__).resolve().parents[2] / "scripts" / "freeze_factor_strategy_research.py"
+    spec = importlib.util.spec_from_file_location("freeze_factor_strategy_research", script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    report = {
+        "items": {
+            "159915": {
+                "status": "ok",
+                "cross_check": {
+                    "suspension_audit": {
+                        "available_source_count": 3,
+                        "verified_suspensions": [
+                            {
+                                "trade_date": "2026-01-06",
+                                "sources": ["eastmoney", "sina", "tencent"],
+                            }
+                        ],
+                    }
+                },
+            }
+        }
+    }
+
+    assert module._verified_suspensions_for(
+        "159915", report, ["2026-01-05", "2026-01-07"]
+    ) == ("2026-01-06",)
+
+    report["items"]["159915"]["cross_check"]["suspension_audit"][
+        "available_source_count"
+    ] = 2
+    with pytest.raises(ValueError, match="三方"):
+        module._verified_suspensions_for(
+            "159915", report, ["2026-01-05", "2026-01-07"]
+        )
+
+
+def test_freeze_parses_cli_window_dates_before_building_database_query():
+    script = Path(__file__).resolve().parents[2] / "scripts" / "freeze_factor_strategy_research.py"
+    spec = importlib.util.spec_from_file_location("freeze_factor_strategy_research", script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.research_window_dates("2019-01-01", "2026-11-26") == (
+        date(2019, 1, 1),
+        date(2026, 11, 26),
+    )
+    with pytest.raises(ValueError, match="截止日期"):
+        module.research_window_dates("2026-11-26", "2019-01-01")

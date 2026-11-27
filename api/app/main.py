@@ -33,13 +33,18 @@ from app.jobs import (
 from app.models import (
     BacktestSource,
     Candle,
+    IndexValuationDaily,
     Instrument,
+    InstrumentIndexLink,
+    InstrumentSentimentLink,
     Job,
     ResearchFactor,
     ResearchStrategyFactor,
     Run,
+    SentimentDaily,
 )
 from app.national_team_routes import router as national_team_router
+from app.research_factor_context import build_external_factor_truth
 from app.research_factors import FACTORS, STRATEGIES, calculate_factor_events
 from app.research_routes import router as research_router
 from app.review_routes import router as review_router
@@ -348,6 +353,52 @@ def candle_factors(code: str, start: date, end: date):
             indicator_rows = indicator_ohlc_rows(rows, source.corporate_actions)
         except ValueError as exc:
             raise HTTPException(422, f"行情或权益资料未通过校验：{exc}") from None
+        index_codes = list(
+            db.scalars(
+                select(InstrumentIndexLink.index_code)
+                .where(InstrumentIndexLink.instrument_code == code)
+                .order_by(InstrumentIndexLink.index_code)
+            )
+        )
+        valuation_rows = [
+            {
+                "trade_date": str(item.trade_date),
+                "metric_key": item.metric_key,
+                "metric_value": str(item.metric_value),
+                "value_status": item.value_status,
+            }
+            for item in db.scalars(
+                select(IndexValuationDaily)
+                .where(
+                    IndexValuationDaily.index_code.in_(index_codes),
+                    IndexValuationDaily.trade_date <= cutoff,
+                )
+                .order_by(IndexValuationDaily.trade_date, IndexValuationDaily.metric_key)
+            )
+        ]
+        sentiment_links = list(
+            db.scalars(
+                select(InstrumentSentimentLink)
+                .where(InstrumentSentimentLink.instrument_code == code)
+                .order_by(InstrumentSentimentLink.category_key)
+            )
+        )
+        sentiment_rows = None
+        if len(sentiment_links) == 1:
+            sentiment_rows = [
+                {
+                    "trade_date": str(item.trade_date),
+                    "fear_greed_score": str(item.fear_greed_score),
+                }
+                for item in db.scalars(
+                    select(SentimentDaily)
+                    .where(
+                        SentimentDaily.category_key == sentiment_links[0].category_key,
+                        SentimentDaily.trade_date <= cutoff,
+                    )
+                    .order_by(SentimentDaily.trade_date)
+                )
+            ]
 
     turning = turning_events(
         indicator_rows,
@@ -355,7 +406,16 @@ def candle_factors(code: str, start: date, end: date):
         turning_profile(code)["parameters"],
     )
     # 指标行情已包含权益调整，不再次把现金分红加入收盘价。
-    events = calculate_factor_events(indicator_rows, turning)
+    external_truth, external_coverage = build_external_factor_truth(
+        indicator_rows,
+        valuation_rows=valuation_rows,
+        sentiment_rows=sentiment_rows,
+    )
+    events = calculate_factor_events(
+        indicator_rows,
+        turning,
+        external_truth=external_truth,
+    )
     return {
         "events": [
             {**event, **FACTORS[event["factor_id"]]}
@@ -365,4 +425,9 @@ def candle_factors(code: str, start: date, end: date):
         "data_cutoff": rows[-1]["trade_date"],
         "partial": partial,
         "warmup_insufficient": sum(row["trade_date"] <= start.isoformat() for row in rows) < SHARED_WARMUP_BARS,
+        "external_factor_context": {
+            "valuation_index_codes": index_codes,
+            "sentiment_category_keys": [item.category_key for item in sentiment_links],
+            "coverage": external_coverage,
+        },
     }

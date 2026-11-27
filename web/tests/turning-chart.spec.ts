@@ -32,7 +32,7 @@ test.beforeEach(async ({ page }) => {
   await page.route("**/api/candles/512100?*", (route) => json(route, rows));
 });
 
-test("行情默认展示阶段顶底与超跌后止跌修复，可叠加同日的其他因子", async ({ page }) => {
+test("行情默认展示阶段顶底与收盘收复昨高，可叠加同日的其他因子", async ({ page }) => {
   const events = [event(112, 0), event(112, 2), event(150, 3), event(200, 1)];
   await page.route("**/api/candles/510500/factors?*", (route) => {
     const query = new URL(route.request().url()).searchParams;
@@ -52,14 +52,14 @@ test("行情默认展示阶段顶底与超跌后止跌修复，可叠加同日�
   await expect(page.getByLabel("顶底来源")).toHaveCount(0);
   await expect.poll(async () => (await chartState(page)).markers.map((marker) => ({ name: marker.name, coord: marker.coord }))).toEqual([
     { name: "阶段底部确认", coord: [rows[112].date, rows[112].low] },
-    { name: "超跌后止跌修复", coord: [rows[150].date, rows[150].low] },
+    { name: "收盘收复昨高", coord: [rows[150].date, rows[150].low] },
     { name: "阶段顶部确认", coord: [rows[200].date, rows[200].high] },
   ]);
   await page.getByText(/因子标记 · 已选/).click();
   await page.getByRole("checkbox", { name: /放量向上突破/ }).check();
   await expect.poll(async () => (await chartState(page)).markers.filter((marker) => marker.coord[0] === rows[112].date).map((marker) => marker.name)).toEqual(["阶段底部确认", "放量向上突破"]);
   await page.getByRole("checkbox", { name: /底部确认/ }).uncheck();
-  await expect.poll(async () => (await chartState(page)).markers.map((marker) => marker.name)).toEqual(["放量向上突破", "超跌后止跌修复", "阶段顶部确认"]);
+  await expect.poll(async () => (await chartState(page)).markers.map((marker) => marker.name)).toEqual(["放量向上突破", "收盘收复昨高", "阶段顶部确认"]);
   await page.getByLabel("当前 ETF").selectOption("512100");
   await expect(page.getByText(/部分行情日期尚未核验权益/)).toBeVisible();
   await expect.poll(async () => (await chartState(page)).markers.map((marker) => marker.coord[0])).toEqual([rows[140].date]);

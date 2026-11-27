@@ -316,9 +316,9 @@ export default function KLine({
             return (factorsByDate.get(date) ?? []).map((factor, index) => {
               const top = factor.factor_id === "turning_top";
               const bottom = factor.factor_id === "turning_bottom";
-              const recovery = factor.factor_id === "oversold_recovery";
+              const recovery = factor.factor_id === "close_above_prior_high";
               const color = top ? palette.chart4 : bottom ? palette.chart3 : recovery ? palette.chart5 : palette.chart2;
-              return { name: factor.name, value: bottom ? "底确" : top ? "顶确" : recovery ? "止跌" : factor.name,
+              return { name: factor.name, value: bottom ? "底确" : top ? "顶确" : recovery ? "收复" : factor.name,
                 coord: [date, top ? candle.high : candle.low], symbol: top || bottom ? "triangle" : factor.output_type === "state" ? "circle" : "diamond", symbolSize: 12,
                 symbolRotate: top ? 180 : 0, symbolOffset: [0, top ? -10 : 10 + index * 14],
                 itemStyle: { color }, label: { show: top || bottom || recovery, position: top ? "top" : "bottom", color, fontSize: 12, fontWeight: 600, textBorderColor: palette.surface, textBorderWidth: 3 },

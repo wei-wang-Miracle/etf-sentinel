@@ -10,6 +10,7 @@ import pytest
 
 from app.free_market_sources import (
     MIN_CALENDAR_DATE,
+    audited_suspensions,
     backfill_instrument_history,
     collect_and_verify_history,
     compute_historical_adjusted_close,
@@ -121,6 +122,34 @@ def test_tiered_fallback_and_peer_cross_check_succeed_when_primary_down():
     assert result["source_status"]["eastmoney"]["available"] is False
     assert result["overlap_check"]["passed"] is True
     assert result["cross_check"]["passed"] is True
+
+
+def test_audited_suspensions_require_every_available_source_to_miss_the_same_day():
+    shared_missing = audited_suspensions(
+        {
+            "eastmoney": _sample_series(["2026-01-05", "2026-01-07"]),
+            "sina": _sample_series(["2026-01-05", "2026-01-07"], include_amount=False),
+            "tencent": _sample_series(["2026-01-05", "2026-01-07"], include_amount=False),
+        }
+    )
+    assert shared_missing["available_source_count"] == 3
+    assert shared_missing["verified_suspensions"] == [
+        {
+            "trade_date": "2026-01-06",
+            "sources": ["eastmoney", "sina", "tencent"],
+        }
+    ]
+
+    peer_has_trade = audited_suspensions(
+        {
+            "eastmoney": _sample_series(["2026-01-05", "2026-01-07"]),
+            "sina": _sample_series(
+                ["2026-01-05", "2026-01-06", "2026-01-07"], include_amount=False
+            ),
+            "tencent": _sample_series(["2026-01-05", "2026-01-07"], include_amount=False),
+        }
+    )
+    assert peer_has_trade["verified_suspensions"] == []
 
 
 def test_three_source_consensus_resolves_single_peer_historical_quirk():

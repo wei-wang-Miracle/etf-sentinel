@@ -13,6 +13,7 @@ def test_factor_and_strategy_tables_replace_algorithm_version_storage():
     assert {
         "research_factors",
         "research_strategy_factors",
+        "instrument_sentiment_links",
         "instrument_strategy_assignments",
         "strategy_comparisons",
         "strategy_comparison_factors",
@@ -42,10 +43,19 @@ def test_factor_and_strategy_tables_replace_algorithm_version_storage():
 def test_research_factor_directory_has_matching_database_columns_and_comments():
     factor_table = Base.metadata.tables["research_factors"]
     relation_table = Base.metadata.tables["research_strategy_factors"]
+    sentiment_link_table = Base.metadata.tables["instrument_sentiment_links"]
 
     assert set(FACTORS)  # Registry contains the complete first research set.
+    assert "oversold_recovery" not in FACTORS
     assert factor_table.comment and all(column.comment for column in factor_table.columns)
     assert relation_table.comment and all(column.comment for column in relation_table.columns)
+    assert sentiment_link_table.comment and all(
+        column.comment for column in sentiment_link_table.columns
+    )
+    assert set(sentiment_link_table.primary_key.columns.keys()) == {
+        "instrument_code",
+        "category_key",
+    }
     assert all({factor_id for factor_id, _ in strategy["factors"]} <= set(FACTORS) for strategy in STRATEGIES.values())
 
 

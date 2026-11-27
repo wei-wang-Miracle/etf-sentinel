@@ -1,0 +1,71 @@
+"""外部估值和情绪因子必须按严格历史可得日期对齐。"""
+
+from datetime import date, timedelta
+
+
+def _rows(length):
+    return [
+        {"trade_date": str(date(2025, 1, 1) + timedelta(days=index))}
+        for index in range(length)
+    ]
+
+
+def test_external_factor_truth_uses_only_observations_strictly_before_etf_day():
+    from app.research_factor_context import build_external_factor_truth
+
+    rows = _rows(7)
+    valuation_rows = [
+        {
+            "trade_date": f"2025-01-0{index}",
+            "metric_key": "pb",
+            "metric_value": str(index),
+            "value_status": "valid",
+        }
+        for index in range(1, 6)
+    ]
+    sentiment_rows = [
+        {"trade_date": "2025-01-01", "fear_greed_score": "10"},
+        {"trade_date": "2025-01-02", "fear_greed_score": "10"},
+        {"trade_date": "2025-01-03", "fear_greed_score": "25"},
+        {"trade_date": "2025-01-04", "fear_greed_score": "85"},
+    ]
+
+    truth, coverage = build_external_factor_truth(
+        rows,
+        valuation_rows=valuation_rows,
+        sentiment_rows=sentiment_rows,
+    )
+
+    assert truth[0]["valuation_low_percentile"] is False
+    assert truth[1]["valuation_low_percentile"] is True
+    assert truth[4]["valuation_high_percentile"] is False
+    assert truth[5]["valuation_high_percentile"] is True
+    assert truth[1]["sentiment_extreme_fear"] is True
+    assert truth[2]["sentiment_fear_rebound"] is False
+    assert truth[3]["sentiment_fear_rebound"] is True
+    assert truth[4]["sentiment_extreme_greed"] is True
+    assert coverage["valuation"]["available"] is True
+    assert coverage["sentiment"]["available"] is True
+
+
+def test_external_factor_truth_ignores_invalid_valuation_and_marks_unmapped_sentiment_unavailable():
+    from app.research_factor_context import build_external_factor_truth
+
+    rows = _rows(3)
+    truth, coverage = build_external_factor_truth(
+        rows,
+        valuation_rows=[
+            {
+                "trade_date": "2025-01-01",
+                "metric_key": "pe",
+                "metric_value": "-1",
+                "value_status": "not_applicable",
+            }
+        ],
+    )
+
+    assert not any(item["valuation_low_percentile"] for item in truth)
+    assert not any(item["valuation_high_percentile"] for item in truth)
+    assert not any(item["sentiment_extreme_fear"] for item in truth)
+    assert coverage["valuation"]["available"] is False
+    assert coverage["sentiment"] == {"available": False, "reason": "未建立ETF–恐贪类别映射"}

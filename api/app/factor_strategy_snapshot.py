@@ -3,6 +3,7 @@
 from decimal import Decimal
 
 from app.backtest_data import trading_days
+from app.research_factor_context import build_external_factor_truth
 from app.research_factors import factor_truth_rows
 from app.shared_etf_snapshot import normalize_split_history
 
@@ -94,6 +95,7 @@ def build_factor_snapshot_item(
     turning,
     start_date=None,
     verified_suspensions=(),
+    factor_context=None,
 ):
     """构造标准化行情、因子逐日真值及类别元数据的一只研究标的。"""
     sliced_rows = (
@@ -124,6 +126,14 @@ def build_factor_snapshot_item(
         normalized_actions,
         verified_suspensions=verified_suspensions,
     )
+    context = factor_context or {}
+    valuation_rows = list(context.get("valuation_rows") or [])
+    sentiment_rows = context.get("sentiment_rows")
+    external_truth, external_coverage = build_external_factor_truth(
+        normalized_rows,
+        valuation_rows=valuation_rows,
+        sentiment_rows=sentiment_rows,
+    )
     item = {
         "code": code,
         "name": name,
@@ -134,8 +144,20 @@ def build_factor_snapshot_item(
         "rows": normalized_rows,
         "actions": normalized_actions,
         "source": source,
+        "factor_context": {
+            "valuation_index_codes": list(context.get("valuation_index_codes") or []),
+            "valuation_rows": valuation_rows,
+            "sentiment_category_keys": list(
+                context.get("sentiment_category_keys") or []
+            ),
+            "sentiment_rows": sentiment_rows,
+            "availability": external_coverage,
+        },
         "factor_truth": factor_truth_rows(
-            normalized_rows, turning, normalized_actions["dividends"]
+            normalized_rows,
+            turning,
+            normalized_actions["dividends"],
+            external_truth=external_truth,
         ),
     }
     coverage = {
@@ -145,5 +167,6 @@ def build_factor_snapshot_item(
         "calendar_version": calendar_version,
         "normalized_splits": conversion,
         "verified_suspensions": used_suspensions,
+        "external": external_coverage,
     }
     return item, coverage

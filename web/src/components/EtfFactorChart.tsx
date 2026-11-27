@@ -18,7 +18,7 @@ type Props = {
 type FactorDates = { events: FactorEvent[]; data_cutoff: string | null; partial: boolean; warmup_insufficient: boolean };
 type FactorCatalog = { factors: (FactorIdentity & { chart_visible: boolean; output_type: string })[] };
 const NO_TRADES: NonNullable<Props["trades"]> = [];
-const DEFAULT_FACTORS = ["turning_bottom", "turning_top", "oversold_recovery"];
+const DEFAULT_FACTORS = ["turning_bottom", "turning_top", "close_above_prior_high"];
 
 export default function EtfFactorChart({ history, start, end, theme, instrumentCode, trades = NO_TRADES, controls }: Props) {
   const catalog = useApiResource<FactorCatalog>("/factors");

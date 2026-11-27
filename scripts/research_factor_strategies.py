@@ -38,6 +38,7 @@ def main():
     if snapshot.get("version") not in (
         "factor-strategy-snapshot-v1.0.0",
         "factor-strategy-snapshot-v1.1.0",
+        "factor-strategy-snapshot-v1.2.0",
     ):
         parser.error("冻结输入版本不受支持")
     universe = snapshot.get("universe")

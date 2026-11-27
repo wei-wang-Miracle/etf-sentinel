@@ -36,7 +36,7 @@ def test_expression_supports_nested_logic_and_past_only_temporal_relations():
 
     truth = truth_rows(5)
     truth[1]["atr_oversold"] = True
-    truth[2]["oversold_recovery"] = True
+    truth[2]["close_above_prior_high"] = True
     truth[3]["ma60_rising"] = True
     expression = {
         "op": "all",
@@ -44,7 +44,7 @@ def test_expression_supports_nested_logic_and_past_only_temporal_relations():
             {
                 "op": "after",
                 "first": {"op": "factor", "factor_id": "atr_oversold"},
-                "then": {"op": "factor", "factor_id": "oversold_recovery"},
+                "then": {"op": "factor", "factor_id": "close_above_prior_high"},
                 "days": 3,
             },
             {
@@ -61,9 +61,9 @@ def test_expression_supports_nested_logic_and_past_only_temporal_relations():
 
     assert evaluate_expression(expression, truth, 2) is False
     assert evaluate_expression(expression, truth, 3) is False
-    truth[3]["oversold_recovery"] = True
+    truth[3]["close_above_prior_high"] = True
     assert evaluate_expression(expression, truth, 3) is True
-    assert render_expression(expression) == "ATR归一化超跌后3日内出现超跌后止跌修复 且 近2日出现MA60 向上 且 非阶段顶部确认"
+    assert render_expression(expression) == "ATR归一化超跌后3日内出现收盘收复昨高 且 近2日出现MA60 向上 且 非阶段顶部确认"
 
 
 def test_expression_renderer_keeps_nested_and_or_precedence_explicit():
@@ -256,6 +256,19 @@ def test_win_rate_gates_replace_buy_and_hold_outperformance_gate():
     assert "最大回撤低于-12%门槛" in _discard_reasons(deep_dd)
 
 
+def test_profit_factor_without_loss_is_not_rejected_by_profit_factor_gate():
+    from app.factor_strategy_research import _discard_reasons
+
+    all_winning = _score_summary(
+        completed=8,
+        profit_factor=None,
+        independent_units=3,
+        cross_unit_pass=True,
+    )
+
+    assert "利润因子低于1.25" not in _discard_reasons(all_winning)
+
+
 def test_bear_market_defense_is_reported_without_removing_release_blockers():
     from app.factor_strategy_research import _discard_reasons, defense_evidence
 
@@ -343,6 +356,12 @@ def test_research_runs_three_candidates_per_category_per_round():
         },
     }
 
+    for item in universe.values():
+        item["factor_truth"][70]["box_breakout_up"] = True
+        item["factor_truth"][71]["turning_top"] = True
+        item["factor_truth"][72]["ma60_rising"] = True
+        item["factor_truth"][73]["strong_close"] = True
+
     result = run_research(universe, rounds=1)
 
     assert len(result["candidates"]) == 6
@@ -355,6 +374,10 @@ def test_research_runs_three_candidates_per_category_per_round():
         "黄金",
         "通信设备",
     }
+    assert all(
+        set(candidate["development"]) == {candidate["research_category"]}
+        for candidate in result["candidates"]
+    )
 
 
 def test_category_summary_labels_single_independent_unit_as_single_instrument_evidence():
@@ -463,7 +486,7 @@ def test_expression_explainability_requires_one_screen_chinese_description():
             for first, second in (
                 ("turning_bottom", "ma5_cross_ma20_up"),
                 ("box_breakout_up", "volume_breakout_up"),
-                ("atr_oversold", "oversold_recovery"),
+                ("atr_oversold", "close_above_prior_high"),
                 ("wilder_rsi_oversold", "strong_close"),
                 ("ma60_rising", "atr_box_breakout"),
             )
@@ -474,7 +497,7 @@ def test_expression_explainability_requires_one_screen_chinese_description():
     assert expression_is_explainable(expression) is False
 
 
-def test_anti_cheat_expression_rules_block_root_not_event_consecutive_and_nesting():
+def test_anti_cheat_expression_rules_block_not_event_consecutive_and_nesting():
     from app.factor_strategy_research import (
         expression_is_explainable,
         holdout_start_date,
@@ -482,7 +505,32 @@ def test_anti_cheat_expression_rules_block_root_not_event_consecutive_and_nestin
 
     root_not = {"op": "not", "expression": {"op": "factor", "factor_id": "turning_top"}}
     assert expression_is_explainable(root_not, role="entry") is False
-    assert expression_is_explainable(root_not, role="exit") is True
+    assert expression_is_explainable(root_not, role="exit") is False
+
+    any_with_not = {
+        "op": "any",
+        "items": [
+            {"op": "factor", "factor_id": "box_breakout_up"},
+            {"op": "not", "expression": {"op": "factor", "factor_id": "turning_top"}},
+        ],
+    }
+    assert expression_is_explainable(any_with_not, role="entry") is False
+
+    all_with_local_not = {
+        "op": "all",
+        "items": [
+            {"op": "factor", "factor_id": "box_breakout_up"},
+            {"op": "not", "expression": {"op": "factor", "factor_id": "atr_oversold"}},
+        ],
+    }
+    assert expression_is_explainable(all_with_local_not, role="entry") is True
+
+    assert expression_is_explainable(
+        {"op": "factor", "factor_id": "close_above_prior_high"}, role="exit"
+    ) is False
+    assert expression_is_explainable(
+        {"op": "factor", "factor_id": "turning_top"}, role="entry"
+    ) is False
 
     event_consecutive = {
         "op": "consecutive",
@@ -520,3 +568,42 @@ def test_anti_cheat_expression_rules_block_root_not_event_consecutive_and_nestin
     )
     # 留出段应按多年度长序列的最后 20% 切分，而不是被 350 根的新标的拖成 60 天
     assert holdout == long_rows[-round((1900 - 66) * 0.2)]["trade_date"]
+
+
+def test_category_factor_pool_only_contains_development_truths():
+    from app.factor_strategy_research import category_factor_ids
+
+    rows = price_rows(80)
+    truth = truth_rows(len(rows))
+    truth[66]["box_breakout_up"] = True
+    universe = {
+        "510300": {
+            "category": "沪深300",
+            "rows": rows,
+            "factor_truth": truth,
+        }
+    }
+
+    assert category_factor_ids("沪深300", universe, rows[70]["trade_date"]) == {
+        "box_breakout_up"
+    }
+
+
+def test_release_gate_reasons_merge_normal_and_stress_cost_windows():
+    from app.factor_strategy_research import release_gate_reasons
+
+    normal = _score_summary(independent_units=3, cross_unit_pass=True)
+    development_stress = _score_summary(
+        independent_units=3,
+        cross_unit_pass=True,
+        profit_factor=1.2,
+    )
+    holdout = _score_summary(independent_units=3, cross_unit_pass=True)
+    holdout_stress = _score_summary(independent_units=3, cross_unit_pass=True)
+
+    assert release_gate_reasons(
+        development=normal,
+        development_stress=development_stress,
+        holdout=holdout,
+        holdout_stress=holdout_stress,
+    ) == ["开发段压力成本：利润因子低于1.25"]

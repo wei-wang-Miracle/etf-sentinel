@@ -359,6 +359,31 @@ class InstrumentIndexLink(Base):
     verified_date: Mapped[Date] = mapped_column(comment="本系统映射核验北京时间日期，非指数数据日期")
 
 
+class InstrumentSentimentLink(Base):
+    """ETF 与行业恐贪类别的显式核验关联。"""
+
+    __tablename__ = "instrument_sentiment_links"
+    __table_args__: ClassVar[dict] = {
+        "comment": "ETF与行业恐贪类别的显式核验关联；未建立关联的ETF不得使用行业恐贪因子"
+    }
+    instrument_code: Mapped[str] = mapped_column(
+        ForeignKey("instruments.instrument_code"),
+        primary_key=True,
+        comment="ETF证券代码，关联instruments.instrument_code；与category_key组成主键",
+    )
+    category_key: Mapped[str] = mapped_column(
+        ForeignKey("sentiment_categories.category_key"),
+        primary_key=True,
+        comment="行业恐贪类别标识，关联sentiment_categories.category_key；与instrument_code组成主键",
+    )
+    mapping_evidence: Mapped[str] = mapped_column(
+        comment="ETF与恐贪类别的核验依据，不根据名称或相关性自动推断"
+    )
+    verified_date: Mapped[Date] = mapped_column(
+        comment="本系统确认该ETF与恐贪类别关联的北京时间日期，非情绪数据日期"
+    )
+
+
 class IndexValuationDaily(Base):
     """指数日频估值当前版本，源历史无逐日分位。"""
 
