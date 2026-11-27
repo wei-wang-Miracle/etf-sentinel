@@ -1,5 +1,12 @@
 const pages = new Set(["etfs", "strategies", "data"]);
 
+export function navigateTo(url: string) {
+  if (url !== `${location.pathname}${location.search}` && url !== location.search) {
+    history.pushState(null, "", url);
+  }
+  window.dispatchEvent(new PopStateEvent("popstate"));
+}
+
 export function workspaceUrl(page: string) {
   const current = new URLSearchParams(location.search);
   const query = new URLSearchParams({ page });

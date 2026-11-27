@@ -1,7 +1,29 @@
 import { useEffect, useRef } from "react";
-import * as echarts from "echarts";
+import * as echarts from "echarts/core";
+import { LineChart, HeatmapChart } from "echarts/charts";
+import {
+  GridComponent,
+  TooltipComponent,
+  LegendComponent,
+  DataZoomComponent,
+  VisualMapComponent,
+  AriaComponent,
+} from "echarts/components";
+import { CanvasRenderer } from "echarts/renderers";
 import ChartReadout from "./ChartReadout";
 import { readChartPalette } from "../lib/chart";
+
+echarts.use([
+  LineChart,
+  HeatmapChart,
+  GridComponent,
+  TooltipComponent,
+  LegendComponent,
+  DataZoomComponent,
+  VisualMapComponent,
+  AriaComponent,
+  CanvasRenderer,
+]);
 
 export type LineSeries = { name: string; points: [string, number | null][] };
 export default function ResearchChart({
@@ -17,20 +39,28 @@ export default function ResearchChart({
 }) {
   const element = useRef<HTMLDivElement>(null);
   useEffect(() => {
+    const node = element.current;
+    return () => {
+      if (node) echarts.getInstanceByDom(node)?.dispose();
+    };
+  }, []);
+  useEffect(() => {
     if (!element.current || !series.some((row) => row.points.length)) return;
-    const chart = echarts.init(element.current),
-      p = readChartPalette();
+    const chart = echarts.getInstanceByDom(element.current) ?? echarts.init(element.current);
+    const p = readChartPalette();
+    const chartColors = [p.chart1, p.chart2, p.chart3, p.chart4, p.chart5, p.chart6];
     const dates = [
       ...new Set(series.flatMap((row) => row.points.map(([day]) => day))),
     ].sort();
     chart.setOption({
       animation: false,
-      color: [p.chart1, p.chart2, p.chart3, p.chart4, p.chart5, p.chart6],
+      color: chartColors,
       textStyle: { color: p.muted, fontFamily: p.fontFamily },
       aria: { enabled: true },
       legend: { type: "scroll", top: 0, textStyle: { color: p.ink } },
       tooltip: {
         trigger: "axis",
+        confine: true,
         backgroundColor: p.surface,
         borderColor: p.border,
         textStyle: { color: p.ink },
@@ -45,35 +75,39 @@ export default function ResearchChart({
         scale: !bounded,
         min: bounded ? 0 : undefined,
         max: bounded ? 100 : undefined,
-        splitLine: { lineStyle: { color: p.border } },
+        splitLine: { lineStyle: { color: p.border, opacity: 0.45 } },
       },
       dataZoom: [{ type: "inside" }, { type: "slider", height: 16, bottom: 5 }],
-      series: series.map((row) => {
+      series: series.map((row, index) => {
         const points = new Map(row.points);
         return {
           type: "line",
           name: row.name,
-          itemStyle: { color: [p.chart1, p.chart2, p.chart3, p.chart4, p.chart5, p.chart6][Array.from(row.name).reduce((sum, char) => sum + char.charCodeAt(0), 0) % 6] },
+          itemStyle: { color: chartColors[index % chartColors.length] },
           data: dates.map((day) => points.get(day) ?? null),
           showSymbol: false,
           connectNulls: false,
         };
       }),
-    });
+    }, { notMerge: true });
     const observer = new ResizeObserver(() => chart.resize());
     observer.observe(element.current);
     return () => {
       observer.disconnect();
-      chart.dispose();
     };
   }, [series, theme, unit, bounded]);
-  return series.some((row) => row.points.length) ? (
+  const hasPoints = series.some((row) => row.points.length);
+  function resetZoom() {
+    if (!element.current) return;
+    echarts.getInstanceByDom(element.current)?.dispatchAction({ type: "dataZoom", start: 0, end: 100 });
+  }
+  return hasPoints ? (
     <><div
       className="kline"
       ref={element}
       role="img"
       aria-label={`${unit}时序对比，缺失不连线，支持缩放和悬停`}
-    /><ChartReadout rows={[...new Set(series.flatMap(row => row.points.map(([day]) => day)))].sort().map(date => ({ date, values: Object.fromEntries(series.map(row => { const value = row.points.find(([day]) => day === date)?.[1]; return [row.name, value == null ? "—" : `${value.toFixed(2)} ${unit}`]; })) }))} /></>
+    /><ChartReadout rows={[...new Set(series.flatMap(row => row.points.map(([day]) => day)))].sort().map(date => ({ date, values: Object.fromEntries(series.map(row => { const value = row.points.find(([day]) => day === date)?.[1]; return [row.name, value == null ? "—" : `${value.toFixed(2)} ${unit}`]; })) }))} onResetZoom={resetZoom} /></>
   ) : (
     <div className="empty">所选对象在此区间无可绘制序列</div>
   );
@@ -90,9 +124,15 @@ export function ResearchHeatmap({
 }) {
   const element = useRef<HTMLDivElement>(null);
   useEffect(() => {
+    const node = element.current;
+    return () => {
+      if (node) echarts.getInstanceByDom(node)?.dispose();
+    };
+  }, []);
+  useEffect(() => {
     if (!element.current) return;
-    const chart = echarts.init(element.current),
-      p = readChartPalette();
+    const chart = echarts.getInstanceByDom(element.current) ?? echarts.init(element.current);
+    const p = readChartPalette();
     const points = data.values.flatMap((row, y) =>
       row.flatMap((value, x) => (value == null ? [] : [[x, y, value]])),
     );
@@ -101,6 +141,10 @@ export function ResearchHeatmap({
       textStyle: { color: p.muted },
       tooltip: {
         position: "top",
+        confine: true,
+        backgroundColor: p.surface,
+        borderColor: p.border,
+        textStyle: { color: p.ink },
         formatter: (params: { value: number[] }) =>
           `${data.rows[params.value[1]]} · ${data.columns[params.value[0]]}：${params.value[2].toFixed(2)}`,
       },
@@ -131,12 +175,11 @@ export function ResearchHeatmap({
       },
       series: [{ type: "heatmap", data: points, progressive: 0 }],
       aria: { enabled: true },
-    });
+    }, { notMerge: true });
     const observer = new ResizeObserver(() => chart.resize());
     observer.observe(element.current);
     return () => {
       observer.disconnect();
-      chart.dispose();
     };
   }, [data, theme, sentiment]);
   return (

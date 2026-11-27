@@ -87,8 +87,18 @@ export default function KLine({
   const positionMode = positions !== undefined && holdings === undefined;
   const maRows = historyRows ?? rows;
   useEffect(() => {
-    if (!element.current || (!rows.length && !holdings?.length)) return;
-    const chart = echarts.init(element.current);
+    if (!element.current || (!rows.length && !holdings?.length)) {
+      if (element.current) echarts.getInstanceByDom(element.current)?.clear();
+      return;
+    }
+    const existing = echarts.getInstanceByDom(element.current);
+    const chart = existing && !existing.isDisposed() ? existing : echarts.init(element.current);
+    if (existing && !existing.isDisposed()) {
+      const prevZoom = (existing.getOption()?.dataZoom as { start?: number; end?: number }[] | undefined)?.[0];
+      if (prevZoom?.start != null && prevZoom.end != null && savedZoom.current) {
+        savedZoom.current = { dates: savedZoom.current.dates, start: prevZoom.start, end: prevZoom.end };
+      }
+    }
     const palette = readChartPalette();
     const comparison = holdings !== undefined;
     const holdingRows = holdings ?? [];
@@ -103,7 +113,8 @@ export default function KLine({
     const candleByDate = new Map(rows.map((r) => [r.date, r]));
     const previousZoom = savedZoom.current;
     const zoom = previousZoom && previousZoom.dates.length === dates.length && dates.every((date, i) => date === previousZoom.dates[i])
-      ? { start: previousZoom.start, end: previousZoom.end } : {};
+      ? { start: previousZoom.start, end: previousZoom.end } : { start: 0, end: 100 };
+    savedZoom.current = { dates, start: zoom.start, end: zoom.end };
     const holdingByDate = new Map(
       holdingRows.map((r) => [r.trade_date, r.estimated_holding_pct]),
     );
@@ -310,7 +321,7 @@ export default function KLine({
               return { name: factor.name, value: bottom ? "底确" : top ? "顶确" : factor.name,
                 coord: [date, top ? candle.high : candle.low], symbol: top || bottom ? "triangle" : factor.output_type === "state" ? "circle" : "diamond", symbolSize: 12,
                 symbolRotate: top ? 180 : 0, symbolOffset: [0, top ? -10 : 10 + index * 12],
-                itemStyle: { color }, label: { show: top || bottom, position: top ? "top" : "bottom", color, fontSize: 12 },
+                itemStyle: { color }, label: { show: top || bottom, position: top ? "top" : "bottom", color, fontSize: 12, fontWeight: 600, textBorderColor: palette.surface, textBorderWidth: 3 },
                 tooltip: { formatter: () => `${escapeHtml(factor.name)} · ${escapeHtml(date)}` },
               };
             });
@@ -394,7 +405,8 @@ export default function KLine({
               })),
             },
       ],
-    });
+    }, { notMerge: true });
+    chart.off("click");
     chart.on("click", (event) => {
       const data = event.data as { tradeIndex?: number | null } | undefined;
       if (data?.tradeIndex != null) onTrade?.(data.tradeIndex);
@@ -402,12 +414,21 @@ export default function KLine({
     const observer = new ResizeObserver(() => chart.resize());
     observer.observe(element.current);
     return () => {
-      const current = (chart.getOption().dataZoom as { start: number; end: number }[])[0];
-      savedZoom.current = { dates, start: current.start, end: current.end };
+      if (!chart.isDisposed()) {
+        const current = (chart.getOption()?.dataZoom as { start?: number; end?: number }[] | undefined)?.[0];
+        if (current?.start != null && current.end != null) {
+          savedZoom.current = { dates, start: current.start, end: current.end };
+        }
+      }
       observer.disconnect();
-      chart.dispose();
     };
   }, [rows, theme, holdings, positions, positionMode, indexPoints, trades, onTrade, factorsByDate, maRows, frontAdjusted]);
+  useEffect(() => {
+    const node = element.current;
+    return () => {
+      if (node) echarts.getInstanceByDom(node)?.dispose();
+    };
+  }, []);
   const candleByDate = new Map(rows.map(row => [row.date, row]));
   const holdingByDate = new Map((holdings ?? []).map(row => [row.trade_date, row.estimated_holding_pct]));
   const positionByDate = new Map((positions ?? []).map((row) => [row.trade_date, row]));
@@ -430,6 +451,10 @@ export default function KLine({
     for (const factor of factorsByDate.get(date) ?? []) values[factor.name] = factor.meaning;
     return { date, values };
   });
+  function resetZoom() {
+    if (!element.current) return;
+    echarts.getInstanceByDom(element.current)?.dispatchAction({ type: "dataZoom", start: 0, end: 100 });
+  }
   return (
     <> <div
       className={`kline ${holdings ? "holdings-comparison-chart" : ""}`}
@@ -440,6 +465,6 @@ export default function KLine({
           ? "基金日K与国家队估算持仓比例同图双轴对照，共享日期与缩放，缺失不补零"
           : `${indexPoints ? "指数" : "基金"}日K、MA5至MA60均线与${positionMode ? "每日收盘模拟仓位" : "成交量"}，可滚轮缩放，悬停查看同日数值`
       }
-    /><ChartReadout rows={readout} /></>
+    /><ChartReadout rows={readout} onResetZoom={rows.length ? resetZoom : undefined} /></>
   );
 }

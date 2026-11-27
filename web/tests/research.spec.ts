@@ -163,3 +163,29 @@ test("每日信号显示算法名称，不显示算法版本号", async ({ page 
   await expect(page.locator(".signal-version")).toHaveText("箱体突破");
   await expect(page.getByText(/第\d+版|1\.0\.0|算法模板版本/)).toHaveCount(0);
 });
+
+test("长区间叠加真实操作自动对齐同步起点，我的ETF列表提供查看行情直达入口", async ({ page }) => {
+  let reviewUrl = "";
+  await page.route("**/api/account/review/510500?*", (route) => {
+    reviewUrl = route.request().url();
+    return json(route, {
+      actual: { status: "not_applicable", reasons: [] },
+      markers: [{ trade_date: candles[10].date, side: "buy", quantity: "100", price: "5.1" }],
+      start: "2025-01-20",
+      end: candles.at(-1)!.date,
+      quality: { issues: [] },
+      comparability: "测试",
+    });
+  });
+  await page.goto("/?page=etfs");
+  const marketLink = page.locator(".journey-etf-row").first().getByRole("link", { name: "查看行情", exact: true });
+  await expect(marketLink).toBeVisible();
+  await marketLink.click();
+  await expect(page).toHaveURL(/detail=overview.*tab=price|tab=price.*detail=overview/);
+
+  await page.getByLabel("起始日期").fill("2023-11-28");
+  await page.getByLabel("截止日期").fill(candles.at(-1)!.date);
+  await page.getByLabel("叠加真实操作").check();
+  await expect.poll(() => reviewUrl).toContain("start=2025-01-20");
+  await expect(page.getByText(/真实操作仅叠加账户同步起点/)).toBeVisible();
+});

@@ -79,7 +79,8 @@ export default function EtfReview({ theme, fixedObject = false }: { theme: strin
   const [error, setError] = useState(""),
     [researchError, setResearchError] = useState("");
   const [loading, setLoading] = useState(true),
-    [running, setRunning] = useState(false);
+    [running, setRunning] = useState(false),
+    [refreshingSource, setRefreshingSource] = useState(false);
   const [refresh, setRefresh] = useState(0),
     [view, setView] = useState("nav");
   useEffect(() => {
@@ -162,12 +163,16 @@ export default function EtfReview({ theme, fixedObject = false }: { theme: strin
     }
   }
   async function refreshSource() {
+    if (refreshingSource) return;
+    setRefreshingSource(true);
     setError("");
     try {
       await api(`/backtests/sources/refresh?instrument_code=${code}`, "POST");
-      setRefresh(refresh + 1);
+      setRefresh((old) => old + 1);
     } catch (e) {
       setError((e as Error).message);
+    } finally {
+      setRefreshingSource(false);
     }
   }
   const actual = result?.actual;
@@ -208,7 +213,6 @@ export default function EtfReview({ theme, fixedObject = false }: { theme: strin
           </label>
         </div>
       </div>
-      {result?.actual.status !== "available" && result && <p className="notice warning">{result.actual.status === "not_applicable" ? "真实核算不适用" : "真实核算暂不可计算"}：{result.actual.reasons?.join("；")}</p>}
       <div className="chart-toolbar">
         <label>
           <input
@@ -226,7 +230,7 @@ export default function EtfReview({ theme, fixedObject = false }: { theme: strin
           />{" "}
           我已核实：累计成交属于委托日期
         </label>
-        <button onClick={() => void refreshSource()}>更新本标的权益资料</button>
+        <button disabled={refreshingSource} onClick={() => void refreshSource()}>{refreshingSource ? "更新中…" : "更新本标的权益资料"}</button>
       </div>
       <p className="muted">
         仅在有对账依据时确认；确认只用于本次核算，不修改源数据，也不能替代同步、T+1、费用和数量检查。

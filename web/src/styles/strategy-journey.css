@@ -1,7 +1,8 @@
-.strategy-matrix { overflow-x: auto; margin-block: 1rem; border: 1px solid var(--color-border); }
+.strategy-matrix { overflow-x: auto; margin-block: 16px; border: 1px solid var(--color-border); }
 .strategy-matrix table { width: 100%; border-collapse: collapse; }
-.strategy-matrix th, .strategy-matrix td { text-align: left; padding: .75rem; border-bottom: 1px solid var(--color-border); vertical-align: top; min-width: 8rem; }
+.strategy-matrix th, .strategy-matrix td { text-align: left; padding: 12px; border-bottom: 1px solid var(--color-border); vertical-align: top; min-width: 128px; }
 .strategy-matrix td { font-variant-numeric: tabular-nums; }
+.table-scroll th button { min-height: 32px; padding: 4px 10px; font-size: 12px; }
 
 .journey-page-controls, .journey-actions { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin: 12px 0; }
 .journey-actions input, .journey-actions select { width: 100%; }
@@ -58,7 +59,7 @@
 .algorithm-run { margin-bottom: 0; }
 .algorithm-run p { flex: 1 1 320px; margin: 0; }
 .algorithm-workspace .strategy-matrix { border-radius: 4px; }
-.algorithm-workspace .strategy-matrix th { min-width: 8rem; }
+.algorithm-workspace .strategy-matrix th { min-width: 128px; }
 @media (max-width: 620px) { .algorithm-range > label:not(:first-child) { flex: 1 1 130px; } }
 
 .algorithm-trade-panel { scroll-margin-top: 72px; }

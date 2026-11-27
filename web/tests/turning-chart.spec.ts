@@ -123,3 +123,27 @@ test("顶底接口失败时保留日K但不回退到本地实验算法", async (
   await expect(page).toHaveURL(/page=etfs.*code=510500/);
   await expect.poll(async () => (await chartState(page)).markers.map((marker) => marker.name)).toEqual(["阶段底部确认"]);
 });
+
+test("因子标记展开为浮层不推挤日K，支持标签移除与Esc关闭", async ({ page }) => {
+  await page.route("**/api/candles/510500/factors?*", (route) =>
+    json(route, { events: [event(112, 0), event(200, 1)], data_cutoff: end, partial: false }),
+  );
+  await page.goto(url);
+  const chart = page.getByRole("img", { name: /基金日K/ });
+  await expect(chart).toBeVisible();
+  const beforeY = (await chart.boundingBox())!.y;
+
+  const trigger = page.getByRole("button", { name: /因子标记 · 已选 2 项/ });
+  await trigger.click();
+  await expect(page.getByRole("dialog", { name: "选择因子标记" })).toBeVisible();
+  expect((await chart.boundingBox())!.y).toBe(beforeY);
+  await page.screenshot({ path: "/tmp/etf-factor-popover.png" });
+
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "选择因子标记" })).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+
+  await page.getByRole("button", { name: "移除 阶段底部确认" }).click();
+  await expect(page.getByRole("button", { name: /因子标记 · 已选 1 项/ })).toBeVisible();
+  await expect.poll(async () => (await chartState(page)).markers.map((marker) => marker.name)).toEqual(["阶段顶部确认"]);
+});

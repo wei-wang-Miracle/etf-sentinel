@@ -6,6 +6,7 @@ import { executionNames, type PlanSignal } from "../lib/strategyLab";
 import { journeyUrl, type JourneyCatalog } from "../lib/strategyJourney";
 import { dataManagementUrl } from "../lib/navigation";
 import { percent } from "../lib/backtests";
+import AppLink from "./AppLink";
 import { ExecutionForm } from "./ExecutionForm";
 
 type SignalCondition = { label: string; satisfied: boolean | null; value: string | number | null };
@@ -52,21 +53,21 @@ export default function DailySignals({ code, compact = false, catalog }: { code?
 
   if (compact) return <section className="signal-digest" aria-label="每日信号摘要">
     <div><span className="digest-label">每日信号</span><p role="status">{signals.loading ? "正在读取信号…" : signals.error ? `信号读取失败：${signals.error}` : summaryText}</p></div>
-    {hasActive || rows.length ? <a href={journeyUrl("etfs", code ?? current[0]?.instrument_code ?? rows[0]?.instrument_code ?? assignments[0]?.instrument_code, { detail: "signals" })}>查看信号与依据</a>
-      : <a href={journeyUrl("strategies", code)}>查看算法库</a>}
+    {hasActive || rows.length ? <AppLink className="button-link" href={journeyUrl("etfs", code ?? current[0]?.instrument_code ?? rows[0]?.instrument_code ?? assignments[0]?.instrument_code, { detail: "signals" })}>查看信号与依据</AppLink>
+      : <AppLink className="button-link" href={journeyUrl("strategies", code)}>查看算法库</AppLink>}
   </section>;
 
   return <section className="signals-workspace" aria-label="每日信号与执行记录">
     <div className="signal-heading"><div><h2>每日信号</h2><p className="muted">{job.loading ? "任务状态读取中" : job.error ? "任务状态未取得" : !job.data?.enabled ? "每日自动运行已暂停" : job.data.next_run ? `下次任务：${stamp(job.data.next_run)}` : "下次运行时间待核验"} · 北京时间 · 不自动下单</p></div><button disabled={busy || signals.loading || !activeKnown || !hasActive} onClick={() => void generate()}>{busy ? "核验数据并计算…" : "检查并生成盘前信号"}</button></div>
     {shown.length > 0 && <p className="context-note">{summaryText}</p>}
-    <div className="signal-controls"><div className="segmented" role="group" aria-label="信号记录范围"><button aria-pressed={view === "current"} onClick={() => setView("current")}>适用计划</button><button aria-pressed={view === "history"} onClick={() => setView("history")}>历史记录</button></div><a href={dataManagementUrl("jobs", "strategy-signals", code)}>检查信号任务</a></div>
+    <div className="signal-controls"><div className="segmented" role="group" aria-label="信号记录范围"><button aria-pressed={view === "current"} onClick={() => setView("current")}>适用计划</button><button aria-pressed={view === "history"} onClick={() => setView("history")}>历史记录</button></div><AppLink href={dataManagementUrl("jobs", "strategy-signals", code)}>检查信号任务</AppLink></div>
     {error && <p className="alert" role="alert">{error}</p>}
     {signals.error && <p className="alert" role="alert">信号读取失败：{signals.error}<button onClick={signals.retry}>重试信号</button></p>}
     {catalog.error && <p className="notice warning">策略状态未取得；无法核验的计划只在历史记录中展示。<button onClick={catalog.retry}>重试策略状态</button></p>}
     {notice && <p className="notice" role="status">{notice}</p>}
-    {blocked.map((row, index) => <p key={index} className="notice warning">{row.instrument_code ?? "日计划"} · 暂不可生成：{row.reason} <a href={dataManagementUrl("jobs", "strategy-signals", row.instrument_code ?? code)}>检查日计划依赖记录</a></p>)}
+    {blocked.map((row, index) => <p key={index} className="notice warning">{row.instrument_code ?? "日计划"} · 暂不可生成：{row.reason} <AppLink href={dataManagementUrl("jobs", "strategy-signals", row.instrument_code ?? code)}>检查日计划依赖记录</AppLink></p>)}
     {recentIssues.map((row, index) => <p className="notice warning" key={index}>最近运行：{row.message}</p>)}
-    {signals.loading ? <div className="empty skeleton-state" role="status">正在读取信号…</div> : !shown.length && !signals.error ? <div className="empty"><h3>{view === "history" ? "暂无历史记录" : "尚无适用计划"}</h3><p>{view === "history" ? "已经过期或所属算法已停用的计划会保留在这里。" : summaryText}</p><a href={hasActive ? dataManagementUrl("jobs", "strategy-signals", code) : journeyUrl("strategies", code)}>{hasActive ? "查看最近运行记录" : "查看算法库"}</a></div>
+    {signals.loading ? <div className="empty skeleton-state" role="status">正在读取信号…</div> : !shown.length && !signals.error ? <div className="empty"><h3>{view === "history" ? "暂无历史记录" : "尚无适用计划"}</h3><p>{view === "history" ? "已经过期或所属算法已停用的计划会保留在这里。" : summaryText}</p><AppLink href={hasActive ? dataManagementUrl("jobs", "strategy-signals", code) : journeyUrl("strategies", code)}>{hasActive ? "查看最近运行记录" : "查看算法库"}</AppLink></div>
       : <div className="journey-signal-list">{shown.map((row) => {
         const quantityUnknown = row.plan.quantity_status === "unknown" || row.plan.actual_quantity == null;
           const model = row.plan.indicators ?? {};

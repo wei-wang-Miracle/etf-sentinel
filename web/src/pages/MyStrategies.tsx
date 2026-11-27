@@ -1,5 +1,6 @@
 import { useState } from "react";
 import AlgorithmBacktest from "../components/AlgorithmBacktest";
+import AppLink from "../components/AppLink";
 import { api } from "../lib/api";
 import { useResearchQuery } from "../lib/research";
 import { journeyUrl, type JourneyCatalog, type StrategyAssignment } from "../lib/strategyJourney";
@@ -9,7 +10,7 @@ import "../styles/strategy-journey.css";
 const roles: Record<string, string> = { trigger: "入场结构", confirmation: "入场确认", risk: "风险判断", filter: "过滤", exit: "退出" };
 
 export default function MyStrategies({ theme }: { theme: string }) {
-  const [query, update] = useResearchQuery({ code: "", view: "list", algorithm: "", start: "", end: "" });
+  const [query, update] = useResearchQuery({ code: "", view: "list", algorithm: "", start: "", end: "", from: "" });
   const catalog = useApiResource<JourneyCatalog>("/strategies/catalog");
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
@@ -18,6 +19,7 @@ export default function MyStrategies({ theme }: { theme: string }) {
   const isBacktest = query.view === "backtest";
   const isGuide = query.view === "algorithm";
   const selected = catalog.data?.strategies.find((item) => item.id === query.algorithm);
+  const dates = { ...(query.start ? { start: query.start } : {}), ...(query.end ? { end: query.end } : {}) };
 
   async function pause(row: StrategyAssignment) {
     setBusy(row.instrument_code); setError(""); setMessage("");
@@ -29,16 +31,23 @@ export default function MyStrategies({ theme }: { theme: string }) {
     finally { setBusy(""); }
   }
 
-  function backtest(algorithm = "", instrument = code) {
-    update({ view: "backtest", algorithm, code: instrument, start: "", end: "" });
+  function backtest(algorithm = "", instrument = code, keepDates = true) {
+    update({
+      view: "backtest",
+      algorithm,
+      code: instrument,
+      from: "",
+      ...(keepDates ? dates : { start: "", end: "" }),
+    });
   }
 
   return <div className="algorithm-workspace">
     <header className="page-header"><div><h1>{isBacktest ? "策略回测" : isGuide ? "策略说明" : "我的策略"}</h1></div></header>
     <div className="journey-actions journey-page-controls">
-      {isBacktest || isGuide ? <button onClick={() => update({ view: "list", algorithm: "" })}>返回策略库</button>
+      {isGuide && query.from === "backtest" && <button className="primary" onClick={() => update({ view: "backtest", algorithm: "", from: "" })}>返回策略对比</button>}
+      {isBacktest || isGuide ? <button onClick={() => update({ view: "list", algorithm: "", from: "" })}>返回策略库</button>
         : <button className="primary" disabled={!catalog.data?.strategies.length} onClick={() => backtest()}>开始策略对比</button>}
-      {code && <a className="button-link" href={journeyUrl("etfs", code, { detail: "signals" })}>查看每日信号</a>}
+      {code && <AppLink className="button-link" href={journeyUrl("etfs", code, { detail: "signals", ...dates })}>查看每日信号</AppLink>}
     </div>
     {catalog.loading && !catalog.data && <p role="status">正在读取策略目录…</p>}
     {catalog.error && <p className="notice warning" role="alert">{catalog.error} <button onClick={catalog.retry}>重试</button></p>}
@@ -61,8 +70,9 @@ export default function MyStrategies({ theme }: { theme: string }) {
           {catalog.data.assignments.map((row) => <div className="journey-saved-row" key={row.id}>
             <span><span className="mono">{row.instrument_code}</span> · {catalog.data?.strategies.find((item) => item.id === row.strategy_id)?.name ?? row.strategy_id} · {row.active ? "已启用" : "已暂停"}</span>
             <div className="journey-actions">
-              <a href={journeyUrl("etfs", row.instrument_code, { detail: "signals" })}>查看信号</a>
-              <button onClick={() => backtest(row.strategy_id, row.instrument_code)}>对比回测</button>
+              <AppLink href={journeyUrl("etfs", row.instrument_code, { detail: "overview", tab: "price" })}>查看行情</AppLink>
+              <AppLink href={journeyUrl("etfs", row.instrument_code, { detail: "signals" })}>查看信号</AppLink>
+              <button onClick={() => backtest(row.strategy_id, row.instrument_code, false)}>对比回测</button>
               {row.active && <button disabled={!!busy || catalog.loading} onClick={() => void pause(row)}>暂停信号</button>}
             </div>
           </div>)}
@@ -70,7 +80,7 @@ export default function MyStrategies({ theme }: { theme: string }) {
         <div className="algorithm-library" aria-label="策略库">{catalog.data.strategies.map((item) => <section className="panel journey-inset algorithm-card" key={item.id}>
           <header><h2>{item.name}</h2><button onClick={() => backtest(item.id)} aria-label={`回测${item.name}`}>回测这套策略</button></header>
           <p>{item.description}</p>
-          <a href={journeyUrl("strategies", code || undefined, { view: "algorithm", algorithm: item.id })}>策略说明</a>
+          <AppLink href={journeyUrl("strategies", code || undefined, { view: "algorithm", algorithm: item.id, ...dates })}>策略说明</AppLink>
         </section>)}</div>
         {!catalog.data.strategies.length && <p className="empty">暂无可回测策略。</p>}
       </>)}

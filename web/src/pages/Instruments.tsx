@@ -12,6 +12,7 @@ function InstrumentRow({
   const [start, setStart] = useState(item.start_date);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [failed, setFailed] = useState(false);
   const dirty = enabled !== item.enabled || start !== item.start_date;
   useEffect(() => {
     setEnabled(item.enabled);
@@ -20,6 +21,7 @@ function InstrumentRow({
   async function save() {
     setBusy(true);
     setMessage("");
+    setFailed(false);
     try {
       await api(`/instruments/${item.code}`, "PUT", {
         enabled,
@@ -28,6 +30,7 @@ function InstrumentRow({
       setMessage("已保存");
       refresh();
     } catch (e) {
+      setFailed(true);
       setMessage((e as Error).message);
     } finally {
       setBusy(false);
@@ -78,9 +81,14 @@ function InstrumentRow({
         <button disabled={!dirty || busy || !start} onClick={save}>
           {busy ? "保存中" : "保存"}
         </button>
-        <span className="subtext" role="status">
-          {message}
-        </span>
+        {message && (
+          <span
+            className={`subtext ${failed ? "danger-text" : "success-text"}`}
+            role={failed ? "alert" : "status"}
+          >
+            {message}
+          </span>
+        )}
       </td>
     </tr>
   );
@@ -88,6 +96,7 @@ function InstrumentRow({
 
 export default function Instruments({ embedded = false }: { embedded?: boolean }) {
   const [rows, setRows] = useState<Instrument[]>([]);
+  const [search, setSearch] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   async function load() {
@@ -103,6 +112,10 @@ export default function Instruments({ embedded = false }: { embedded?: boolean }
   useEffect(() => {
     void load();
   }, []);
+  const keyword = search.trim().toLowerCase();
+  const visibleRows = rows.filter((item) =>
+    `${item.code}${item.name}`.toLowerCase().includes(keyword),
+  );
   return (
     <>
       <header className="page-header">
@@ -124,9 +137,21 @@ export default function Instruments({ embedded = false }: { embedded?: boolean }
       <section className="panel">
         <div className="panel-header">
           <h2>
-            研究标的 <span className="muted">/ {rows.length}</span>
+            研究标的 <span className="muted">/ {visibleRows.length}{keyword ? `（共 ${rows.length}）` : ""}</span>
           </h2>
-          <span className="muted">数据源：财通证券 · 历史日行情</span>
+          <div className="date-controls">
+            <label className="search-field">
+              <span className="sr-only">筛选标的</span>
+              <input
+                type="search"
+                aria-label="筛选标的"
+                placeholder="筛选代码或名称"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </label>
+            <span className="muted">数据源：财通证券 · 历史日行情</span>
+          </div>
         </div>
         <div className="table-scroll">
           <table>
@@ -142,12 +167,17 @@ export default function Instruments({ embedded = false }: { embedded?: boolean }
               </tr>
             </thead>
             <tbody>
-              {rows.map((item) => (
+              {visibleRows.map((item) => (
                 <InstrumentRow key={item.code} item={item} refresh={load} />
               ))}
             </tbody>
           </table>
         </div>
+        {!loading && !error && rows.length > 0 && !visibleRows.length && (
+          <div className="empty">
+            没有匹配的标的。<button onClick={() => setSearch("")}>清除筛选</button>
+          </div>
+        )}
         {loading && (
           <div className="empty" role="status">
             正在读取标的配置…

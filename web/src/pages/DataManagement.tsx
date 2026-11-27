@@ -4,6 +4,7 @@ import { syncStatusName, type AccountSyncStatus, type AccountSyncSummary } from 
 import Instruments from "./Instruments";
 import Jobs from "./Jobs";
 import Tabs from "../components/Tabs";
+import AppLink from "../components/AppLink";
 import { useResearchQuery } from "../lib/research";
 import { safeReturnUrl } from "../lib/navigation";
 
@@ -12,7 +13,7 @@ export default function DataManagement({ initialTab = "instruments" }: { initial
   const tab = ["instruments", "account", "jobs"].includes(query.manage) ? query.manage : "instruments";
   const returnTo = safeReturnUrl(query.return_to);
   return <>
-    <header className="page-header"><div><h1>数据管理</h1><p>检查采集覆盖、账户同步与任务运行，数据缺失不会按零参与研究。</p></div>{returnTo && <a href={returnTo}>返回原任务{query.code ? ` · ${query.code}` : ""}</a>}</header>
+    <header className="page-header"><div><h1>数据管理</h1><p>检查采集覆盖、账户同步与任务运行，数据缺失不会按零参与研究。</p></div>{returnTo && <AppLink className="button-link" href={returnTo}>返回原任务{query.code ? ` · ${query.code}` : ""}</AppLink>}</header>
     <Tabs label="数据管理分类" items={[["instruments", "标的配置"], ["account", "账户与权益"], ["jobs", "任务与运行记录"]].map(([value, label]) => ({ value, label }))} value={tab} onChange={(manage) => update({ manage })}>
       {tab === "jobs" ? <Jobs /> : tab === "account" ? <DataPreparation key={query.code} initialCode={query.code} /> : <Instruments embedded />}
     </Tabs>

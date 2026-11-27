@@ -48,12 +48,22 @@ export default function App() {
   const [, refreshUrl] = useState(0);
   useEffect(() => { const changed = () => { setPage(pageFromUrl()); refreshUrl((old) => old + 1); }; window.addEventListener("popstate", changed); return () => window.removeEventListener("popstate", changed); }, []);
   function navigate(next: string) { history.pushState(null, "", workspaceUrl(next)); setPage(next); window.dispatchEvent(new PopStateEvent("popstate")); }
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(
+    () => localStorage.getItem("sidebar-collapsed") === "true",
+  );
   const [theme, setTheme] = useState(
     () => localStorage.getItem("theme") ?? "dark",
   );
-  document.documentElement.dataset.theme = theme;
-  const title = pages.find((p) => p.key === page)?.label;
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
+  const isCompare = page === "etfs" && new URLSearchParams(location.search).get("auxiliary") === "compare";
+  const title = isCompare ? "横向对比" : pages.find((p) => p.key === page)?.label;
+  function toggleCollapsed() {
+    const next = !collapsed;
+    setCollapsed(next);
+    localStorage.setItem("sidebar-collapsed", String(next));
+  }
   function toggleTheme() {
     const next = theme === "dark" ? "light" : "dark";
     setTheme(next);
@@ -68,7 +78,7 @@ export default function App() {
         </div>
         <button
           className="collapse-button"
-          onClick={() => setCollapsed(!collapsed)}
+          onClick={toggleCollapsed}
           aria-label={collapsed ? "展开导航" : "折叠导航"}
           aria-expanded={!collapsed}
         >
@@ -109,7 +119,7 @@ export default function App() {
           <span>
             <span className="muted">研究工作台</span>
             <span className="separator">/</span>
-            {title}
+            {isCompare ? <><span className="muted">我的 ETF</span><span className="separator">/</span>{title}</> : title}
           </span>
           <div>
             <span className="muted mono">

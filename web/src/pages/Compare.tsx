@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import AppLink from "../components/AppLink";
 import ChartCaption from "../components/ChartCaption";
 import { journeyUrl } from "../lib/strategyJourney";
 import { api } from "../lib/api";
@@ -105,9 +106,11 @@ export default function Compare({ theme }: { theme: string }) {
       });
     return () => controller.abort();
   }, [dimension, metric, start, end, query.codes, scope, refresh]);
-  const selected = query.codes
-    ? query.codes.split(",")
-    : (result?.series.map((row) => row.code) ?? []);
+  const selected = query.codes === "none"
+    ? []
+    : query.codes
+      ? query.codes.split(",")
+      : (result?.series.map((row) => row.code) ?? []);
   const items = [...(result?.items ?? [])].sort((a, b) =>
     a.rank == null
       ? 1
@@ -126,7 +129,7 @@ export default function Compare({ theme }: { theme: string }) {
     <>
       <header className="page-header">
         <div>
-          <a className="back-link" href={journeyUrl("etfs", new URLSearchParams(location.search).get("code") ?? undefined, { start, end, detail: "overview" })}>返回 ETF 研究</a>
+          <AppLink className="back-link" href={journeyUrl("etfs", new URLSearchParams(location.search).get("code") ?? undefined, { start, end, detail: "overview" })}>返回 ETF 研究</AppLink>
           <h1>横向对比</h1>
           <p>以ETF为研究主体，指数提供关联因子；市场情绪单独作为背景</p>
         </div>
@@ -135,6 +138,13 @@ export default function Compare({ theme }: { theme: string }) {
         <div className="chart-toolbar">
           <label>比较维度 <select aria-label="比较维度" value={dimension} onChange={event => switchDimension(event.target.value)}>{Object.entries(dimensions).map(([key, name]) => <option key={key} value={key}>{name}</option>)}</select></label>
           <div className="date-controls">
+            <div className="range-buttons" role="group" aria-label="快捷日期区间">
+              {[{ label: "3M", days: 90 }, { label: "6M", days: 180 }, { label: "1Y", days: 365 }, { label: "3Y", days: 1095 }].map((item) => {
+                const targetStart = dateAgo(item.days);
+                const targetEnd = dateAgo(1);
+                return <button key={item.label} type="button" aria-pressed={start === targetStart && end === targetEnd} onClick={() => update({ start: targetStart, end: targetEnd })}>{item.label}</button>;
+              })}
+            </div>
             {dimension !== "sentiment" && <label>
               ETF集合{" "}
               <select aria-label="ETF集合" value={scope} onChange={(e) => update({ scope: e.target.value, codes: "" })}>
@@ -218,7 +228,7 @@ export default function Compare({ theme }: { theme: string }) {
               ))}
               {items.length > 0 && (
                 <>
-                  <details><summary>选择对比对象（最多六个）</summary><div className="research-selection">
+                  <details><summary>选择对比对象（已选 {selected.length}/6）</summary><div className="research-selection">
                     {items.map((item) => (
                       <label key={item.code}>
                         <input
@@ -328,11 +338,11 @@ export default function Compare({ theme }: { theme: string }) {
                               {item.object_type === "sentiment" ? (
                                 item.name
                               ) : (
-                                <a
-                                  href={`?page=research&object=${item.object_type}:${item.code}&start=${start}&end=${end}`}
+                                <AppLink
+                                  href={journeyUrl("etfs", item.code, { detail: "overview", start, end })}
                                 >
                                   {item.code} · {item.name}
-                                </a>
+                                </AppLink>
                               )}
                               <small className="subtext">{item.code}</small>
                               {dimension === "valuation" && <small className="subtext">

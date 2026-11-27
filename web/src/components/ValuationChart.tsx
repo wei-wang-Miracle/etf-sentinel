@@ -39,8 +39,14 @@ export default function ValuationChart({
 }) {
   const element = useRef<HTMLDivElement>(null);
   useEffect(() => {
+    const node = element.current;
+    return () => {
+      if (node) echarts.getInstanceByDom(node)?.dispose();
+    };
+  }, []);
+  useEffect(() => {
     if (!element.current || !rows.length) return;
-    const chart = echarts.init(element.current);
+    const chart = echarts.getInstanceByDom(element.current) ?? echarts.init(element.current);
     const p = readChartPalette();
     const dates = [
       ...new Set([
@@ -160,20 +166,23 @@ export default function ValuationChart({
           lineStyle: { width: 1.3 },
         },
       ],
-    });
+    }, { notMerge: true });
     const observer = new ResizeObserver(() => chart.resize());
     observer.observe(element.current);
     return () => {
       observer.disconnect();
-      chart.dispose();
     };
   }, [rows, candles, title, unit, theme]);
+  function resetZoom() {
+    if (!element.current) return;
+    echarts.getInstanceByDom(element.current)?.dispatchAction({ type: "dataZoom", start: 0, end: 100 });
+  }
   return (
     <><div
       className="kline"
       ref={element}
       role="img"
       aria-label={`${title}、指数点位与本地回看分位，可缩放及悬停查看`}
-    /><ChartReadout rows={rows.map(row => ({ date: row.trade_date, values: { [title]: row.value == null ? "—" : `${row.value} ${unit}`, "本地十年回看分位": row.local_percentile == null ? "—" : `${row.local_percentile}%`, "指数收盘点位": String(candles.find(item => item.date === row.trade_date)?.close ?? "—") } }))} /></>
+    /><ChartReadout rows={rows.map(row => ({ date: row.trade_date, values: { [title]: row.value == null ? "—" : `${row.value} ${unit}`, "本地十年回看分位": row.local_percentile == null ? "—" : `${row.local_percentile}%`, "指数收盘点位": String(candles.find(item => item.date === row.trade_date)?.close ?? "—") } }))} onResetZoom={resetZoom} /></>
   );
 }

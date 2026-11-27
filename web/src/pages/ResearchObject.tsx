@@ -1,4 +1,5 @@
 import { useState } from "react";
+import AppLink from "../components/AppLink";
 import ChartCaption from "../components/ChartCaption";
 import Tabs from "../components/Tabs";
 import KLine from "../components/KLine";
@@ -30,6 +31,8 @@ type NationalData = { estimation_start_date: string; holdings: { trade_date: str
 type ReviewMarkers = { markers: { trade_date: string; side: string; quantity: string; price: string }[] };
 const views = [{ value: "price", label: "行情" }, { value: "valuation", label: "关联估值" }, { value: "funds", label: "国家队" }, { value: "sentiment", label: "市场情绪" }];
 const tasks: Record<string, string> = { price: "etf", valuation: "index-valuations", funds: "national-team", sentiment: "sentiment" };
+const quickRanges = [{ label: "3M", days: 90 }, { label: "6M", days: 180 }, { label: "1Y", days: 365 }, { label: "3Y", days: 1095 }];
+const ACCOUNT_SYNC_START = "2025-01-20";
 
 export default function ResearchObject({ theme, code, summary, loading, error, retry }: {
   theme: string; code: string; summary?: ResearchSummary; loading: boolean; error: string; retry: () => void;
@@ -43,12 +46,18 @@ export default function ResearchObject({ theme, code, summary, loading, error, r
   const index = summary?.linked.index_code;
   const category = summary?.summary.sentiment.find((item) => item.category_key === query.category) ?? summary?.summary.sentiment[0];
   const range = `start=${start}&end=${end}`;
+  const today = dateAgo(0);
+  const yesterday = dateAgo(1);
+  const markerStart = start < ACCOUNT_SYNC_START ? ACCOUNT_SYNC_START : start;
+  const markerEnd = end >= today ? yesterday : end;
+  const markerRangeValid = validDates && markerStart <= markerEnd;
+  const markerClamped = start < ACCOUNT_SYNC_START || end >= today;
   const path = !summary || !validDates ? null : tab === "price" ? `/candles/${code}?start=1990-01-01&end=${end}`
     : tab === "valuation" ? index ? `/index-valuations/series/${index}?${range}&metric=${metric}` : null
       : tab === "funds" ? summary.linked.national_team_tracked ? `/national-team/series/${code}?${range}` : null
         : category ? `/sentiment/series/${category.category_key}?${range}` : null;
   const plot = useApiResource<Candle[] | ValuationData | NationalData | SentimentDaily[]>(path);
-  const actual = useApiResource<ReviewMarkers>(tab === "price" && showActual && validDates ? `/account/review/${code}?${range}` : null);
+  const actual = useApiResource<ReviewMarkers>(tab === "price" && showActual && markerRangeValid ? `/account/review/${code}?start=${markerStart}&end=${markerEnd}` : null);
   const history = tab === "price" ? (plot.data as Candle[] | undefined) ?? [] : [];
   const candles = tab === "price" ? history.filter(row => row.date >= start && row.date <= end) : tab === "funds" ? (plot.data as NationalData | undefined)?.candles ?? [] : [];
   const valuation = tab === "valuation" ? plot.data as ValuationData | undefined : undefined;
@@ -88,13 +97,29 @@ export default function ResearchObject({ theme, code, summary, loading, error, r
       </dl>
       {tab === "valuation" && <p className="context-note">关联指数：{summary.summary.valuation?.index_name ?? index ?? "未映射"} <span className="mono">{index}</span>；同指数 ETF 共享估值证据，历史源可能修订，未证明原时点可得。</p>}
       <div className="dossier-chart">
-        {!validDates ? <div className="empty" role="alert">请选择有效的起止日期，起始日期不能晚于截止日期。</div> : nationalUnsupported ? <div className="empty"><h2>该 ETF 不在国家队数据源范围内</h2><p>数据源仅提供18只ETF，不包含 {code}；重新采集不会产生该标的数据。可在顶部切换至源支持的 ETF，如 510500 或 512100。</p></div> : unavailable ? <div className="empty"><p>{unavailable}</p><a href={dataManagementUrl("jobs", tasks[tab], code)}>检查对应数据任务</a></div>
-          : plot.loading ? <div className="chart-loading skeleton-state" role="status">正在读取所选区间…</div> : plot.error ? <div className="empty" role="alert"><p>所选区间读取失败：{plot.error}</p><button onClick={plot.retry}>重试图表</button><a href={dataManagementUrl("jobs", tasks[tab], code)}>检查对应数据任务</a></div>
-            : !hasPlot ? <div className="empty"><h2>所选区间暂无数据</h2><p>可以调整日期，或检查对应采集任务。</p><a href={dataManagementUrl("jobs", tasks[tab], code)}>检查对应数据任务</a></div> : <>
-              {actual.error && <p className="notice warning">真实操作标记暂不可用，行情仍可查看。<button onClick={actual.retry}>重试标记</button></p>}
+        {!validDates ? <div className="empty" role="alert">请选择有效的起止日期，起始日期不能晚于截止日期。</div> : nationalUnsupported ? <div className="empty"><h2>该 ETF 不在国家队数据源范围内</h2><p>数据源仅提供18只ETF，不包含 {code}；重新采集不会产生该标的数据。可在顶部切换至源支持的 ETF，如 510500 或 512100。</p></div> : unavailable ? <div className="empty"><p>{unavailable}</p><AppLink href={dataManagementUrl("jobs", tasks[tab], code)}>检查对应数据任务</AppLink></div>
+          : plot.loading ? <div className="chart-loading skeleton-state" role="status">正在读取所选区间…</div> : plot.error ? <div className="empty" role="alert"><p>所选区间读取失败：{plot.error}</p><button onClick={plot.retry}>重试图表</button><AppLink href={dataManagementUrl("jobs", tasks[tab], code)}>检查对应数据任务</AppLink></div>
+            : !hasPlot ? <div className="empty"><h2>所选区间暂无数据</h2><p>可以调整日期，或检查对应采集任务。</p><AppLink href={dataManagementUrl("jobs", tasks[tab], code)}>检查对应数据任务</AppLink></div> : <>
+              {showActual && !markerRangeValid && <p className="notice">所选区间早于账户同步起点（{ACCOUNT_SYNC_START}），暂无真实操作记录可叠加。</p>}
+              {showActual && markerRangeValid && markerClamped && !actual.error && <p className="muted">真实操作仅叠加账户同步起点（{ACCOUNT_SYNC_START}）至昨日的已同步记录。</p>}
+              {actual.error && <p className="notice warning">真实操作标记暂不可用（{actual.error}），行情仍可查看。<button onClick={actual.retry}>重试标记</button></p>}
               {tab === "price" ? <EtfFactorChart history={history} start={start} end={end} theme={theme} instrumentCode={code}
                 trades={showActual ? actual.data?.markers : undefined}
-                controls={<label><input type="checkbox" checked={showActual} onChange={event => setShowActual(event.target.checked)} />叠加真实操作</label>} />
+                controls={<>
+                  <select
+                    className="quick-range-select"
+                    aria-label="快捷日期区间"
+                    value={quickRanges.find((item) => start === dateAgo(item.days) && end === dateAgo(1))?.label ?? ""}
+                    onChange={(event) => {
+                      const picked = quickRanges.find((item) => item.label === event.target.value);
+                      if (picked) update({ start: dateAgo(picked.days), end: dateAgo(1) });
+                    }}
+                  >
+                    <option value="">快捷区间</option>
+                    {quickRanges.map((item) => <option key={item.label} value={item.label}>近 {item.label}</option>)}
+                  </select>
+                  <label><input type="checkbox" checked={showActual} onChange={event => setShowActual(event.target.checked)} />叠加真实操作</label>
+                </>} />
                 : tab === "valuation" ? <ValuationChart rows={valuation!.series} candles={valuation!.candles} title={metrics[metric].name} unit={metrics[metric].unit} theme={theme} />
                   : tab === "funds" ? <><KLine rows={candles} holdings={national!.holdings} theme={theme} />{!candles.length && <p className="notice warning">区间缺少本地日 K，仅展示估算比例，不伪造 ETF 价格。</p>}</>
                     : <SentimentTrend rows={sentiment!} theme={theme} />}
@@ -106,7 +131,7 @@ export default function ResearchObject({ theme, code, summary, loading, error, r
         <p>最新摘要按各自源日期展示，不代表所选历史时点已知；图表仅展示所选日期区间。数据截止日期保留在各指标旁。</p>
         <p>行情来源：财通证券。行情标签页以源复权收盘比率生成前复权 OHLC，消除已核验份额折算带来的图形断层；顶底确认按交易日可得的因果复权价格计算。个人记录为本地只读同步，未确认成交所属日前的标记仅用于核对。国家队为固定基准估算比例，零份额下为空；恐贪保留源类别和标签，不推断分类阈值。</p>
         <p>估值来源：韭圈；本地分位以截至各日十日历年有效样本统计，显示区间不改变回看窗口。修订历史不冒充原时点可得数据。</p>
-        <a href={journeyUrl("etfs", code, { auxiliary: "compare", dimension: tab === "funds" ? "holdings" : tab === "price" ? "trend" : tab, start, end })}>进入跨 ETF 对比</a>
+        <AppLink href={journeyUrl("etfs", code, { auxiliary: "compare", dimension: tab === "funds" ? "holdings" : tab === "price" ? "trend" : tab, start, end })}>进入跨 ETF 对比</AppLink>
       </details>
     </>}
     </Tabs>

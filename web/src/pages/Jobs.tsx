@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, stamp, statusNames, type Job, type Run } from "../lib/api";
 import { useResearchQuery } from "../lib/research";
 import Tabs from "../components/Tabs";
@@ -24,22 +24,24 @@ function TaskPanel({ task }: { task: string }) {
   const [job, setJob] = useState<Job | null>(null);
   const [time, setTime] = useState("01:00");
   const [enabled, setEnabled] = useState(true);
-  const [error, setError] = useState("");
+  const [pollError, setPollError] = useState("");
+  const [actionError, setActionError] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<number | null>(null);
+  const logPanelRef = useRef<HTMLElement>(null);
   async function load(initial = false, signal?: AbortSignal) {
     try {
       const data = await api<Job>(path, "GET", undefined, signal);
       if (signal?.aborted) return;
       setJob(data);
-      setError("");
+      setPollError("");
       if (initial) {
         setTime(data.time);
         setEnabled(data.enabled);
       }
     } catch (e) {
-      if (!signal?.aborted) setError((e as Error).message);
+      if (!signal?.aborted) setPollError((e as Error).message);
     }
   }
   useEffect(() => {
@@ -51,11 +53,18 @@ function TaskPanel({ task }: { task: string }) {
       clearInterval(timer);
     };
   }, []);
+  useEffect(() => {
+    if (selected != null) {
+      logPanelRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      logPanelRef.current?.focus({ preventScroll: true });
+    }
+  }, [selected]);
   const running = job?.runs.some((r) => r.status === "running");
   const detail: Run | undefined = job?.runs.find((r) => r.id === selected);
   async function action(kind: "save" | "run") {
     setBusy(true);
     setMessage("");
+    setActionError("");
     try {
       await api(
         kind === "save" ? path : `${path}/run`,
@@ -67,11 +76,12 @@ function TaskPanel({ task }: { task: string }) {
       );
       await load();
     } catch (e) {
-      setError((e as Error).message);
+      setActionError((e as Error).message);
     } finally {
       setBusy(false);
     }
   }
+  const error = actionError || pollError;
   return (
     <>
       <header className="page-header">
@@ -89,8 +99,8 @@ function TaskPanel({ task }: { task: string }) {
       </header>
       {error && (
         <div className="alert" role="alert">
-          {error}
-          <button onClick={() => load(!job)}>重试</button>
+          <span>{error}</span>
+          <button onClick={() => { setActionError(""); void load(!job); }}>重试</button>
         </div>
       )}
       {job && !job.source_configured && (
@@ -168,57 +178,61 @@ function TaskPanel({ task }: { task: string }) {
           <h2>运行记录</h2>
           <span className="muted">最近 20 次 · 自动刷新</span>
         </div>
-        <div className="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>运行编号</th>
-                <th>触发方式</th>
-                <th>开始时间</th>
-                <th>结束时间</th>
-                <th>处理记录</th>
-                <th>状态</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {job?.runs.map((run) => (
-                <tr key={run.id}>
-                  <td className="mono">#{run.id}</td>
-                  <td>{run.trigger === "manual" ? "手动" : "定时"}</td>
-                  <td className="mono">{stamp(run.started_at)}</td>
-                  <td className="mono">{stamp(run.ended_at)}</td>
-                  <td>
-                    {run.logs.length} 条 /{" "}
-                    {run.logs.filter((l) => l.status === "failed").length} 条失败
-                  </td>
-                  <td>
-                    <span className={`badge ${run.status}`}>
-                      {statusNames[run.status]}
-                    </span>
-                  </td>
-                  <td>
-                    <button
-                      onClick={() =>
-                        setSelected(selected === run.id ? null : run.id)
-                      }
-                    >
-                      {selected === run.id ? "收起日志" : "查看日志"}
-                    </button>
-                  </td>
+        {!job ? (
+          <div className="empty" role="status">正在读取运行记录…</div>
+        ) : job.runs.length ? (
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>运行编号</th>
+                  <th>触发方式</th>
+                  <th>开始时间</th>
+                  <th>结束时间</th>
+                  <th>处理记录</th>
+                  <th>状态</th>
+                  <th>操作</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {job && !job.runs.length && (
+              </thead>
+              <tbody>
+                {job.runs.map((run) => (
+                  <tr key={run.id}>
+                    <td className="mono">#{run.id}</td>
+                    <td>{run.trigger === "manual" ? "手动" : "定时"}</td>
+                    <td className="mono">{stamp(run.started_at)}</td>
+                    <td className="mono">{stamp(run.ended_at)}</td>
+                    <td>
+                      {run.logs.length} 条 /{" "}
+                      {run.logs.filter((l) => l.status === "failed").length} 条失败
+                    </td>
+                    <td>
+                      <span className={`badge ${run.status}`}>
+                        {statusNames[run.status]}
+                      </span>
+                    </td>
+                    <td>
+                      <button
+                        aria-pressed={selected === run.id}
+                        onClick={() =>
+                          setSelected(selected === run.id ? null : run.id)
+                        }
+                      >
+                        {selected === run.id ? "收起日志" : "查看日志"}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
           <div className="empty">
             还没有运行记录。配置完成后，点击“立即采集”更新行情并核验权益资料。
           </div>
         )}
       </section>
       {detail && (
-        <section className="panel">
+        <section ref={logPanelRef} tabIndex={-1} className="panel" aria-label={`运行 ${detail.id} 处理明细`}>
           <div className="panel-header">
             <h2>运行 #{detail.id} · 处理明细</h2>
             <button onClick={() => setSelected(null)}>关闭日志</button>

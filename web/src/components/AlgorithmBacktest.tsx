@@ -1,8 +1,9 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { api, stamp } from "../lib/api";
 import { dateAgo } from "../lib/research";
 import { journeyUrl, type Comparison, type ComparisonTrack, type JourneyCatalog, type StrategyAssignment } from "../lib/strategyJourney";
 import { useApiResource } from "../lib/useApiResource";
+import AppLink from "./AppLink";
 import StrategyComparison from "./StrategyComparison";
 
 type Props = {
@@ -34,11 +35,26 @@ export default function AlgorithmBacktest({ catalog, code, algorithm, range, the
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState<string>();
   const [error, setError] = useState("");
+  const confirmRef = useRef<HTMLElement>(null);
+  const resultRef = useRef<HTMLDivElement>(null);
   const history = useApiResource<Comparison[]>(code ? `/strategies/comparisons?instrument_code=${code}` : null);
   const historical = useApiResource<Comparison>(historicalId ? `/strategies/comparisons/${historicalId}` : null);
   const result = historicalId ? historical.data : current?.result;
   const stale = !historicalId && !!current && current.signature !== signature;
   const ready = !!instrument?.default_start && !!start && !!end && start <= end && end <= maxDate && choices.length > 0;
+
+  useEffect(() => {
+    if (pending) {
+      confirmRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      confirmRef.current?.focus({ preventScroll: true });
+    }
+  }, [pending]);
+
+  useEffect(() => {
+    if (historicalId && historical.data) {
+      resultRef.current?.scrollIntoView({ block: "start", behavior: "smooth" });
+    }
+  }, [historicalId, historical.data]);
 
   async function run(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -95,9 +111,10 @@ export default function AlgorithmBacktest({ catalog, code, algorithm, range, the
               <input type="checkbox" checked={selected.includes(item.id)} onChange={(event) => setSelected((values) => event.target.checked ? [...values, item.id] : values.filter((value) => value !== item.id))} />
               <span><strong>{item.name}</strong><span className="muted">{item.description}</span></span>
             </label>
-            <a href={journeyUrl("strategies", code || undefined, { view: "algorithm", algorithm: item.id })}>算法说明</a>
+            <AppLink href={journeyUrl("strategies", code || undefined, { view: "algorithm", algorithm: item.id, from: "backtest", ...(start ? { start } : {}), ...(end ? { end } : {}) })}>算法说明</AppLink>
           </div>)}
         </fieldset>}
+        {!!available.length && !choices.length && <p className="notice warning">请至少选择一套算法后再运行回测。</p>}
         <div className="journey-section-heading algorithm-run">
           <p className="muted">统一口径：本金 ¥50,000，佣金万分之一，最低佣金 ¥0，滑点 5 基点。收盘判定，下一交易日开盘模拟成交。</p>
           <button className="primary" type="submit" disabled={busy || !!saving || !ready}>{busy ? "正在计算…" : "运行回测"}</button>
@@ -109,15 +126,17 @@ export default function AlgorithmBacktest({ catalog, code, algorithm, range, the
     {stale && <p className="notice" role="status">研究范围已变更，请重新运行后再采用。</p>}
     {historical.loading && <p className="notice" role="status">正在读取回测快照…</p>}
     {historical.error && <p className="notice warning" role="alert">{historical.error} <button onClick={historical.retry}>重试</button></p>}
-    {pending && !historicalId && !stale && <section className="notice" aria-label="确认采用策略">
+    {pending && !historicalId && !stale && <section ref={confirmRef} tabIndex={-1} className="notice" aria-label="确认采用策略">
       <p>{assignment && assignment.strategy_id !== pending.strategy_id ? "替换当前策略为" : "采用"}「{pending.name}」用于 <span className="mono">{code}</span> 的后续盘前信号。历史计划保留，不会下单。</p>
       <div className="journey-actions"><button className="primary" disabled={!!saving} onClick={() => void adopt()}>确认采用</button><button disabled={!!saving} onClick={() => setPending(undefined)}>取消</button></div>
     </section>}
-    {result && <StrategyComparison key={result.id} result={result} theme={theme} renderAdoption={!stale && !historicalId ? (track) => {
-      if (track.strategy_id === "hold" || !track.account || track.status !== "success") return <span className="muted">—</span>;
-      if (assignment?.active && assignment.strategy_id === track.strategy_id) return <a href={journeyUrl("etfs", code, { detail: "signals" })}>当前已采用 · 查看信号</a>;
-      return <button type="button" disabled={busy || !!saving} aria-label={`采用${track.name}`} onClick={() => setPending(track)}>采用策略</button>;
-    } : undefined} />}
+    <div ref={resultRef}>
+      {result && <StrategyComparison key={result.id} result={result} theme={theme} renderAdoption={!stale && !historicalId ? (track) => {
+        if (track.strategy_id === "hold" || !track.account || track.status !== "success") return <span className="muted">—</span>;
+        if (assignment?.active && assignment.strategy_id === track.strategy_id) return <AppLink href={journeyUrl("etfs", code, { detail: "signals" })}>当前已采用 · 查看信号</AppLink>;
+        return <button type="button" disabled={busy || !!saving} aria-label={`采用${track.name}`} onClick={() => setPending(track)}>采用策略</button>;
+      } : undefined} />}
+    </div>
     {code && <details className="panel journey-inset">
       <summary>历史回测</summary>
       {history.loading && <p role="status">正在读取回测记录…</p>}
