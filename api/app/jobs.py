@@ -1,7 +1,6 @@
 """独立任务后台执行与数据库级互斥调度。"""
 
 import logging
-import os
 import threading
 from datetime import timedelta
 
@@ -16,6 +15,15 @@ from app.sentiment import collect_sentiment
 
 logger = logging.getLogger(__name__)
 LOCK_ID = 510500512100
+_DEFAULT_COLLECT = collect
+_PENDING_BACKFILL_LOCK = threading.Lock()
+_PENDING_BACKFILL_CODES: set[str] = set()
+
+
+def queue_free_backfill(code):
+    """登记新增 ETF 代码，在最近一次任务 1 运行中补齐上市至今日免费历史行情。"""
+    with _PENDING_BACKFILL_LOCK:
+        _PENDING_BACKFILL_CODES.add(code)
 
 
 def launch(trigger="manual", job_id=1):
@@ -50,7 +58,16 @@ def launch(trigger="manual", job_id=1):
     def execute():
         """异常时保留已提交区间，清理互斥锁并记录安全摘要。"""
         try:
-            collectors[job_id](run_id)
+            if job_id == 1:
+                with _PENDING_BACKFILL_LOCK:
+                    pending = tuple(sorted(_PENDING_BACKFILL_CODES))
+                    _PENDING_BACKFILL_CODES.clear()
+                if pending and collect is _DEFAULT_COLLECT:
+                    collect(run_id, backfill_codes=pending)
+                else:
+                    collectors[job_id](run_id)
+            else:
+                collectors[job_id](run_id)
         except Exception:  # noqa: BLE001 — 后台边界必须落库并释放锁，不暴露源凭据
             logger.error("采集任务异常 run_id=%s；请检查数据库及数据源配置", run_id)
             with Session() as db:
@@ -119,9 +136,7 @@ def scheduler(stop):
                         select(Job).where(Job.id == job_id).with_for_update(key_share=True)
                     )
                     current = now()
-                    configured = job_id in (2, 3, 4, 5) or (
-                        os.getenv("CHATBI_TOKEN")
-                    )
+                    configured = True
                     if not (
                         job.enabled
                         and configured

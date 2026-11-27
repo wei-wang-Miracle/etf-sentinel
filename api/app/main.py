@@ -23,7 +23,13 @@ from app.backtest_routes import router as backtest_router
 from app.collection import fetch_rows, now, validate_row
 from app.db import Session
 from app.index_valuation_routes import router as index_valuation_router
-from app.jobs import launch, next_run, recover_interrupted, scheduler
+from app.jobs import (
+    launch,
+    next_run,
+    queue_free_backfill,
+    recover_interrupted,
+    scheduler,
+)
 from app.models import (
     BacktestSource,
     Candle,
@@ -154,6 +160,7 @@ def create_instrument(body: InstrumentCreate):
         if created is None:
             raise HTTPException(409, "该 ETF 已在标的配置中")
         db.commit()
+    queue_free_backfill(code)
     return {"code": code, "run_id": launch()}
 
 
@@ -183,9 +190,8 @@ def get_job():
             "enabled": job.enabled,
             "time": job.time,
             "next_run": next_run(job),
-            "source_configured": bool(
-                os.getenv("CHATBI_TOKEN")
-            ),
+            "source_configured": True,
+            "chatbi_configured": bool(os.getenv("CHATBI_TOKEN")),
             "runs": [
                 {
                     "id": r.id,
@@ -212,9 +218,7 @@ def update_job(body: JobUpdate):
 
 @app.post("/job/run", status_code=202)
 def run_job():
-    """手动触发异步采集，重复触发返回冲突。"""
-    if not os.getenv("CHATBI_TOKEN"):
-        raise HTTPException(422, "后端数据源凭据尚未配置")
+    """手动触发异步采集，优先 ChatBI 并支持静默切换免费源；重复触发返回冲突。"""
     run_id = launch()
     if run_id is None:
         raise HTTPException(409, "采集任务正在运行")

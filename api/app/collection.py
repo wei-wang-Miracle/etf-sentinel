@@ -127,14 +127,24 @@ def fetch_rows(code, start, end, *, api_path="daily_ohlcv_etf"):
             raise ValueError("数据源返回格式错误") from None
 
 
-def collect(run_id, fetch=fetch_rows, fetch_equity=None):
-    """采集启用标的行情，并逐只核验全部配置标的权益。"""
+def collect(
+    run_id,
+    fetch=fetch_rows,
+    fetch_equity=None,
+    *,
+    backfill_codes=(),
+    backfill_fn=None,
+    fallback_fn=None,
+):
+    """采集启用标的行情，并逐只核验全部配置标的权益；默认源失败时静默切换免费源，新增标的追加历史回补。"""
     if fetch_equity is None:
         from app.backtest_data import fetch_actions
 
         fetch_equity = fetch_actions
+    allow_fallback = fallback_fn is not None or fetch is fetch_rows
     cutoff = now().date() - timedelta(days=1)
     failures = successes = 0
+    fallback_windows = {}
     with Session() as db:
         run = db.get(Run, run_id)
         configured_instruments = db.scalars(
@@ -195,6 +205,12 @@ def collect(run_id, fetch=fetch_rows, fetch_equity=None):
                     }
                 except (ValueError, KeyError, InvalidOperation) as exc:
                     db.rollback()
+                    if allow_fallback:
+                        # 既有 ChatBI 失败时暂不判错，待权益核验完成后静默切换免费行情源补齐。
+                        fallback_windows.setdefault(instrument.code, []).append(
+                            (start, end, query_start, str(exc))
+                        )
+                        continue
                     # 复查失败也必须重试，不能继续沿用旧成功区间跳过该月。
                     failed_window = db.get(Window, (instrument.code, start))
                     if failed_window is not None:
@@ -255,6 +271,115 @@ def collect(run_id, fetch=fetch_rows, fetch_equity=None):
                 }
             run.logs = [*run.logs, entry]
             db.commit()
+
+        if fallback_windows:
+            if fallback_fn is None:
+                from app.free_market_sources import backfill_instrument_history
+
+                fallback_fn = backfill_instrument_history
+            for code, pending_windows in fallback_windows.items():
+                earliest_query = min(item[2] for item in pending_windows)
+                try:
+                    result = fallback_fn(
+                        db,
+                        code,
+                        end_date=cutoff,
+                        collected_at=now(),
+                        tencent_start_year=max(2006, earliest_query.year - 1),
+                    )
+                except (ValueError, KeyError, InvalidOperation) as exc:
+                    db.rollback()
+                    for start, end, query_start, chatbi_err in pending_windows:
+                        failed_window = db.get(Window, (code, start))
+                        if failed_window is not None:
+                            db.delete(failed_window)
+                        failures += 1
+                        run.logs = [
+                            *run.logs,
+                            {
+                                "kind": "market",
+                                "code": code,
+                                "start": str(query_start),
+                                "end": str(end),
+                                "status": "failed",
+                                "count": 0,
+                                "message": f"ChatBI失败（{chatbi_err}），免费源切换亦失败：{exc}",
+                            },
+                        ]
+                else:
+                    latest_end = max(end for _, end, _, _ in pending_windows)
+                    for start, end, _, _ in pending_windows:
+                        previous = db.get(Window, (code, start))
+                        if previous:
+                            previous.end = end
+                        else:
+                            db.add(Window(code=code, start=start, end=end))
+                    successes += 1
+                    run.logs = [
+                        *run.logs,
+                        {
+                            "kind": "market",
+                            "code": code,
+                            "start": str(earliest_query),
+                            "end": str(latest_end),
+                            "status": "success",
+                            "count": result["backfill_candidates"],
+                            "message": (
+                                f"ChatBI 不可用，已切换免费源 {result['selected_source']} "
+                                f"对比校验并补齐 {result['backfill_candidates']} 条"
+                            ),
+                        },
+                    ]
+                db.commit()
+
+        if backfill_codes:
+            if backfill_fn is None:
+                from app.free_market_sources import backfill_instrument_history
+
+                backfill_fn = backfill_instrument_history
+            from app.free_market_sources import free_backfill_end_date
+
+            backfill_end = free_backfill_end_date(now())
+            enabled_codes = {item.code for item in instruments}
+            for code in backfill_codes:
+                if code not in enabled_codes:
+                    continue
+                try:
+                    result = backfill_fn(
+                        db,
+                        code,
+                        end_date=backfill_end,
+                        collected_at=now(),
+                        require_equity=True,
+                    )
+                except (ValueError, KeyError, InvalidOperation) as exc:
+                    db.rollback()
+                    failures += 1
+                    entry = {
+                        "kind": "free_backfill",
+                        "code": code,
+                        "status": "failed",
+                        "count": 0,
+                        "message": str(exc),
+                    }
+                else:
+                    successes += 1
+                    entry = {
+                        "kind": "free_backfill",
+                        "code": code,
+                        "start": result["listing_start"],
+                        "end": result["end"],
+                        "status": "success",
+                        "count": result["backfill_candidates"],
+                        "message": (
+                            f"已通过 {result['selected_source']} 对比校验并补齐"
+                            f" {result['backfill_candidates']} 条历史日K"
+                            if result["backfill_candidates"]
+                            else f"已通过 {result['selected_source']} 对比校验，无缺失早期日K"
+                        ),
+                    }
+                run.logs = [*run.logs, entry]
+                db.commit()
 
         run.status = ("partial" if successes else "failed") if failures else "success"
         run.ended_at = now()
