@@ -19,7 +19,12 @@ def main():
     parser.add_argument("input", type=Path, help="冻结目录中的input.json")
     parser.add_argument("output", type=Path, help="必须不存在的研究结果JSON")
     parser.add_argument("--rounds", type=int, default=50, help="确定性演化轮数，默认50")
-    parser.add_argument("--seed", type=int, default=20261127, help="候选演化随机种子")
+    parser.add_argument("--seed", type=int, default=20261128, help="候选演化随机种子")
+    parser.add_argument(
+        "--eval-start-date",
+        default=None,
+        help="可选开发段正式评分起点 YYYY-MM-DD；默认读取冻结文件内 eval_start_date",
+    )
     args = parser.parse_args()
     input_path = args.input.resolve()
     output_path = args.output.resolve()
@@ -44,7 +49,12 @@ def main():
     universe = snapshot.get("universe")
     if not isinstance(universe, dict):
         parser.error("冻结输入缺少ETF集合")
-    result = run_research(universe, rounds=args.rounds, random_seed=args.seed)
+    result = run_research(
+        universe,
+        rounds=args.rounds,
+        random_seed=args.seed,
+        eval_start_date=args.eval_start_date or snapshot.get("eval_start_date"),
+    )
     result["input"] = {
         "path": str(input_path),
         "sha256": digest(input_path),

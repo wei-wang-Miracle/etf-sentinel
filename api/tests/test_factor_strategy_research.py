@@ -644,3 +644,189 @@ def test_release_gate_reasons_merge_normal_and_stress_cost_windows():
         holdout=holdout,
         holdout_stress=holdout_stress,
     ) == ["开发段压力成本：利润因子低于1.25"]
+
+
+def test_v15_evidence_tiers_classify_style_and_intra_unit_consistency():
+    from app.factor_strategy_research import (
+        classify_expression_style,
+        evaluate_evidence_tier,
+        summarize_category,
+    )
+
+    assert (
+        classify_expression_style(
+            {
+                "op": "all",
+                "items": [
+                    {"op": "factor", "factor_id": "above_ma250"},
+                    {"op": "factor", "factor_id": "atr_box_breakout"},
+                ],
+            }
+        )
+        == "trend_breakout"
+    )
+    assert (
+        classify_expression_style(
+            {
+                "op": "all",
+                "items": [
+                    {"op": "factor", "factor_id": "erp_high_percentile"},
+                    {"op": "factor", "factor_id": "oversold_recovery"},
+                ],
+            }
+        )
+        == "reversal_value"
+    )
+
+    universe = {
+        "159915": {"category": "创业板", "independent_key": "399006.SZ"},
+        "159952": {"category": "创业板", "independent_key": "399006.SZ"},
+    }
+    good_evals = {
+        "159915": {
+            "rounds": [{"pnl": "200"}] * 6 + [{"pnl": "-50"}] * 2,
+            "carry_in_rounds": [],
+            "carry_in_completed": 0,
+            "return": 0.12,
+            "drawdown": -0.05,
+            "exposure": 0.3,
+            "completed": 8,
+            "open": 0,
+            "benchmark": {"return": 0.05, "drawdown": -0.1},
+        },
+        "159952": {
+            "rounds": [{"pnl": "180"}] * 5 + [{"pnl": "-60"}] * 3,
+            "carry_in_rounds": [],
+            "carry_in_completed": 0,
+            "return": 0.09,
+            "drawdown": -0.06,
+            "exposure": 0.3,
+            "completed": 8,
+            "open": 0,
+            "benchmark": {"return": 0.05, "drawdown": -0.1},
+        },
+    }
+    summary_good = summarize_category("创业板", universe, good_evals)
+    assert summary_good["intra_unit_consistency"]["all_positive"] is True
+
+    # 趋势策略在 55% 胜率 + 高 PF 下，单独立单位且类内 ETF 一致为正应获得 single_unit_candidate
+    tier = evaluate_evidence_tier(
+        style="trend_breakout",
+        development=_score_summary(
+            completed=16,
+            win_rate=0.55,
+            profit_factor=2.1,
+            independent_units=1,
+            cross_unit_pass=None,
+            intra_unit_consistency={"all_positive": True},
+        ),
+        development_stress=_score_summary(
+            completed=16,
+            win_rate=0.52,
+            profit_factor=1.9,
+            independent_units=1,
+            cross_unit_pass=None,
+            intra_unit_consistency={"all_positive": True},
+        ),
+        holdout=_score_summary(
+            completed=8,
+            win_rate=0.50,
+            profit_factor=2.5,
+            independent_units=1,
+            cross_unit_pass=None,
+            intra_unit_consistency={"all_positive": True},
+        ),
+        holdout_stress=_score_summary(
+            completed=8,
+            win_rate=0.50,
+            profit_factor=2.2,
+            independent_units=1,
+            cross_unit_pass=None,
+            intra_unit_consistency={"all_positive": True},
+        ),
+    )
+    assert tier["evidence_tier"] == "single_unit_candidate"
+
+    # 若同类另一只 ETF 亏损，则不得冒充类内一致候选
+    mixed = evaluate_evidence_tier(
+        style="trend_breakout",
+        development=_score_summary(
+            completed=16,
+            win_rate=0.55,
+            profit_factor=2.1,
+            independent_units=1,
+            cross_unit_pass=None,
+            intra_unit_consistency={"all_positive": True},
+        ),
+        development_stress=_score_summary(
+            completed=16,
+            win_rate=0.52,
+            profit_factor=1.9,
+            independent_units=1,
+            cross_unit_pass=None,
+            intra_unit_consistency={"all_positive": True},
+        ),
+        holdout=_score_summary(
+            completed=8,
+            win_rate=0.50,
+            profit_factor=2.5,
+            independent_units=1,
+            cross_unit_pass=None,
+            intra_unit_consistency={"all_positive": False},
+        ),
+        holdout_stress=_score_summary(
+            completed=8,
+            win_rate=0.50,
+            profit_factor=2.2,
+            independent_units=1,
+            cross_unit_pass=None,
+            intra_unit_consistency={"all_positive": False},
+        ),
+    )
+    assert mixed["evidence_tier"] == "single_unit_mixed"
+
+
+def test_v15_excludes_short_regime_subfactors_and_outputs_peer_and_regime_checks():
+    from app.factor_strategy_research import category_factor_ids, run_research
+
+    rows = price_rows(500)
+    truth = truth_rows(len(rows))
+    # 短历史政权子因子仅在开发期末尾出现（<35%），不应污染长期演化池
+    for idx in range(70, 395, 20):
+        truth[idx]["box_breakout_up"] = True
+        truth[idx + 1]["turning_top"] = True
+        truth[idx + 2]["ma60_rising"] = True
+        truth[idx + 3]["strong_close"] = True
+        truth[idx]["market_fear_extreme"] = True
+    truth[400]["market_ivix_high"] = True
+    truth[430]["market_ivix_high"] = True
+    truth[435]["market_futures_deep_discount"] = True
+
+    universe = {
+        "159915": {
+            "category": "创业板",
+            "independent_key": "399006.SZ",
+            "rows": rows,
+            "actions": {"dividends": []},
+            "factor_truth": truth,
+        },
+        "588050": {
+            "category": "科创板",
+            "independent_key": "000688.SH",
+            "rows": rows,
+            "actions": {"dividends": []},
+            "factor_truth": truth,
+        },
+    }
+    pool = category_factor_ids(
+        "创业板", universe, rows[410]["trade_date"], exclude_short_regime=True
+    )
+    assert "market_ivix_high" not in pool
+    assert "market_fear_extreme" in pool
+
+    report = run_research(universe, rounds=1, eval_start_date=rows[100]["trade_date"])
+    assert report["version"] == "factor-strategy-research-v1.5.0"
+    leader = report["category_leaders"]["创业板"]
+    assert "evidence_tier" in leader
+    assert leader["peer_cross_check"]["peer_category"] == "科创板"
+    assert leader["regime_overlay_check"]["available"] is True

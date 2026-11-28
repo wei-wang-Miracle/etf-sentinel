@@ -36,7 +36,7 @@ STRESS_COSTS = {
     "minimum_commission": 5,
     "slippage_bps": 10,
 }
-RESEARCH_VERSION = "factor-strategy-research-v1.4.0"
+RESEARCH_VERSION = "factor-strategy-research-v1.5.0"
 HOLDOUT_RATIO = 0.2
 MIN_HOLDOUT_DAYS = 60
 MIN_COMPLETED_TRADES = 5
@@ -48,6 +48,80 @@ MAX_DRAWDOWN_COMPRESSION_RATIO = 0.5
 MAX_DRAWDOWN = -0.12
 MIN_PROFIT_FACTOR = 1.25
 MAX_EXPLANATION_CHARS = 100
+MAX_CANDIDATE_ATOMS = 5
+MAX_CANDIDATE_DEPTH = 3
+
+# 仅近约1年才有历史的新增政权子因子（区别于 2020-08 起的总恐贪分数）
+SHORT_HISTORY_REGIME_FACTORS = frozenset(
+    {
+        "market_ivix_calm",
+        "market_ivix_high",
+        "market_breadth_weak",
+        "market_futures_deep_discount",
+    }
+)
+
+TREND_BREAKOUT_FACTORS = frozenset(
+    {
+        "atr_box_breakout",
+        "box_breakout_up",
+        "volume_breakout_up",
+        "above_ma250",
+        "ma120_rising",
+        "ma60_rising",
+        "ma20_ma60_bullish",
+        "ma5_cross_ma20_up",
+        "adx_trending",
+        "volatility_contracting",
+        "gap_up_strong",
+        "relative_strength_20d_positive",
+    }
+)
+REVERSAL_VALUE_FACTORS = frozenset(
+    {
+        "atr_oversold",
+        "wilder_rsi_oversold",
+        "oversold_recovery",
+        "turning_bottom",
+        "deep_drawdown_60d",
+        "consecutive_down_exhaustion",
+        "erp_high_percentile",
+        "valuation_low_percentile",
+        "dividend_yield_high",
+        "market_fear_extreme",
+        "sentiment_extreme_fear",
+        "sentiment_fear_rebound",
+    }
+)
+STYLE_PROFILES = {
+    "trend_breakout": {
+        "label": "趋势/波动突破",
+        "min_dev_completed": 8,
+        "min_holdout_completed": 5,
+        "min_win_rate": 0.45,
+        "min_profit_factor": 1.50,
+        "max_drawdown": -0.12,
+    },
+    "reversal_value": {
+        "label": "反转/估值修复",
+        "min_dev_completed": 8,
+        "min_holdout_completed": 5,
+        "min_win_rate": 0.60,
+        "min_profit_factor": 1.25,
+        "max_drawdown": -0.12,
+    },
+}
+PEER_CATEGORY_MAP = {
+    "大盘宽基": "中盘宽基",
+    "中盘宽基": "小盘宽基",
+    "小盘宽基": "中盘宽基",
+    "微盘": "小盘宽基",
+    "创业板": "科创板",
+    "科创板": "创业板",
+    "通信设备": "创业板",
+    "半导体材料设备": "科创板",
+    "黄金": "大盘宽基",
+}
 
 # 因子只有一个可计算身份，但研究表达式必须遵守其因果方向：入场用于发现
 # 趋势/反转机会，退出用于兑现、转弱和风险收缩，避免把买点反向当成卖点。
@@ -321,6 +395,8 @@ def prepare_factor_strategy(
     exit_expression,
     *,
     costs=COSTS,
+    risk_baseline=RISK_BASELINE,
+    start_index=None,
 ):
     """以既有因子表达式生成次日开盘执行的统一风险基线决策。"""
     validate_expression(entry_expression)
@@ -341,17 +417,22 @@ def prepare_factor_strategy(
     exit_factors = sorted(_expression_factor_ids(exit_expression))
     entry_truth = _expression_truth(entry_expression, truth_rows)
     exit_truth = _expression_truth(exit_expression, truth_rows)
+    warmup_cutoff = (
+        risk_baseline["warmup"]
+        if start_index is None
+        else max(risk_baseline["warmup"], start_index)
+    )
     target, entry, last_exit = 0, None, -10_000
     result = []
     for index, row in enumerate(rows):
         trace = {
-            "preheated": index >= RISK_BASELINE["warmup"],
+            "preheated": index >= warmup_cutoff,
             "entry_expression": entry_text,
             "exit_expression": exit_text,
             "entry_factors": entry_factors,
             "exit_factors": exit_factors,
         }
-        if index < RISK_BASELINE["warmup"]:
+        if index < warmup_cutoff:
             result.append({"decision": None, "indicators": trace})
             continue
 
@@ -365,8 +446,8 @@ def prepare_factor_strategy(
                 / 1000
             )
             initial_stop = price - min(
-                RISK_BASELINE["max_stop"] * price,
-                RISK_BASELINE["initial_stop_atr"] * signal_atr,
+                risk_baseline["max_stop"] * price,
+                risk_baseline["initial_stop_atr"] * signal_atr,
             )
             entry = {
                 "index": index,
@@ -395,11 +476,11 @@ def prepare_factor_strategy(
             entry["peak"] = max(entry["peak"], effective)
             reasons = []
             gain = entry["peak"] - entry["price"]
-            if gain >= RISK_BASELINE["trail_start_atr"] * entry["atr"]:
+            if gain >= risk_baseline["trail_start_atr"] * entry["atr"]:
                 multiplier = (
-                    RISK_BASELINE["tight_trail_atr"]
-                    if gain >= RISK_BASELINE["tighten_atr"] * entry["atr"]
-                    else RISK_BASELINE["trail_atr"]
+                    risk_baseline["tight_trail_atr"]
+                    if gain >= risk_baseline["tighten_atr"] * entry["atr"]
+                    else risk_baseline["trail_atr"]
                 )
                 entry["protection"] = max(
                     entry["protection"],
@@ -415,10 +496,12 @@ def prepare_factor_strategy(
                     if entry["protection"] > entry["initial_stop"]
                     else "ATR初始止损"
                 )
+            weak_days = risk_baseline.get("weak_exit_days")
             if (
-                index - entry["index"] + 1 >= RISK_BASELINE["weak_exit_days"]
+                weak_days is not None
+                and index - entry["index"] + 1 >= weak_days
                 and effective - entry["price"]
-                < RISK_BASELINE["weak_gain_atr"] * entry["atr"]
+                < risk_baseline["weak_gain_atr"] * entry["atr"]
             ):
                 reasons.append("弱势时间退出")
             target = int(not reasons)
@@ -738,6 +821,103 @@ def release_gate_reasons(*, development, development_stress, holdout, holdout_st
     return [f"{label}：{reason}" for label, reasons in checks for reason in reasons]
 
 
+def classify_expression_style(entry_expression):
+    """按入场因子特征划分策略风格，使趋势突破与左侧反转各按匹配统计尺子评估。"""
+    factors = _expression_factor_ids(entry_expression)
+    if (factors & TREND_BREAKOUT_FACTORS) and not (factors & REVERSAL_VALUE_FACTORS):
+        return "trend_breakout"
+    return "reversal_value"
+
+
+def _style_window_reasons(summary, profile, *, is_holdout=False, stress=False):
+    reasons = []
+    min_trades = (
+        profile["min_holdout_completed"] if is_holdout else profile["min_dev_completed"]
+    )
+    if not stress and summary["completed"] < min_trades:
+        reasons.append(f"完成交易不足{min_trades}笔")
+    win_rate = summary.get("win_rate")
+    if win_rate is None or win_rate < profile["min_win_rate"]:
+        reasons.append(f"胜率低于{profile['min_win_rate']:.0%}门槛")
+    if (summary["expectancy"] or 0) <= 0:
+        reasons.append("成本后单笔期望不为正")
+    if (
+        summary["profit_factor"] is not None
+        and summary["profit_factor"] < profile["min_profit_factor"]
+    ):
+        reasons.append(f"利润因子低于{profile['min_profit_factor']:.2f}")
+    if not stress and summary["return"] <= 0:
+        reasons.append("窗口绝对收益不为正")
+    if summary["drawdown"] < profile["max_drawdown"]:
+        reasons.append(f"最大回撤低于{profile['max_drawdown']:.0%}门槛")
+    return reasons
+
+
+def evaluate_evidence_tier(
+    *,
+    style,
+    development,
+    development_stress,
+    holdout,
+    holdout_stress,
+):
+    """将单独立单位死锁改造为可论证的分级证据等级。
+
+    Returns:
+        dict - 包含 evidence_tier、style_label、tier_reasons、intra_consistent 等。
+    """
+    profile = STYLE_PROFILES[style]
+    dev_reasons = [
+        *[
+            f"开发段普通成本：{r}"
+            for r in _style_window_reasons(development, profile, is_holdout=False, stress=False)
+        ],
+        *[
+            f"开发段压力成本：{r}"
+            for r in _style_window_reasons(development_stress, profile, is_holdout=False, stress=True)
+        ],
+    ]
+    hold_reasons = [
+        *[
+            f"留出段普通成本：{r}"
+            for r in _style_window_reasons(holdout, profile, is_holdout=True, stress=False)
+        ],
+        *[
+            f"留出段压力成本：{r}"
+            for r in _style_window_reasons(holdout_stress, profile, is_holdout=True, stress=True)
+        ],
+    ]
+    all_reasons = [*dev_reasons, *hold_reasons]
+    intra_ok = bool((holdout.get("intra_unit_consistency") or {}).get("all_positive")) and bool(
+        (development.get("intra_unit_consistency") or {}).get("all_positive")
+    )
+    if not all_reasons:
+        if development["independent_units"] >= 2 and development["cross_unit_pass"] and holdout["cross_unit_pass"]:
+            tier = "cross_unit_verified"
+            label = "跨独立指数验证通过"
+        elif intra_ok:
+            tier = "single_unit_candidate"
+            label = "单指数专精候选（类内多ETF一致）"
+        else:
+            tier = "single_unit_mixed"
+            label = "单指数候选（类内ETF分化）"
+            all_reasons.append("类内同指数ETF收益未全部为正")
+    elif not dev_reasons:
+        tier = "holdout_watch"
+        label = "开发达标·留出待观察"
+    else:
+        tier = "rejected"
+        label = "未通过基础门槛"
+    return {
+        "style": style,
+        "style_label": profile["label"],
+        "evidence_tier": tier,
+        "evidence_tier_label": label,
+        "tier_reasons": all_reasons,
+        "intra_consistent": intra_ok,
+    }
+
+
 def summarize_category(category, universe, evaluations):
     """按独立跟踪单位等权汇总类别，不把同指数 ETF 重复加权。"""
     grouped = defaultdict(dict)
@@ -790,6 +970,19 @@ def summarize_category(category, universe, evaluations):
             for code, item in sorted(universe.items())
             if item["category"] == category and code in evaluations
         },
+    }
+    etf_returns = [
+        evaluations[code]["return"]
+        for code, item in sorted(universe.items())
+        if item["category"] == category and code in evaluations
+    ]
+    positive_etf_count = sum(value > 0 for value in etf_returns)
+    summary["intra_unit_consistency"] = {
+        "etf_count": len(etf_returns),
+        "positive_etf_count": positive_etf_count,
+        "all_positive": bool(etf_returns) and positive_etf_count == len(etf_returns),
+        "min_return": round(min(etf_returns), 6) if etf_returns else None,
+        "max_return": round(max(etf_returns), 6) if etf_returns else None,
     }
     summary["calmar"] = (
         summary["return"] / -summary["drawdown"] if summary["drawdown"] < 0 else None
@@ -1011,7 +1204,61 @@ def _seed_expressions(entry_factor_ids, exit_factor_ids):
                     _factor("strong_close"),
                 ],
             },
-            "透明种子：趋势回踩",
+            "透明种子：短均趋势回踩",
+        ),
+        (
+            {"above_ma250", "adx_trending", "trend_pullback_near_ma20"},
+            {
+                "op": "all",
+                "items": [
+                    _factor("above_ma250"),
+                    _factor("adx_trending"),
+                    _factor("trend_pullback_near_ma20"),
+                ],
+            },
+            "透明种子：长周期趋势回踩",
+        ),
+        (
+            {"volatility_contracting", "atr_box_breakout", "strong_close"},
+            {
+                "op": "all",
+                "items": [
+                    {
+                        "op": "within",
+                        "expression": _factor("volatility_contracting"),
+                        "days": 5,
+                    },
+                    _factor("atr_box_breakout"),
+                    _factor("strong_close"),
+                ],
+            },
+            "透明种子：波动收缩突破",
+        ),
+        (
+            {"erp_high_percentile", "oversold_recovery"},
+            {
+                "op": "all",
+                "items": [
+                    _factor("erp_high_percentile"),
+                    _factor("oversold_recovery"),
+                ],
+            },
+            "透明种子：风险溢价+超跌修复",
+        ),
+        (
+            {"market_fear_extreme", "oversold_recovery"},
+            {
+                "op": "all",
+                "items": [
+                    {
+                        "op": "within",
+                        "expression": _factor("market_fear_extreme"),
+                        "days": 5,
+                    },
+                    _factor("oversold_recovery"),
+                ],
+            },
+            "透明种子：恐贪极恐+超跌修复",
         ),
     )
     return [
@@ -1143,18 +1390,80 @@ def _category_development_universe(category, universe, stop_date):
     }
 
 
-def category_factor_ids(category, universe, stop_date):
-    """返回类别开发段至少真实触发一次的因子，未覆盖外部数据不会污染候选池。"""
+def _expression_atom_count(expression):
+    operator = expression["op"]
+    if operator == "factor":
+        return 1
+    if operator in {"all", "any"}:
+        return sum(_expression_atom_count(item) for item in expression["items"])
+    if operator in {"not", "within", "consecutive"}:
+        return _expression_atom_count(expression["expression"])
+    return _expression_atom_count(expression["first"]) + _expression_atom_count(
+        expression["then"]
+    )
+
+
+def _expression_depth(expression):
+    operator = expression["op"]
+    if operator == "factor":
+        return 1
+    if operator in {"all", "any"}:
+        return 1 + max(_expression_depth(item) for item in expression["items"])
+    if operator in {"not", "within", "consecutive"}:
+        return 1 + _expression_depth(expression["expression"])
+    return 1 + max(
+        _expression_depth(expression["first"]),
+        _expression_depth(expression["then"]),
+    )
+
+
+def _is_compact_for_evolution(expression):
+    """限制演化搜索的原子因子个数与嵌套深度，降低多条件堆叠对留出期的过拟合风险。"""
+    return (
+        _expression_atom_count(expression) <= MAX_CANDIDATE_ATOMS
+        and _expression_depth(expression) <= MAX_CANDIDATE_DEPTH
+    )
+
+
+def category_factor_ids(category, universe, stop_date, *, exclude_short_regime=False):
+    """返回类别开发段至少真实触发一次的因子；可选过滤仅覆盖短历史窗口的政权子因子。"""
     factor_ids = set()
-    for item in _category_development_universe(category, universe, stop_date).values():
+    active_dates = {factor_id: [] for factor_id in SHORT_HISTORY_REGIME_FACTORS}
+    dev_items = _category_development_universe(category, universe, stop_date).values()
+    max_dev_days = 0
+    for item in dev_items:
+        item_days = [
+            truth["trade_date"]
+            for truth in item["factor_truth"]
+            if truth["trade_date"] < stop_date
+        ]
+        max_dev_days = max(max_dev_days, len(item_days))
         for truth in item["factor_truth"]:
             if truth["trade_date"] >= stop_date:
                 break
-            factor_ids.update(
-                factor_id
-                for factor_id in FACTORS
-                if truth.get(factor_id, False)
-            )
+            for factor_id in FACTORS:
+                if truth.get(factor_id, False):
+                    factor_ids.add(factor_id)
+                    if factor_id in active_dates:
+                        active_dates[factor_id].append(truth["trade_date"])
+    if exclude_short_regime and max_dev_days >= 400:
+        sample_item = max(dev_items, key=lambda item: len(item["rows"]))
+        dev_slice = [
+            row["trade_date"]
+            for row in sample_item["rows"]
+            if row["trade_date"] < stop_date
+        ]
+        for factor_id, days in active_dates.items():
+            if factor_id not in factor_ids or not days:
+                continue
+            earliest = min(days)
+            if (
+                earliest in dev_slice
+                and (len(dev_slice) - dev_slice.index(earliest))
+                / max(1, len(dev_slice))
+                < 0.35
+            ):
+                factor_ids.discard(factor_id)
     return factor_ids
 
 
@@ -1184,14 +1493,24 @@ def _new_candidate(
     exit_expression,
     origin,
     universe,
+    start_date,
     stop_date,
 ):
     evaluations = evaluate_universe(
-        universe, entry, exit_expression, stop_date=stop_date
+        universe,
+        entry,
+        exit_expression,
+        start_date=start_date,
+        stop_date=stop_date,
     )
     development = summarize_category(research_category, universe, evaluations)
     stress_evaluations = evaluate_universe(
-        universe, entry, exit_expression, stop_date=stop_date, costs=STRESS_COSTS
+        universe,
+        entry,
+        exit_expression,
+        start_date=start_date,
+        stop_date=stop_date,
+        costs=STRESS_COSTS,
     )
     development_stress = summarize_category(
         research_category, universe, stress_evaluations
@@ -1249,8 +1568,115 @@ def _fallback_proposals(entry_factor_ids, exit_factor_ids):
             yield _factor(entry_id), _factor(exit_id), "透明兜底：单因子入场与单因子退出"
 
 
-def run_research(universe, rounds=50, *, random_seed=20261127):
-    """按类别独立演化可解释因子策略，并在固定留出段后统一报告。"""
+def peer_cross_check(
+    category,
+    entry_expression,
+    exit_expression,
+    universe,
+    *,
+    start_date=None,
+):
+    """在选定类别领先候选后，用相邻高相关类别做盲测以辅助判断是否存在过拟合。"""
+    peer_category = PEER_CATEGORY_MAP.get(category)
+    if not peer_category:
+        return None
+    peer_items = {
+        code: item
+        for code, item in universe.items()
+        if item["category"] == peer_category
+    }
+    if not peer_items:
+        return None
+    evaluations = evaluate_universe(
+        peer_items, entry_expression, exit_expression, start_date=start_date
+    )
+    if not evaluations:
+        return None
+    summary = summarize_category(peer_category, peer_items, evaluations)
+    return {
+        "peer_category": peer_category,
+        "etf_count": summary["etf_count"],
+        "completed": summary["completed"],
+        "win_rate": summary["win_rate"],
+        "profit_factor": summary["profit_factor"],
+        "return": round(summary["return"], 6),
+        "drawdown": round(summary["drawdown"], 6),
+        "non_collapse": (
+            summary["return"] > -0.10
+            or (
+                summary["profit_factor"] is not None
+                and summary["profit_factor"] >= 1.0
+            )
+        ),
+    }
+
+
+def regime_overlay_check(
+    category,
+    eligible_universe,
+    entry_expression,
+    exit_expression,
+    *,
+    holdout_start,
+):
+    """在留出段比较叠加近1年全市场政权风险开关（禁高波动与深贴水）的边际变化。"""
+    regime_start = None
+    for item in eligible_universe.values():
+        for truth in item["factor_truth"]:
+            if truth["trade_date"] >= holdout_start and any(
+                truth.get(factor_id, False)
+                for factor_id in SHORT_HISTORY_REGIME_FACTORS
+            ):
+                day = truth["trade_date"]
+                if regime_start is None or day < regime_start:
+                    regime_start = day
+                break
+    if regime_start is None:
+        return {"available": False, "reason": "留出区间尚无全市场政权子因子覆盖"}
+    base_eval = evaluate_universe(
+        eligible_universe, entry_expression, exit_expression, start_date=regime_start
+    )
+    filtered_entry = {
+        "op": "all",
+        "items": [
+            entry_expression,
+            {"op": "not", "expression": _factor("market_ivix_high")},
+            {"op": "not", "expression": _factor("market_futures_deep_discount")},
+        ],
+    }
+    filtered_eval = evaluate_universe(
+        eligible_universe, filtered_entry, exit_expression, start_date=regime_start
+    )
+    if not base_eval or not filtered_eval:
+        return {"available": False, "reason": "政权子因子重叠窗口不足以比较"}
+    base_sum = summarize_category(category, eligible_universe, base_eval)
+    filt_sum = summarize_category(category, eligible_universe, filtered_eval)
+    return {
+        "available": True,
+        "regime_start": regime_start,
+        "base": {
+            "completed": base_sum["completed"],
+            "win_rate": base_sum["win_rate"],
+            "return": round(base_sum["return"], 6),
+            "drawdown": round(base_sum["drawdown"], 6),
+        },
+        "filtered": {
+            "completed": filt_sum["completed"],
+            "win_rate": filt_sum["win_rate"],
+            "return": round(filt_sum["return"], 6),
+            "drawdown": round(filt_sum["drawdown"], 6),
+        },
+    }
+
+
+def run_research(
+    universe,
+    rounds=50,
+    *,
+    random_seed=20261128,
+    eval_start_date=None,
+):
+    """按类别独立演化可解释因子策略，并在固定留出段后输出分级论证结果。"""
     if not isinstance(rounds, int) or rounds < 1:
         raise ValueError("研究轮数必须为正整数")
     if not universe:
@@ -1269,7 +1695,9 @@ def run_research(universe, rounds=50, *, random_seed=20261127):
             f"以下类别在开发段未满足预热或有效窗口要求：{', '.join(unavailable_categories)}"
         )
     category_factors = {
-        category: category_factor_ids(category, universe, holdout_start)
+        category: category_factor_ids(
+            category, universe, holdout_start, exclude_short_regime=True
+        )
         for category in categories
     }
     category_entry_factors = {
@@ -1320,6 +1748,8 @@ def run_research(universe, rounds=50, *, random_seed=20261127):
                     signature in signatures_by_category[category]
                     or not expression_is_explainable(entry, role="entry")
                     or not expression_is_explainable(exit_expression, role="exit")
+                    or not _is_compact_for_evolution(entry)
+                    or not _is_compact_for_evolution(exit_expression)
                 ):
                     continue
                 signatures_by_category[category].add(signature)
@@ -1332,6 +1762,7 @@ def run_research(universe, rounds=50, *, random_seed=20261127):
                     exit_expression,
                     origin,
                     category_universes[category],
+                    eval_start_date,
                     holdout_start,
                 )
                 candidates.append(candidate)
@@ -1379,12 +1810,37 @@ def run_research(universe, rounds=50, *, random_seed=20261127):
             holdout=holdout,
             holdout_stress=holdout_stress,
         )
+        style = classify_expression_style(leader["entry_expression"])
+        evidence = evaluate_evidence_tier(
+            style=style,
+            development=leader["development"][category],
+            development_stress=leader["development_stress"][category],
+            holdout=holdout,
+            holdout_stress=holdout_stress,
+        )
+        peer_check = peer_cross_check(
+            category,
+            leader["entry_expression"],
+            leader["exit_expression"],
+            universe,
+            start_date=eval_start_date,
+        )
+        regime_check = regime_overlay_check(
+            category,
+            eligible_universe,
+            leader["entry_expression"],
+            leader["exit_expression"],
+            holdout_start=holdout_start,
+        )
         leaders[category] = {
             "candidate_id": leader["candidate_id"],
             "entry_expression": leader["entry_expression"],
             "exit_expression": leader["exit_expression"],
             "entry_text": leader["entry_text"],
             "exit_text": leader["exit_text"],
+            **evidence,
+            "peer_cross_check": peer_check,
+            "regime_overlay_check": regime_check,
             "development": leader["development"][category],
             "development_stress": leader["development_stress"][category],
             "holdout": holdout,
@@ -1396,6 +1852,7 @@ def run_research(universe, rounds=50, *, random_seed=20261127):
         }
     return {
         "version": RESEARCH_VERSION,
+        "eval_start_date": eval_start_date,
         "rounds": round_records,
         "round_count": rounds,
         "holdout_start": holdout_start,

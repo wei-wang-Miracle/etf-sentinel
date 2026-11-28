@@ -81,6 +81,11 @@ def main():
         help="研究样本截止日期 YYYY-MM-DD；默认读取本地已核验行情的最新日期",
     )
     parser.add_argument(
+        "--eval-start-date",
+        default=None,
+        help="开发段正式评分起始日期 YYYY-MM-DD；可用于冻结前一年数据做250日预热后再评分",
+    )
+    parser.add_argument(
         "--verification-report",
         type=Path,
         default=ROOT / ".local" / "free-history-verification.json",
@@ -106,6 +111,8 @@ def main():
     from dotenv import load_dotenv
 
     load_dotenv(ROOT / ".env")
+    from sqlalchemy import select
+
     from app.algorithm_templates import turning_events, turning_profile
     from app.db import Session, engine
     from app.factor_strategy_snapshot import build_factor_snapshot_item
@@ -121,7 +128,6 @@ def main():
         MarketRegimeFactorDaily,
         SentimentDaily,
     )
-    from sqlalchemy import select
 
     if engine.url.host not in ("localhost", "127.0.0.1", "::1"):
         raise ValueError("分类因子策略研究冻结只允许读取本地数据库")
@@ -315,6 +321,7 @@ def main():
         {
             "version": "factor-strategy-snapshot-v1.2.0",
             "start_date": args.start_date,
+            "eval_start_date": args.eval_start_date,
             "universe": universe,
             "excluded": excluded,
         },
