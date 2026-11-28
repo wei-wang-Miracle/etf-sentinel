@@ -87,33 +87,13 @@ def adopt(result, strategy="range_breakout", **kwargs):
 
 def test_catalog_compare_and_verify_without_automatic_adoption():
     catalog = client.get("/strategies/catalog").json()
-    assert {item["id"] for item in catalog["strategies"]} == {
-        "range_breakout",
-        "bottom_confirmation",
-        "hybrid_reversal",
-        "trend_pullback",
-        "volatility_contraction_breakout",
-        "value_sentiment_reversal",
-        "gem_bottom_contraction",
-    }
+    assert catalog["strategies"] == []
     assert catalog["assignments"] == []
     factors = client.get("/factors").json()
     assert {item["id"] for item in factors["factors"]} == set(FACTORS)
-    assert next(item for item in catalog["strategies"] if item["id"] == "range_breakout")["factors"][0]["id"] == "box_breakout_up"
-    result = compare()
-    assert result["complete"], result["tracks"]
-    assert [row["strategy_id"] for row in result["tracks"]] == [*BODY["strategies"], "hold"]
-    assert client.get("/strategies/catalog").json()["assignments"] == []
+    assert client.post("/strategies/comparisons", json=BODY).status_code == 422
     assert client.get("/strategies").status_code == 404
     assert client.get("/strategy-lab/observations").status_code == 404
-    assert adopt(result, "hold").status_code == 422
-    assert client.post(f"/strategies/comparisons/{result['id']}/verify").json()["identical"] is True
-    with Session() as db:
-        rows = db.execute(text("SELECT strategy_id, factor_id FROM strategy_comparison_factors WHERE comparison_id = :id"), {"id": result["id"]})
-        assert {tuple(row) for row in rows} == {
-            ("range_breakout", "box_breakout_up"), ("range_breakout", "turning_top"),
-            ("bottom_confirmation", "turning_bottom"), ("bottom_confirmation", "turning_top"),
-        }
 
 
 def test_comparison_rejects_user_rules_retired_and_research_strategies():

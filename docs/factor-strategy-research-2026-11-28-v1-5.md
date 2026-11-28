@@ -35,10 +35,6 @@
 2. **高波动品种上「政权开关」价值被实测证实**：在留出期（2025-12-02 起）直接叠入 `非全市场波动率偏高 且 非期指深贴水` 后，**微盘**净收益由 `+1.4%` 升至 `+11.2%`，**半导体材料设备**最大回撤由 `-54.6%` 收敛至 `-33.3%`，**黄金**回撤由 `-32.2%` 收敛至 `-23.9%`。这验证了为高波动品种专门溯源补采更早 iVIX 与期指升贴水历史数据的价值。
 3. **自动遗传进化仍偏爱稀缺条件，固定先验更稳健**：大盘 `c0876`、小盘 `c1338` 等遗传冠军依旧在开发段过拟合到 0~4 笔留出交易；相比之下，第一步已接入工作台比较观察的三套清晰固定先验（尤其是 `波动收缩突破` 与 `趋势回踩`）反而在跨期泛化上更稳健。
 
-## 四、研究结论落地（迁移 0026）
+## 四、研究结论留存说明
 
-依据本轮 `v1.5.0` 门禁评估结果，已通过迁移 `0026_strategy_category_bindings.py` 将结论落地到数据库 `instruments.research_category` 与 `research_strategy_scopes`：
-
-- `黄金` 分类下的 `trend_pullback` 与 `volatility_contraction_breakout` 达到 `single_unit_candidate` 门槛，均标为 `adoptable=True`，开放策略库采用并进入任务 5 盘前信号；
-- `创业板` 领先候选 `c1329` 已固化为代码策略 `gem_bottom_contraction`（`创业板底分型缩波`）并绑定 `创业板` 分类（`holdout_watch`, `adoptable=False`）；
-- 其余分类策略按绑定关系仅在对应分类展示对比，未达采用门禁前保持只读观察，不可采用。
+本报告与离线 `v1.5.0` 研究框架（`api/app/factor_strategy_research.py`、`scripts/freeze_factor_strategy_research.py`、`scripts/research_factor_strategies.py`）作为后续从零重建策略体系的研究依据保留。此前通过迁移 `0026` 登记的数据库策略作用域数据及 7 套策略实现已按用户最新要求全部清理下线。

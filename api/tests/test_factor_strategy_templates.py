@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from app import main, strategy_plans, strategy_workbench
 from app.backtest import run_backtest
 from app.backtest_data import trading_days
+from app.factor_strategy_research import RISK_BASELINE
 from app.factor_strategy_templates import (
     FACTOR_TEMPLATES,
     factor_template_snapshot,
@@ -60,7 +61,71 @@ def _synthetic_rows(start_text, end_text):
     return days, rows
 
 
-def test_factor_template_snapshot_validates_strictly_and_runs_deterministically():
+def _register_test_strategies(monkeypatch):
+    """临时注入测试用合成策略，以在默认空策略库下独立验证模板与分类工作台逻辑。"""
+    specs = {
+        "synth_long_250": {
+            "min_warmup_bars": 250,
+            "external_requirements": ("valuation", "market_fear_greed"),
+            "risk_baseline": dict(RISK_BASELINE),
+            "entry_expression": {
+                "op": "all",
+                "items": [
+                    {"op": "factor", "factor_id": "above_ma250"},
+                    {"op": "factor", "factor_id": "trend_pullback_near_ma20"},
+                ],
+            },
+            "exit_expression": {
+                "op": "any",
+                "items": [
+                    {"op": "factor", "factor_id": "turning_top"},
+                    {"op": "factor", "factor_id": "market_greed_extreme"},
+                ],
+            },
+        },
+        "synth_short_66": {
+            "min_warmup_bars": 66,
+            "external_requirements": ("market_fear_greed",),
+            "risk_baseline": dict(RISK_BASELINE),
+            "entry_expression": {"op": "factor", "factor_id": "turning_bottom"},
+            "exit_expression": {"op": "factor", "factor_id": "turning_top"},
+        },
+    }
+    metas = {
+        "synth_long_250": {
+            "name": "测试长周期策略",
+            "description": "仅用于测试250日预热与分类绑定的合成策略。",
+            "adoptable": False,
+            "factors": (
+                ("above_ma250", "filter"),
+                ("trend_pullback_near_ma20", "trigger"),
+                ("turning_top", "exit"),
+                ("market_greed_extreme", "exit"),
+            ),
+        },
+        "synth_short_66": {
+            "name": "测试短周期策略",
+            "description": "仅用于测试66日预热与观察拦截的合成策略。",
+            "adoptable": False,
+            "factors": (
+                ("turning_bottom", "trigger"),
+                ("turning_top", "exit"),
+            ),
+        },
+    }
+    for sid, spec in specs.items():
+        monkeypatch.setitem(FACTOR_TEMPLATES, sid, spec)
+    for sid, meta in metas.items():
+        monkeypatch.setitem(STRATEGIES, sid, meta)
+
+
+def test_factor_template_snapshot_validates_strictly_and_runs_deterministically(monkeypatch):
+    assert FACTOR_TEMPLATES == {}
+    for removed in ("range_breakout", "trend_pullback", "gem_bottom_contraction"):
+        with pytest.raises(ValueError, match="不存在"):
+            factor_template_snapshot(removed, "510300")
+
+    _register_test_strategies(monkeypatch)
     days, rows = _synthetic_rows("2024-01-02", "2025-06-30")
     external = {
         "valuation_rows": [
@@ -118,9 +183,10 @@ def test_factor_template_snapshot_validates_strictly_and_runs_deterministically(
         assert Decimal(result["strategy"]["metrics"]["final_equity"]) > 0
 
 
-def test_factor_template_rejects_insufficient_warmup():
+def test_factor_template_rejects_insufficient_warmup(monkeypatch):
+    _register_test_strategies(monkeypatch)
     days, rows = _synthetic_rows("2025-01-02", "2025-08-29")
-    snap = factor_template_snapshot("trend_pullback", "510300")
+    snap = factor_template_snapshot("synth_long_250", "510300")
     params = {
         "template": snap,
         "decision_start": days[100],
@@ -283,6 +349,7 @@ def test_workbench_compare_verify_and_adopt_guard_for_new_factor_strategies(monk
         def commit(self):
             return None
 
+    _original_fake_scalars = FakeSession.scalars
     monkeypatch.setattr(strategy_workbench, "Session", FakeSession)
     monkeypatch.setattr(
         strategy_workbench,
@@ -301,12 +368,48 @@ def test_workbench_compare_verify_and_adopt_guard_for_new_factor_strategies(monk
     )
     client = TestClient(main.app)
 
+    # 默认状态下工作台策略库为空，旧策略名全部不可用
+    assert client.get("/strategies/catalog").json()["strategies"] == []
+    assert (
+        client.post(
+            "/strategies/comparisons",
+            json={
+                "instrument_code": "510300",
+                "start_date": days[260],
+                "end_date": days[-1],
+                "strategies": ["range_breakout"],
+            },
+        ).status_code
+        == 422
+    )
+
+    _register_test_strategies(monkeypatch)
+    scopes = [
+        SimpleNamespace(
+            strategy_id=sid,
+            category_name="大盘宽基",
+            scope_type="category",
+            research_version="test-v1",
+            evidence_tier="holdout_watch",
+            adoptable=False,
+            evidence_summary={"note": "测试观察"},
+        )
+        for sid in ("synth_long_250", "synth_short_66")
+    ]
+    monkeypatch.setattr(
+        FakeSession,
+        "scalars",
+        lambda self, stmt: (
+            scopes
+            if stmt.column_descriptions[0]["entity"] is ResearchStrategyScope
+            else _original_fake_scalars(self, stmt)
+        ),
+    )
+
     cat = client.get("/strategies/catalog").json()
     by_id = {item["id"]: item for item in cat["strategies"]}
-    assert by_id["range_breakout"]["adoptable"] is True
-    assert by_id["trend_pullback"]["adoptable"] is False
-    assert by_id["volatility_contraction_breakout"]["adoptable"] is False
-    assert by_id["value_sentiment_reversal"]["adoptable"] is False
+    assert by_id["synth_long_250"]["adoptable"] is False
+    assert by_id["synth_short_66"]["adoptable"] is False
 
     # 预热不足时仅缺少预热的轨道失败，其余成功（单轨隔离失败）
     partial = client.post(
@@ -315,7 +418,7 @@ def test_workbench_compare_verify_and_adopt_guard_for_new_factor_strategies(monk
             "instrument_code": "510300",
             "start_date": days[70],
             "end_date": days[-1],
-            "strategies": ["trend_pullback", "volatility_contraction_breakout"],
+            "strategies": ["synth_long_250", "synth_short_66"],
         },
     )
     assert partial.status_code == 200, partial.text
@@ -325,18 +428,14 @@ def test_workbench_compare_verify_and_adopt_guard_for_new_factor_strategies(monk
     assert "250" in p_data["tracks"][0]["reason"]
     assert p_data["tracks"][1]["status"] == "success"
 
-    # 满足 250 日预热后 3 套新因子策略均可完整比较与复算，且严格禁止采用
+    # 满足 250 日预热后均可完整比较与复算，且未达采用门槛时禁止采用
     full = client.post(
         "/strategies/comparisons",
         json={
             "instrument_code": "510300",
             "start_date": days[260],
             "end_date": days[-1],
-            "strategies": [
-                "trend_pullback",
-                "volatility_contraction_breakout",
-                "value_sentiment_reversal",
-            ],
+            "strategies": ["synth_long_250", "synth_short_66"],
         },
     )
     assert full.status_code == 200, full.text
@@ -348,17 +447,13 @@ def test_workbench_compare_verify_and_adopt_guard_for_new_factor_strategies(monk
         ]
         is True
     )
-    for sid in (
-        "trend_pullback",
-        "volatility_contraction_breakout",
-        "value_sentiment_reversal",
-    ):
+    for sid in ("synth_long_250", "synth_short_66"):
         resp = client.post(
             "/strategies/adopt",
             json={"comparison_id": f_data["id"], "strategy_id": sid},
         )
         assert resp.status_code == 422
-        assert "比较观察" in resp.json()["detail"]
+        assert "门槛" in resp.json()["detail"]
 
     # 离线 research_only 策略依然在接口层被拒绝
     assert (
@@ -377,6 +472,7 @@ def test_workbench_compare_verify_and_adopt_guard_for_new_factor_strategies(monk
 
 def test_factor_template_cross_split_warmup_and_category_scope_adoption(monkeypatch):
     """验证跨份额折算全历史预热及分类绑定下的黄金采用与创业板观察拦截。"""
+    _register_test_strategies(monkeypatch)
     days, full_rows = _synthetic_rows("2024-01-02", "2025-09-30")
     split_day = days[300]
     actions = {"dividends": [], "splits": [{"effective_date": split_day, "ratio": "1:2"}]}
@@ -399,28 +495,19 @@ def test_factor_template_cross_split_warmup_and_category_scope_adoption(monkeypa
     execution_date = date(2025, 10, 9)
     scopes = [
         SimpleNamespace(
-            strategy_id="range_breakout",
-            category_name="通用",
-            scope_type="universal",
-            research_version="shared-baseline-v1.0",
-            evidence_tier="baseline",
-            adoptable=True,
-            evidence_summary={"note": "通用基准"},
-        ),
-        SimpleNamespace(
-            strategy_id="trend_pullback",
+            strategy_id="synth_long_250",
             category_name="黄金",
             scope_type="category",
-            research_version="factor-strategy-research-v1.5.0",
+            research_version="test-v1",
             evidence_tier="single_unit_candidate",
             adoptable=True,
             evidence_summary={"note": "黄金开放采用"},
         ),
         SimpleNamespace(
-            strategy_id="gem_bottom_contraction",
+            strategy_id="synth_short_66",
             category_name="创业板",
             scope_type="category",
-            research_version="factor-strategy-research-v1.5.0",
+            research_version="test-v1",
             evidence_tier="holdout_watch",
             adoptable=False,
             evidence_summary={"note": "创业板观察"},
@@ -589,11 +676,11 @@ def test_factor_template_cross_split_warmup_and_category_scope_adoption(monkeypa
     client = TestClient(main.app)
 
     cat = {item["id"]: item for item in client.get("/strategies/catalog").json()["strategies"]}
-    assert cat["trend_pullback"]["supported_instruments"] == ["518880"]
-    assert cat["trend_pullback"]["adoptable_instruments"] == ["518880"]
-    assert cat["trend_pullback"]["earliest_start_by_instrument"]["518880"] == post_rows[1]["trade_date"]
-    assert cat["gem_bottom_contraction"]["supported_instruments"] == ["159915"]
-    assert cat["gem_bottom_contraction"]["adoptable_instruments"] == []
+    assert cat["synth_long_250"]["supported_instruments"] == ["518880"]
+    assert cat["synth_long_250"]["adoptable_instruments"] == ["518880"]
+    assert cat["synth_long_250"]["earliest_start_by_instrument"]["518880"] == post_rows[1]["trade_date"]
+    assert cat["synth_short_66"]["supported_instruments"] == ["159915"]
+    assert cat["synth_short_66"]["adoptable_instruments"] == []
 
     # 跨分类对比被拦截（不能用黄金策略回测创业板）
     assert (
@@ -603,7 +690,7 @@ def test_factor_template_cross_split_warmup_and_category_scope_adoption(monkeypa
                 "instrument_code": "159915",
                 "start_date": post_rows[5]["trade_date"],
                 "end_date": post_rows[-1]["trade_date"],
-                "strategies": ["trend_pullback"],
+                "strategies": ["synth_long_250"],
             },
         ).status_code
         == 422
@@ -616,7 +703,7 @@ def test_factor_template_cross_split_warmup_and_category_scope_adoption(monkeypa
             "instrument_code": "518880",
             "start_date": post_rows[5]["trade_date"],
             "end_date": post_rows[-1]["trade_date"],
-            "strategies": ["trend_pullback"],
+            "strategies": ["synth_long_250"],
         },
     )
     assert comp.status_code == 200, comp.text
@@ -624,10 +711,10 @@ def test_factor_template_cross_split_warmup_and_category_scope_adoption(monkeypa
     assert comp_data["complete"] is True
     assert client.post(f"/strategies/comparisons/{comp_data['id']}/verify").json()["identical"] is True
 
-    # 黄金采用 trend_pullback 成功，并支持任务5盘前生成
+    # 黄金采用 synth_long_250 成功，并支持任务5盘前生成
     adopted = client.post(
         "/strategies/adopt",
-        json={"comparison_id": comp_data["id"], "strategy_id": "trend_pullback"},
+        json={"comparison_id": comp_data["id"], "strategy_id": "synth_long_250"},
     )
     assert adopted.status_code == 200, adopted.text
     with ScopeFakeSession() as db:
@@ -635,23 +722,23 @@ def test_factor_template_cross_split_warmup_and_category_scope_adoption(monkeypa
             db, assignments["518880"], now_dt, cutoff_date, execution_date
         )
         assert plan["action"] in {"buy", "hold", "sell", "wait"}
-        assert evidence["strategy_id"] == "trend_pullback"
+        assert evidence["strategy_id"] == "synth_long_250"
         assert plan["conditions"]["buy"] and plan["conditions"]["sell"]
 
-    # 创业板对比 gem_bottom_contraction 成功，但禁止采用
+    # 创业板对比 synth_short_66 成功，但禁止采用
     gem_comp = client.post(
         "/strategies/comparisons",
         json={
             "instrument_code": "159915",
             "start_date": post_rows[5]["trade_date"],
             "end_date": post_rows[-1]["trade_date"],
-            "strategies": ["gem_bottom_contraction"],
+            "strategies": ["synth_short_66"],
         },
     )
     assert gem_comp.status_code == 200 and gem_comp.json()["complete"] is True
     gem_adopt = client.post(
         "/strategies/adopt",
-        json={"comparison_id": gem_comp.json()["id"], "strategy_id": "gem_bottom_contraction"},
+        json={"comparison_id": gem_comp.json()["id"], "strategy_id": "synth_short_66"},
     )
     assert gem_adopt.status_code == 422
     assert "尚未达到研究采用门槛" in gem_adopt.json()["detail"]
@@ -662,7 +749,7 @@ def test_factor_template_cross_split_warmup_and_category_scope_adoption(monkeypa
             post_rows,
             [],
             {
-                "template": factor_template_snapshot("trend_pullback", "518880"),
+                "template": factor_template_snapshot("synth_long_250", "518880"),
                 "decision_start": post_rows[-1]["trade_date"],
                 "external": {"warmup_rows": warmup_rows[:-1], "warmup_dividends": warmup_actions["dividends"]},
                 "slippage_bps": 5,

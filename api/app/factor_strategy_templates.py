@@ -1,140 +1,17 @@
-"""基于因子表达式的通用与分类策略模板，按研究门禁结果决定是否开放采用。"""
+"""基于因子表达式的通用与分类策略模板基础设施；当前策略库已清空待重建。"""
 
 from datetime import date
 from math import isfinite
 
 from app.algorithm_templates import TURNING_VERSION, turning_events, turning_profile
-from app.factor_strategy_research import RISK_BASELINE, prepare_factor_strategy
+from app.factor_strategy_research import prepare_factor_strategy
 from app.research_factor_context import build_external_factor_truth
 from app.research_factors import STRATEGIES, factor_truth_rows
 
 FACTOR_STRATEGY_VERSION = "factor-strategy-template-v1.0.0"
 
-FACTOR_TEMPLATES = {
-    "trend_pullback": {
-        "min_warmup_bars": 250,
-        "external_requirements": (),
-        "risk_baseline": dict(RISK_BASELINE),
-        "entry_expression": {
-            "op": "all",
-            "items": [
-                {"op": "factor", "factor_id": "above_ma250"},
-                {"op": "factor", "factor_id": "adx_trending"},
-                {"op": "factor", "factor_id": "trend_pullback_near_ma20"},
-            ],
-        },
-        "exit_expression": {
-            "op": "any",
-            "items": [
-                {"op": "factor", "factor_id": "turning_top"},
-                {"op": "factor", "factor_id": "adx_choppy"},
-                {"op": "factor", "factor_id": "atr_overbought"},
-            ],
-        },
-    },
-    "volatility_contraction_breakout": {
-        "min_warmup_bars": 66,
-        "external_requirements": (),
-        "risk_baseline": dict(RISK_BASELINE),
-        "entry_expression": {
-            "op": "all",
-            "items": [
-                {
-                    "op": "within",
-                    "days": 5,
-                    "expression": {
-                        "op": "factor",
-                        "factor_id": "volatility_contracting",
-                    },
-                },
-                {"op": "factor", "factor_id": "atr_box_breakout"},
-                {"op": "factor", "factor_id": "strong_close"},
-            ],
-        },
-        "exit_expression": {
-            "op": "any",
-            "items": [
-                {"op": "factor", "factor_id": "turning_top"},
-                {"op": "factor", "factor_id": "high_volume_stall"},
-                {"op": "factor", "factor_id": "close_cross_ma10_down"},
-            ],
-        },
-    },
-    "value_sentiment_reversal": {
-        "min_warmup_bars": 66,
-        "external_requirements": ("valuation", "market_fear_greed"),
-        "risk_baseline": {**RISK_BASELINE, "weak_exit_days": 40},
-        "entry_expression": {
-            "op": "all",
-            "items": [
-                {
-                    "op": "any",
-                    "items": [
-                        {"op": "factor", "factor_id": "erp_high_percentile"},
-                        {"op": "factor", "factor_id": "dividend_yield_high"},
-                        {"op": "factor", "factor_id": "valuation_low_percentile"},
-                        {
-                            "op": "within",
-                            "days": 5,
-                            "expression": {
-                                "op": "factor",
-                                "factor_id": "market_fear_extreme",
-                            },
-                        },
-                    ],
-                },
-                {"op": "factor", "factor_id": "oversold_recovery"},
-            ],
-        },
-        "exit_expression": {
-            "op": "any",
-            "items": [
-                {"op": "factor", "factor_id": "turning_top"},
-                {"op": "factor", "factor_id": "valuation_high_percentile"},
-                {"op": "factor", "factor_id": "market_greed_extreme"},
-                {"op": "factor", "factor_id": "wilder_rsi_overbought_turn_down"},
-            ],
-        },
-    },
-    "gem_bottom_contraction": {
-        "min_warmup_bars": 66,
-        "external_requirements": ("market_fear_greed",),
-        "risk_baseline": dict(RISK_BASELINE),
-        "entry_expression": {
-            "op": "all",
-            "items": [
-                {
-                    "op": "within",
-                    "days": 5,
-                    "expression": {"op": "factor", "factor_id": "turning_bottom"},
-                },
-                {
-                    "op": "within",
-                    "days": 3,
-                    "expression": {
-                        "op": "factor",
-                        "factor_id": "volatility_contracting",
-                    },
-                },
-                {"op": "factor", "factor_id": "strong_close"},
-                {"op": "factor", "factor_id": "close_position_positive"},
-            ],
-        },
-        "exit_expression": {
-            "op": "all",
-            "items": [
-                {"op": "factor", "factor_id": "ma5_cross_ma20_down"},
-                {
-                    "op": "not",
-                    "expression": {
-                        "op": "factor",
-                        "factor_id": "market_greed_extreme",
-                    },
-                },
-            ],
-        },
-    },
-}
+# 当前已登记策略全部下线清空，后续通过代码策略 + 研究作用域重新注册。
+FACTOR_TEMPLATES = {}
 
 
 def is_factor_template(strategy_id):

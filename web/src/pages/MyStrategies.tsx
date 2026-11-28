@@ -97,7 +97,7 @@ export default function MyStrategies({ theme }: { theme: string }) {
             </div>
           </div>)}
         </section>
-        {code && <p className="muted">当前关注 <span className="mono">{code}</span>（{instrument?.research_category ?? "未分类"}），策略库展示通用策略及该分类绑定策略。</p>}
+        {code && !!visibleStrategies.length && <p className="muted">当前关注 <span className="mono">{code}</span>（{instrument?.research_category ?? "未分类"}），策略库展示通用策略及该分类绑定策略。</p>}
         <div className="algorithm-library" aria-label="策略库">{visibleStrategies.map((item) => {
           const itemEvidence = evidenceForStrategy(item, instrument?.research_category);
           const itemAdoptable = code ? isStrategyAdoptable(item, code) : item.adoptable !== false;
@@ -108,7 +108,7 @@ export default function MyStrategies({ theme }: { theme: string }) {
             <AppLink href={journeyUrl("strategies", code || undefined, { view: "algorithm", algorithm: item.id, ...dates })}>策略说明</AppLink>
           </section>;
         })}</div>
-        {!visibleStrategies.length && <p className="empty">暂无可回测策略。</p>}
+        {!visibleStrategies.length && <p className="empty">当前策略库已清空（保留 50 项原子因子观察与回测引擎），等待后续结合研究重新登记策略。</p>}
       </>)}
   </div>;
 }

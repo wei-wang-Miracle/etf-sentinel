@@ -337,30 +337,6 @@ EXTERNAL_FACTOR_IDS = frozenset(
 )
 
 STRATEGIES = {
-    "range_breakout": {
-        "name": "箱体突破",
-        "description": "观察价格向上突破过去20个交易日区间后，趋势、修复和量能能否确认。",
-        "factors": (
-            ("box_breakout_up", "trigger"),
-            ("turning_top", "risk"),
-        ),
-    },
-    "bottom_confirmation": {
-        "name": "底部确认",
-        "description": "观察阶段底部确认，并结合价格修复、趋势和量能判断。",
-        "factors": (
-            ("turning_bottom", "trigger"),
-            ("turning_top", "risk"),
-        ),
-    },
-    "hybrid_reversal": {
-        "name": "复合反转",
-        "description": "观察阶段底部或超卖结构，并等待修复、趋势和量能确认。",
-        "factors": (
-            ("turning_bottom", "trigger"),
-            ("turning_top", "risk"),
-        ),
-    },
     "range_breakout_research": {
         "name": "共享突破研究",
         "description": "离线评估共享箱体突破、趋势、收盘位置和量能确认，不可采用。",
@@ -382,61 +358,6 @@ STRATEGIES = {
             ("close_above_prior_high", "confirmation"),
             ("recovery_volume_band", "confirmation"),
             ("lower_shadow_support", "confirmation"),
-        ),
-    },
-    "trend_pullback": {
-        "name": "趋势回踩",
-        "description": "MA250之上且ADX确认趋势时回踩MA20附近入场；顶部、趋势转弱或极度超买退出，作用域与准入由研究结论绑定。",
-        "adoptable": False,
-        "factors": (
-            ("above_ma250", "filter"),
-            ("adx_trending", "filter"),
-            ("trend_pullback_near_ma20", "trigger"),
-            ("turning_top", "exit"),
-            ("adx_choppy", "exit"),
-            ("atr_overbought", "exit"),
-        ),
-    },
-    "volatility_contraction_breakout": {
-        "name": "波动收缩突破",
-        "description": "近5日波动率收敛蓄势后高收盘触发ATR余量突破入场；顶部、放量滞涨或跌破MA10退出，作用域与准入由研究结论绑定。",
-        "adoptable": False,
-        "factors": (
-            ("volatility_contracting", "filter"),
-            ("atr_box_breakout", "trigger"),
-            ("strong_close", "confirmation"),
-            ("turning_top", "exit"),
-            ("high_volume_stall", "exit"),
-            ("close_cross_ma10_down", "exit"),
-        ),
-    },
-    "value_sentiment_reversal": {
-        "name": "估值恐贪反转",
-        "description": "低估值安全边际或全市场极端恐惧下等待超跌止跌修复入场；顶部、高估、极端贪婪或RSI转弱退出，作用域与准入由研究结论绑定。",
-        "adoptable": False,
-        "factors": (
-            ("erp_high_percentile", "filter"),
-            ("dividend_yield_high", "filter"),
-            ("valuation_low_percentile", "filter"),
-            ("market_fear_extreme", "filter"),
-            ("oversold_recovery", "trigger"),
-            ("turning_top", "exit"),
-            ("valuation_high_percentile", "exit"),
-            ("market_greed_extreme", "exit"),
-            ("wilder_rsi_overbought_turn_down", "exit"),
-        ),
-    },
-    "gem_bottom_contraction": {
-        "name": "创业板底分型缩波",
-        "description": "固化自v1.5.0创业板领先候选c1329：近5日底部确认、近3日短波动率收敛且日内强势收于上半区入场；MA5下穿MA20且非全市场极端贪婪退出。",
-        "adoptable": False,
-        "factors": (
-            ("turning_bottom", "trigger"),
-            ("volatility_contracting", "filter"),
-            ("strong_close", "confirmation"),
-            ("close_position_positive", "confirmation"),
-            ("ma5_cross_ma20_down", "exit"),
-            ("market_greed_extreme", "exit"),
         ),
     },
 }

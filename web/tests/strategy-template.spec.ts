@@ -150,3 +150,16 @@ test("按分类过滤适用策略，并在250日预热不足时自动避开与�
   expect(submitted?.start_date).toBe("2025-06-02");
   expect(submitted?.strategies).toContain("trend_pullback");
 });
+
+test("空策略库展示清空说明并禁用开始对比与运行回测", async ({ page }) => {
+  await page.route("**/api/strategies/catalog", (route) =>
+    json(route, { ...catalog, strategies: [], assignments: [] }),
+  );
+  await page.goto("/?page=strategies");
+  await expect(page.getByText(/当前策略库已清空/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "开始策略对比" })).toBeDisabled();
+
+  await page.goto("/?page=strategies&code=510500&view=backtest");
+  await expect(page.getByText(/当前策略库已清空，暂无可参加比较的策略/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "运行回测" })).toBeDisabled();
+});

@@ -178,6 +178,7 @@ export default function AlgorithmBacktest({ catalog, code, algorithm, range, the
             </div>;
           })}
         </fieldset>}
+        {!catalog.strategies.length ? <p className="empty">当前策略库已清空，暂无可参加比较的策略。请在重新登记策略后再运行回测。</p> : !!code && !available.length ? <p className="empty">当前 ETF 所属分类暂无可用策略。</p> : null}
         {!!available.length && !choices.length && <p className="notice warning">请至少选择一套算法后再运行回测。</p>}
         <div className="journey-section-heading algorithm-run">
           <p className="muted">统一口径：¥50,000 本金 · 佣金万一 · 滑点 5bp · 次日开盘成交</p>

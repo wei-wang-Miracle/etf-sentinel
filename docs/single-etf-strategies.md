@@ -58,24 +58,18 @@
 
 三套共享算法当前只使用行情和已核实的现金分红。FundDB 的基金档案、份额流、规模和折溢价只在“资金与份额”图层供观察，受首次采集日起才有历史的限制，当前不属于指标、因子或策略输入；本地积累超过120个交易日后，才可作为新的外部因子候选另行研究和验证。
 
-## 通用与分类研究绑定策略
+## 当前策略库状态（已清空待重建）
 
-除箱体突破、底部确认、复合反转三套通用共享基准外，代码库现包含四套由因子表达式与跨份额折算全历史预热支撑的策略模板（由 [factor_strategy_templates.py](../api/app/factor_strategy_templates.py) 执行，因子关系由迁移 `0025` 与 `0026` 登记），并依据 `v1.5.0` 研究门禁结论在数据库 `research_strategy_scopes` 中记录通用/分类绑定与采用准入状态（详见 [v1.5.0 结论](factor-strategy-research-2026-11-28-v1-5.md)）：
+按用户最新指示，系统已彻底清空以下两部分内容，目前仅保留 50 项原子因子（行情图可正常观察）、统一回测与跨拆算预热引擎、前端比较/采用/盘前信号框架以及离线研究脚本与报告：
 
-| 策略 | 预热要求 | 绑定范围与状态 (`research_strategy_scopes`) | 入场与退出概要 |
-| --- | --- | --- | --- |
-| 趋势回踩 (`trend_pullback`) | 250 交易日（支持跨折算预热） | `黄金` 绑定 · `single_unit_candidate`（**开放采用**，可参与任务5盘前信号） | `MA250` 之上且 `ADX14 >= 25` 时回踩 `MA20` 附近；阶段顶部、`ADX < 18` 或 ATR 超买退出；统一止损/移动止盈及 18 日弱势退出 |
-| 波动收缩突破 (`volatility_contraction_breakout`) | 66 交易日（支持跨折算预热） | `黄金` · `single_unit_candidate`（**开放采用**）；`创业板` · `holdout_watch`（**暂观察**） | 近 5 日波动率收敛蓄势后，当日高收盘触发 ATR 余量突破；阶段顶部、放量滞涨或收盘跌破 `MA10` 退出 |
-| 创业板底分型缩波 (`gem_bottom_contraction`) | 66 交易日（支持跨折算预热） | `创业板` 绑定（固化自 `c1329`）· `holdout_watch`（**暂观察**） | 近 2 日触发底部确认且近 5 日波动收缩时，强阳实体靠上部确认介入；阶段顶部、`MA5` 下穿 `MA20` 或全市场极度贪婪退出，弱势退出 24 日 |
-| 估值恐贪反转 (`value_sentiment_reversal`) | 66 交易日（支持跨折算预热） | `大盘宽基` / `中盘宽基` 绑定 · `rejected`（**暂观察对比**） | 关联指数高风险溢价 / 高股息 / 低估值或近 5 日全市场极度恐惧下触发超跌止跌修复；高估风险、全市场极度贪婪或 Wilder RSI 超买退出，弱势退出 40 日 |
-
-前端与工作台按当前选中 ETF 的 `instruments.research_category` 自动只展示「通用策略 + 当前 ETF 所属分类绑定策略」，并按每个 `(策略, ETF)` 的预热下限提供预热提示与一键调晚起始日，不再误将尚未完成 250 日预热或跨分类不适用策略投入整组比较。
+1. **数据库清空**：本地库中的 `backtest_runs`、`strategy_comparisons`、`strategy_comparison_factors`、`instrument_strategy_assignments`、`strategy_signals`、`strategy_execution_links`、`research_strategy_scopes` 与 `research_strategy_factors` 已全部清空（`research_factors` 等 50 项原子因子与全量基础行情保持保留）。
+2. **代码策略下线**：此前注册的全部 7 套策略（通用三套：`range_breakout`、`bottom_confirmation`、`hybrid_reversal`；因子策略四套：`trend_pullback`、`volatility_contraction_breakout`、`value_sentiment_reversal`、`gem_bottom_contraction`）已从 [research_factors.py](../api/app/research_factors.py) 的 `STRATEGIES` 与 [factor_strategy_templates.py](../api/app/factor_strategy_templates.py) 的 `FACTOR_TEMPLATES` 移除；`/strategies/catalog` 现返回空列表，`compare` 与 `adopt` 对空表/未登记策略严格拒绝，界面展示空策略库提示待后续结合研究结论重新定义与注册。
 
 ## 已退出可采用目录的研究
 
 [50 轮逐 ETF 多因子拟合](multifactor-research-validation.md)只保留离线研究材料，不可选择、回测或启用为当前策略。固定先验共享突破和左侧反转仍是离线原型，没有接入每日信号；其可复用观察因子已进入目录。
 
-[分类因子策略研究 v1.5.0](factor-strategy-research-2026-11-28-v1-5.md)已升级至 2018—2026 冻结行情与 2019 起正式评分，解除单独立单位一票否决，改为风格自适应门槛、分级证据、类内多 ETF 一致性与邻近类别交叉盲测，并量化了近 1 年政权开关（高波动与期指深贴水过滤）对留出回撤的改善效果；达到门禁门槛的 `黄金` 绑定结论已通过迁移 `0026` 落地为开放采用策略，其余留出待观察与淘汰项仅开放分类内比较对照。历史 `v1.4.0` 归档见[v1.4.0 结论](factor-strategy-research-2026-11-27-v1-4.md)。
+[分类因子策略研究 v1.5.0](factor-strategy-research-2026-11-28-v1-5.md)保留 2018—2026 冻结行情与 2019 起评分、风格自适应门槛、分级证据与留出政权开关研究脚本及结果作为后续重建策略的参考依据；历史 `v1.4.0` 归档见[v1.4.0 结论](factor-strategy-research-2026-11-27-v1-4.md)。
 
 ## 回测口径与边界
 

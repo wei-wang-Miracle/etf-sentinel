@@ -135,7 +135,7 @@ def _resolve_strategy_scope(db, strategy_id, instrument_code):
     """按数据库作用域表匹配ETF对应的研究绑定结论；分类绑定的优先级高于通用绑定。"""
     all_scopes = list(db.scalars(select(ResearchStrategyScope)))
     if not all_scopes:
-        return None
+        return False
     instrument = db.get(Instrument, instrument_code)
     category = (instrument.research_category if instrument else None) or "未分类"
     strategy_scopes = [item for item in all_scopes if item.strategy_id == strategy_id]
@@ -212,11 +212,12 @@ def strategy_catalog(db, instrument_code=None):
             }
             adoptable_flag = bool(adoptable_instruments)
         else:
-            scope_type = "universal"
+            # 数据库作用域表为空时不再回退放行代码内策略，确保清空数据库即对应空策略目录。
+            scope_type = "category"
             bound_categories = []
-            supported = list(supported_codes)
-            adoptable_flag = definition.get("adoptable", True)
-            adoptable_instruments = list(supported) if adoptable_flag else []
+            supported = []
+            adoptable_flag = False
+            adoptable_instruments = []
             evidence_by_category = {}
 
         earliest_start_by_instrument = {

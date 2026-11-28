@@ -36,27 +36,21 @@ def test_factor_and_strategy_tables_replace_algorithm_version_storage():
     assert "factor_id" in tables["strategy_comparison_factors"].c
     assert "research_strategies" not in tables
     assert set(STRATEGIES) == {
+        "range_breakout_research",
+        "left_reversal_research",
+    }
+    assert all(meta.get("research_only") for meta in STRATEGIES.values())
+    for sid in (
         "range_breakout",
         "bottom_confirmation",
         "hybrid_reversal",
-        "range_breakout_research",
-        "left_reversal_research",
-        "trend_pullback",
-        "volatility_contraction_breakout",
-        "value_sentiment_reversal",
-        "gem_bottom_contraction",
-    }
-    for sid in (
         "trend_pullback",
         "volatility_contraction_breakout",
         "value_sentiment_reversal",
         "gem_bottom_contraction",
     ):
-        assert STRATEGIES[sid].get("adoptable") is False
-        assert not STRATEGIES[sid].get("research_only")
-        with pytest.raises(HTTPException, match="比较观察"):
-            _candidate(sid, "510300")
-        assert _candidate(sid, "510300", allow_unadoptable=True)["factor_template"]["id"] == sid
+        with pytest.raises(HTTPException, match="策略不可用"):
+            _candidate(sid, "510300", allow_unadoptable=True)
 
 
 def test_research_factor_directory_has_matching_database_columns_and_comments():
