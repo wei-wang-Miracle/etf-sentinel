@@ -21,6 +21,17 @@ import { dataManagementUrl } from "../lib/navigation";
 import { journeyUrl } from "../lib/strategyJourney";
 
 type Metric = { value: number | null; local_percentile: number | null; source_percentile: number | null; trade_date: string | null; value_status: string };
+type CatalogProfileSummary = {
+  fund_full_name?: string | null;
+  category_primary?: string | null;
+  category_tag?: string | null;
+  tracking_index_code?: string | null;
+  tracking_index_name?: string | null;
+  index_corr?: number | null;
+  setup_date?: string | null;
+  management_fee_pct?: number | null;
+  custody_fee_pct?: number | null;
+};
 export type ResearchSummary = {
   object: { type: string; code: string; name: string };
   linked: { index_code: string | null; national_team_tracked: boolean };
@@ -29,6 +40,7 @@ export type ResearchSummary = {
     valuation: { index_code: string; index_name: string; metrics: Record<string, Metric> } | null;
     national_team: { ratio: number | null; as_of: string | null };
     sentiment: { category_key: string; category_name: string; index_name?: string | null; fear_greed_score: number | null; last_date: string | null; source_label: string | null }[];
+    catalog_profile?: CatalogProfileSummary | null;
   };
   redirected_from?: { type: string; code: string } | null;
   warnings: string[];
@@ -37,6 +49,7 @@ type ValuationData = { series: ValuationPoint[]; candles: Candle[] };
 type NationalData = { estimation_start_date: string; holdings: { trade_date: string; estimated_holding_pct: number | null }[]; candles: Candle[] };
 type EtfFlowData = { series: EtfFlowPoint[] };
 type EtfFlowSummary = {
+  profile?: CatalogProfileSummary | null;
   latest: EtfFlowPoint | null;
   coverage: { first_trade_date: string | null; last_trade_date: string | null; count: number };
 };
@@ -89,6 +102,8 @@ export default function ResearchObject({ theme, code, summary, loading, error, r
   const unavailable = tab === "valuation" && !index ? "尚无关联指数" : tab === "sentiment" && sentimentScope === "industry" && summary && !category ? "尚无行业恐贪类别，可切换至全市场温度与波指" : "";
   const hasPlot = tab === "price" ? candles.length > 0 : tab === "valuation" ? !!valuation?.series.length : tab === "funds" ? fundView === "flows" ? !!flows?.series.length : !!national?.holdings.length : sentimentScope === "market" ? !!marketSeries.data?.fear_greed.length : !!sentiment?.length;
   const chartResource = tab === "sentiment" && sentimentScope === "market" ? marketSeries : plot;
+  const targetTask = tab === "sentiment" && sentimentScope === "market" ? "market-sentiment" : tab === "funds" && fundView === "national" ? "national-team" : tasks[tab];
+  const catalogProfile = summary?.summary.catalog_profile ?? flowSummary.data?.profile ?? null;
 
   return <section className="dossier-research" aria-label="ETF行情与背景">
     <Tabs label="图表维度" items={views} value={tab} onChange={(tab) => update({ tab })} toolbar={<div className="research-controls">
@@ -117,19 +132,20 @@ export default function ResearchObject({ theme, code, summary, loading, error, r
           <div className="metric-context"><dt>估算口径</dt><dd>固定基准</dd><small>{national?.estimation_start_date ?? "2026-01-01"} · 不是真实持仓</small></div>
         </> : sentimentScope === "market" ? <>
           <div><dt>全市场恐贪分</dt><dd className={marketOverview.data?.latest.source_label?.includes("恐惧") ? "sentiment-fear-text" : marketOverview.data?.latest.source_label?.includes("贪婪") ? "sentiment-greed-text" : ""}>{number(marketOverview.data?.latest.fear_greed_score, 1)}</dd><small>{marketOverview.data?.latest.source_label ?? "源标签暂无"} · {marketOverview.data?.latest.trade_date ?? "暂无数据"}</small></div>
-          <div><dt>50ETF期权波动率</dt><dd>{number(marketOverview.data?.regime_factors.volatility?.raw_value, 2)}</dd><small>{marketOverview.data?.regime_factors.volatility?.trade_date ?? "暂无数据"}</small></div>
-          <div><dt>期指年化升贴水</dt><dd>{number(marketOverview.data?.regime_factors.premium?.raw_value, 2)}%</dd><small>创新高占比 {number(marketOverview.data?.regime_factors.strength?.raw_value, 2)}%</small></div>
+          <div><dt>50ETF期权波动率</dt><dd>{number(marketOverview.data?.regime_factors.volatility?.raw_value, 2)}</dd><small>股债差 {number(marketOverview.data?.regime_factors.bx?.raw_value, 2)}% · {marketOverview.data?.regime_factors.volatility?.trade_date ?? "暂无数据"}</small></div>
+          <div><dt>期指年化升贴水</dt><dd>{number(marketOverview.data?.regime_factors.premium?.raw_value, 2)}%</dd><small>创新高 {number(marketOverview.data?.regime_factors.strength?.raw_value, 2)}% · 成交 {number(marketOverview.data?.regime_factors.wz?.raw_value, 0)}</small></div>
         </> : <>
           <div><dt>{category?.category_name ?? "市场类别"}恐贪分数</dt><dd className={category?.source_label?.includes("恐惧") ? "sentiment-fear-text" : category?.source_label?.includes("贪婪") ? "sentiment-greed-text" : ""}>{number(category?.fear_greed_score, 1)}</dd><small>{category?.source_label ?? "源标签暂无"} · {category?.last_date ?? "暂无数据"}</small></div>
           <div className="metric-context"><dt>适用范围</dt><dd>市场背景</dd><small>不是这只 ETF 的直接情绪或买卖信号</small></div>
         </>}
       </dl>
+      {tab === "funds" && catalogProfile && <p className="context-note">基金档案：{catalogProfile.fund_full_name ?? summary.object.name}{catalogProfile.category_tag ? ` · ${catalogProfile.category_tag}` : ""}{catalogProfile.setup_date ? ` · 成立 ${catalogProfile.setup_date}` : ""}{catalogProfile.management_fee_pct == null ? "" : ` · 费率 ${catalogProfile.management_fee_pct}%+${catalogProfile.custody_fee_pct ?? "—"}%`}{catalogProfile.tracking_index_code ? ` · 源跟踪 ${catalogProfile.tracking_index_code}` : ""}{catalogProfile.index_corr == null ? "" : `（相关度 ${catalogProfile.index_corr.toFixed(3)}）`}</p>}
       {tab === "funds" && fundView === "flows" && (flowSummary.data?.coverage.count ?? 0) > 0 && (flowSummary.data?.coverage.count ?? 0) < 5 && <p className="notice warning">已收集 {flowSummary.data!.coverage.count} 个截面日（{flowSummary.data!.coverage.first_trade_date} 起），历史日度资金流随每日任务 7 持续累积，不回填未采集历史。</p>}
       {tab === "valuation" && <p className="context-note">关联指数：{summary.summary.valuation?.index_name ?? index ?? "未映射"} <span className="mono">{index}</span>；同指数 ETF 共享估值证据，历史源可能修订，未证明原时点可得。</p>}
       <div className="dossier-chart">
-        {!validDates ? <div className="empty" role="alert">请选择有效的起止日期，起始日期不能晚于截止日期。</div> : nationalUnsupported ? <div className="empty"><h2>该 ETF 不在国家队数据源范围内</h2><p>数据源仅提供18只ETF，不包含 {code}；重新采集不会产生该标的数据。可在顶部切换至源支持的 ETF，如 510500 或 512100。</p></div> : unavailable ? <div className="empty"><p>{unavailable}</p><AppLink href={dataManagementUrl("jobs", tasks[tab], code)}>检查对应数据任务</AppLink></div>
-          : chartResource.loading || (tab === "sentiment" && sentimentScope === "market" && marketOverview.loading) ? <div className="chart-loading skeleton-state" role="status">正在读取所选区间…</div> : chartResource.error || (tab === "sentiment" && sentimentScope === "market" && marketOverview.error) ? <div className="empty" role="alert"><p>所选区间读取失败：{chartResource.error || marketOverview.error}</p><button onClick={() => { chartResource.retry(); marketOverview.retry(); }}>重试图表</button><AppLink href={dataManagementUrl("jobs", sentimentScope === "market" ? "market-sentiment" : tasks[tab], code)}>检查对应数据任务</AppLink></div>
-            : !hasPlot ? <div className="empty"><h2>所选区间暂无数据</h2><p>可以调整日期，或检查对应采集任务。</p><AppLink href={dataManagementUrl("jobs", tasks[tab], code)}>检查对应数据任务</AppLink></div> : <>
+        {!validDates ? <div className="empty" role="alert">请选择有效的起止日期，起始日期不能晚于截止日期。</div> : nationalUnsupported ? <div className="empty"><h2>该 ETF 不在国家队数据源范围内</h2><p>数据源仅提供18只ETF，不包含 {code}；重新采集不会产生该标的数据。可在顶部切换至源支持的 ETF，如 510500 或 512100。</p></div> : unavailable ? <div className="empty"><p>{unavailable}</p><AppLink href={dataManagementUrl("jobs", targetTask, code)}>检查对应数据任务</AppLink></div>
+          : chartResource.loading || (tab === "sentiment" && sentimentScope === "market" && marketOverview.loading) ? <div className="chart-loading skeleton-state" role="status">正在读取所选区间…</div> : chartResource.error || (tab === "sentiment" && sentimentScope === "market" && marketOverview.error) ? <div className="empty" role="alert"><p>所选区间读取失败：{chartResource.error || marketOverview.error}</p><button onClick={() => { chartResource.retry(); marketOverview.retry(); }}>重试图表</button><AppLink href={dataManagementUrl("jobs", targetTask, code)}>检查对应数据任务</AppLink></div>
+            : !hasPlot ? <div className="empty"><h2>所选区间暂无数据</h2><p>可以调整日期，或检查对应采集任务。</p><AppLink href={dataManagementUrl("jobs", targetTask, code)}>检查对应数据任务</AppLink></div> : <>
               {showActual && !markerRangeValid && <p className="notice">所选区间早于账户同步起点（{ACCOUNT_SYNC_START}），暂无真实操作记录可叠加。</p>}
               {showActual && markerRangeValid && markerClamped && !actual.error && <p className="muted">真实操作仅叠加账户同步起点（{ACCOUNT_SYNC_START}）至昨日的已同步记录。</p>}
               {actual.error && <p className="notice warning">真实操作标记暂不可用（{actual.error}），行情仍可查看。<button onClick={actual.retry}>重试标记</button></p>}

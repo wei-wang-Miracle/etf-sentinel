@@ -31,6 +31,7 @@ def test_factor_directory_declares_observable_identity_and_output_type():
         "box_breakout_up",
         "volume_breakout_up",
         "atr_oversold",
+        "oversold_recovery",
         "wilder_rsi_oversold",
         "ma60_rising",
         "strong_close",
@@ -75,9 +76,9 @@ def test_factor_directory_declares_observable_identity_and_output_type():
         "market_breadth_weak",
         "market_futures_deep_discount",
     }
-    assert "oversold_recovery" not in FACTORS
     assert FACTORS["turning_bottom"]["output_type"] == "event"
     assert FACTORS["atr_oversold"]["output_type"] == "state"
+    assert FACTORS["oversold_recovery"]["output_type"] == "event"
     assert FACTORS["close_above_prior_high"]["output_type"] == "event"
     assert FACTORS["atr_overbought"]["output_type"] == "state"
     assert FACTORS["wilder_rsi_overbought_turn_down"]["output_type"] == "event"
@@ -146,6 +147,21 @@ def test_reversal_atoms_do_not_require_the_old_composite_recovery_factor():
     assert truth[-1]["below_ma20"] is True
     assert truth[-1]["close_position_positive"] is True
     assert truth[-1]["lower_shadow_support"] is True
+    assert truth[-1]["oversold_recovery"] is True
+
+    non_oversold_closes = [10.0 + 0.05 * index for index in range(20)] + [10.40, 10.45]
+    non_oversold_rows = rows_from_closes(
+        non_oversold_closes,
+        volumes=[100.0] * 21 + [120.0],
+        highs=[value + 0.02 for value in non_oversold_closes[:-1]] + [10.50],
+        lows=[value - 0.02 for value in non_oversold_closes[:-1]] + [10.35],
+    )
+    non_oversold_truth = factor_truth_rows(non_oversold_rows, {})
+    assert non_oversold_truth[-2]["atr_oversold"] is False
+    assert non_oversold_truth[-2]["wilder_rsi_oversold"] is False
+    assert non_oversold_truth[-1]["close_above_prior_high"] is True
+    assert non_oversold_truth[-1]["below_ma20"] is True
+    assert non_oversold_truth[-1]["oversold_recovery"] is False
 
 
 def test_profit_taking_and_regime_factors_have_distinct_truths():
@@ -199,8 +215,8 @@ def test_factor_events_mark_wilder_oversold_atoms_and_turning_events():
     assert ("turning_top", rows[-1]["trade_date"]) in indexed
     assert ("atr_oversold", rows[25]["trade_date"]) not in indexed
     assert ("atr_oversold", rows[26]["trade_date"]) in indexed
+    assert ("oversold_recovery", rows[-2]["trade_date"]) in indexed
     assert ("close_above_prior_high", rows[-2]["trade_date"]) in indexed
-    assert not any(event["factor_id"] == "oversold_recovery" for event in events)
 
 
 def test_factor_events_need_history_for_wilder_indicators():
@@ -215,6 +231,7 @@ def test_separates_wilder_oversold_from_atr_oversold_with_no_price_breakout():
     indexed = {(item["factor_id"], item["trade_date"]) for item in events}
     assert ("wilder_rsi_oversold", rows[14]["trade_date"]) in indexed
     assert not any(item["factor_id"] == "atr_oversold" for item in events)
+    assert not any(item["factor_id"] == "oversold_recovery" for item in events)
     assert not any(item["factor_id"] == "close_above_prior_high" for item in events)
 
 

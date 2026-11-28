@@ -59,11 +59,12 @@ def test_wilder_adx_waits_for_28_observations_and_is_causal():
 
     baseline = _adx_series(highs, lows, closes)
 
-    assert all(item[2] is None for item in baseline[:28])
-    plus_di, minus_di, adx = baseline[28]
+    assert all(item[2] is None for item in baseline[:27])
+    plus_di, minus_di, adx = baseline[27]
     assert plus_di is not None and minus_di is not None and adx is not None
     assert plus_di > minus_di
     assert 0 <= adx <= 100
+    assert baseline[28][2] is not None
 
     highs[-1], lows[-1], closes[-1] = 10_000.0, 1.0, 5_000.0
     assert _adx_series(highs, lows, closes)[:30] == baseline[:30]

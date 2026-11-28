@@ -120,12 +120,15 @@ def wilder_adx14(
     minus_di = 100 * state["minus_dm14"] / state["tr14"]
     di_total = plus_di + minus_di
     dx = 100 * abs(plus_di - minus_di) / di_total if di_total > 0 else 0.0
-    if index <= 27:
+    if index <= 26:
         state["dx_values"] = [*state.get("dx_values", []), dx]
         return plus_di, minus_di, None, state
 
     if "adx" not in state:
-        seed = state.get("dx_values", [])
-        state["adx"] = sum(seed) / len(seed) if seed else dx
+        # 第28根K线（index == 27）集齐前14个DX值，按标准Wilder口径以算术均值作为首个ADX。
+        seed = [*state.get("dx_values", []), dx]
+        state["adx"] = sum(seed) / len(seed)
+        return plus_di, minus_di, state["adx"], state
+
     state["adx"] = (state["adx"] * 13 + dx) / 14
     return plus_di, minus_di, state["adx"], state

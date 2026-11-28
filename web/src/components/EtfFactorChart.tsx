@@ -28,7 +28,7 @@ type FactorDates = {
 };
 type FactorCatalog = { factors: (FactorIdentity & { chart_visible: boolean; output_type: string })[] };
 const NO_TRADES: NonNullable<Props["trades"]> = [];
-const DEFAULT_FACTORS = ["turning_bottom", "turning_top", "close_above_prior_high"];
+const DEFAULT_FACTORS = ["turning_bottom", "turning_top", "oversold_recovery"];
 const CATEGORY_ORDER = [
   "结构确认", "趋势状态", "趋势转折", "趋势走弱", "均线位置", "趋势回踩",
   "突破事件", "突破确认", "反转确认", "价格确认", "超跌状态", "波动率状态",
@@ -203,7 +203,7 @@ export default function EtfFactorChart({ history, start, end, theme, instrumentC
     </div>
     <KLine rows={rows} historyRows={history} theme={theme} trades={trades} factorEvents={events} frontAdjusted />
     {markers.loading ? <p className="muted" role="status">正在读取因子标记…</p>
-      : markers.error ? <p className="notice warning" role="status">因子标记暂不可用 · {markers.error} {markers.error.includes("权益资料") && <AppLink href={dataManagementUrl("jobs", "etf", instrumentCode)}>到行情任务批量更新权益资料</AppLink>} <button type="button" onClick={markers.retry}>重试标点</button></p>
+      : markers.error ? <p className="notice warning" role="status">因子标记暂不可用 · {markers.error} {markers.error.includes("权益资料") ? <AppLink href={dataManagementUrl("jobs", "etf", instrumentCode)}>到行情任务批量更新权益资料</AppLink> : markers.error.includes("行情") ? <AppLink href={dataManagementUrl("jobs", "etf", instrumentCode)}>到行情任务核验并补全行情</AppLink> : null} <button type="button" onClick={markers.retry}>重试标点</button></p>
         : markers.data && <p className="muted" role="status">
           {markers.data.data_cutoff ? `因子标记 · 本地日行情及已核验权益 · 数据截止 ${markers.data.data_cutoff}` : "所选区间暂无可核验的因子数据"}
           {markers.data.partial ? " · 部分行情日期尚未核验权益" : ""}

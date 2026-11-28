@@ -9,7 +9,11 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 
-from app.backtest_data import _transition_split_multiplier, trading_days
+from app.backtest_data import (
+    _transition_split_multiplier,
+    expected_transition_factors,
+    trading_days,
+)
 
 # 分级顺序：优先东财（全历史、含成交额、与权益同源），备用新浪（精度一致），兜底腾讯（全历史分段）
 SOURCE_TIERS = ("eastmoney", "sina", "tencent")
@@ -638,6 +642,8 @@ def compute_historical_adjusted_close(
     *,
     anchor_date=None,
     anchor_factor=Decimal(1),
+    observed_transitions=None,
+    known_factors=None,
 ):
     """基于本地锚定复权倍率与已核验分红折算事件，向历史反推连续的 adjusted_close。
 
@@ -648,6 +654,9 @@ def compute_historical_adjusted_close(
         actions (dict) - BacktestSource 中的 dividends 与 splits。
         anchor_date (str|None) - 锚定日期（通常为本地库已有最早交易日）；为空则锚定末日为 1。
         anchor_factor (Decimal) - 锚定日当日的 adjusted_close / close 倍率。
+        observed_transitions (dict|None) - 可选 {(prev_day, curr_day): observed_ratio}，
+            用于在同日拆股+分红时匹配本地已核验数据源实际采用的除权顺序。
+        known_factors (dict|None) - 可选 {trade_date: factor}，用于在向前后推算时锚定已知接缝倍率，避免跨多年累积误差。
     返回：list[Decimal] - 与 rows 等长的复权收盘价序列。
     """
     if not rows:
@@ -663,9 +672,11 @@ def compute_historical_adjusted_close(
         for event in actions.get("dividends", [])
     }
     splits = actions.get("splits", [])
+    observed_map = observed_transitions or {}
+    pinned_factors = known_factors or {}
 
     factors = [Decimal(0)] * len(rows)
-    factors[anchor_index] = anchor_factor
+    factors[anchor_index] = pinned_factors.get(target_date, anchor_factor)
 
     def step_ratio(prev_index, curr_index):
         prev_day = dates[prev_index]
@@ -673,26 +684,105 @@ def compute_historical_adjusted_close(
         prev_close = Decimal(str(rows[prev_index]["close"]))
         cash_div = dividends.get(curr_day, Decimal(0))
         split_mult = _transition_split_multiplier(splits, prev_day, curr_day)
-        # 若同日或相邻日既发生大比例折算又分红，且分红按折算后份额派发，需按真实除权后基准避免负分母
-        effective_prev = prev_close / split_mult if cash_div >= prev_close else prev_close
-        if cash_div >= effective_prev:
-            raise ValueError(f"{curr_day} 现金分红超过前收盘价，无法反推复权因子")
-        return (effective_prev / (effective_prev - cash_div)) * split_mult
+        try:
+            candidates = expected_transition_factors(prev_close, cash_div, split_mult)
+        except ValueError:
+            raise ValueError(f"{curr_day} 现金分红超过前收盘价，无法反推复权因子") from None
+        observed = observed_map.get((prev_day, curr_day))
+        if observed is not None and len(candidates) > 1:
+            matching = min(candidates, key=lambda item: abs(observed / item - 1))
+            if abs(observed / matching - 1) <= Decimal("0.0004"):
+                return matching
+        return candidates[0]
 
     # 向更早历史反推
     for index in range(anchor_index, 0, -1):
-        ratio = step_ratio(index - 1, index)
-        factors[index - 1] = factors[index] / ratio
+        prev_day = dates[index - 1]
+        if prev_day in pinned_factors:
+            factors[index - 1] = pinned_factors[prev_day]
+        else:
+            ratio = step_ratio(index - 1, index)
+            factors[index - 1] = factors[index] / ratio
 
     # 若锚定日不是末日，向后顺推
     for index in range(anchor_index + 1, len(rows)):
-        ratio = step_ratio(index - 1, index)
-        factors[index] = factors[index - 1] * ratio
+        curr_day = dates[index]
+        if curr_day in pinned_factors:
+            factors[index] = pinned_factors[curr_day]
+        else:
+            ratio = step_ratio(index - 1, index)
+            factors[index] = factors[index - 1] * ratio
 
     return [
         (Decimal(str(row["close"])) * factor).quantize(Decimal("0.00000001"))
         for row, factor in zip(rows, factors, strict=True)
     ]
+
+
+def persist_verified_suspensions(db, code, suspension_audit, collected_at):
+    """将至少双源核验一致的真实停牌日幂等持久化到数据库。
+
+    功能：避免因子图等在线场景因历史上已确认停牌或份额折算停牌日被严格日历校验误拒。
+    参数：
+        db - SQLAlchemy 会话。
+        code (str) - 六位 ETF 代码。
+        suspension_audit (dict|None) - audited_suspensions 返回的停牌审计字典。
+        collected_at (datetime) - 核验写入时间戳。
+    返回：int - 写入或更新的停牌日期条数。
+    """
+    from app.models import InstrumentVerifiedSuspension
+
+    if not isinstance(suspension_audit, dict):
+        return 0
+    available_count = suspension_audit.get("available_source_count")
+    calendar_version = suspension_audit.get("calendar_version")
+    records = suspension_audit.get("verified_suspensions") or []
+    if (
+        not isinstance(available_count, int)
+        or available_count < 2
+        or not calendar_version
+        or not records
+    ):
+        return 0
+
+    rows = []
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        trade_date_text = record.get("trade_date")
+        sources = sorted(
+            {
+                str(name)
+                for name in (record.get("sources") or [])
+                if isinstance(name, str) and name
+            }
+        )
+        if not isinstance(trade_date_text, str) or len(sources) < 2:
+            continue
+        rows.append(
+            {
+                "instrument_code": code,
+                "trade_date": date.fromisoformat(trade_date_text),
+                "sources": sources,
+                "calendar_version": str(calendar_version),
+                "collected_at": collected_at,
+            }
+        )
+    if not rows:
+        return 0
+
+    stmt = insert(InstrumentVerifiedSuspension.__table__).values(rows)
+    db.execute(
+        stmt.on_conflict_do_update(
+            index_elements=["instrument_code", "trade_date"],
+            set_={
+                "sources": stmt.excluded.sources,
+                "calendar_version": stmt.excluded.calendar_version,
+                "collected_at": stmt.excluded.collected_at,
+            },
+        )
+    )
+    return len(rows)
 
 
 def free_backfill_end_date(current_dt):
@@ -782,8 +872,38 @@ def backfill_instrument_history(
         anchor_date = rows[-1]["trade_date"]
         anchor_factor = Decimal(1)
 
+    observed_transitions = {}
+    for idx in range(1, len(existing)):
+        prev_row = existing[idx - 1]
+        curr_row = existing[idx]
+        if (
+            prev_row.get("adjusted_close") is not None
+            and curr_row.get("adjusted_close") is not None
+        ):
+            prev_factor = Decimal(str(prev_row["adjusted_close"])) / Decimal(
+                str(prev_row["close"])
+            )
+            curr_factor = Decimal(str(curr_row["adjusted_close"])) / Decimal(
+                str(curr_row["close"])
+            )
+            observed_transitions[(prev_row["trade_date"], curr_row["trade_date"])] = (
+                curr_factor / prev_factor
+            )
+
+    known_factors = {
+        item["trade_date"]: Decimal(str(item["adjusted_close"]))
+        / Decimal(str(item["close"]))
+        for item in existing
+        if item.get("adjusted_close") is not None
+    }
+
     adjusted_series = compute_historical_adjusted_close(
-        rows, actions, anchor_date=anchor_date, anchor_factor=anchor_factor
+        rows,
+        actions,
+        anchor_date=anchor_date,
+        anchor_factor=anchor_factor,
+        observed_transitions=observed_transitions,
+        known_factors=known_factors,
     )
     existing_dates = {item["trade_date"] for item in existing}
     selected = verified["selected_source"]
@@ -813,16 +933,24 @@ def backfill_instrument_history(
             }
         )
 
-    if apply and to_insert:
-        for start_idx in range(0, len(to_insert), 500):
-            batch = to_insert[start_idx : start_idx + 500]
-            stmt = insert(Candle.__table__).values(batch)
-            db.execute(
-                stmt.on_conflict_do_nothing(
-                    index_elements=["instrument_code", "trade_date"]
+    if apply:
+        if to_insert:
+            for start_idx in range(0, len(to_insert), 500):
+                batch = to_insert[start_idx : start_idx + 500]
+                stmt = insert(Candle.__table__).values(batch)
+                db.execute(
+                    stmt.on_conflict_do_nothing(
+                        index_elements=["instrument_code", "trade_date"]
+                    )
                 )
-            )
-        db.commit()
+        written_suspensions = persist_verified_suspensions(
+            db,
+            code,
+            (verified.get("cross_check") or {}).get("suspension_audit"),
+            collected_at,
+        )
+        if to_insert or written_suspensions:
+            db.commit()
 
     return {
         "status": "ok",

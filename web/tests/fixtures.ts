@@ -14,6 +14,7 @@ export const factorCatalog = {
     { id: "close_above_prior_high", name: "收盘收复昨高", category: "反转确认" },
     { id: "erp_high_percentile", name: "股债高性价比保护", category: "外部估值" },
     { id: "relative_strength_20d_positive", name: "相对沪深300跑赢", category: "相对强弱" },
+    { id: "oversold_recovery", name: "超跌后止跌修复", category: "反转确认" },
   ].map((factor) => ({ ...factor, meaning: "仅用于观察。", chart_visible: true, output_type: "event" })),
 };
 export const catalog = {

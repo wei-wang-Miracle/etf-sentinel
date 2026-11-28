@@ -49,7 +49,8 @@ def test_research_factor_directory_has_matching_database_columns_and_comments():
     sentiment_link_table = Base.metadata.tables["instrument_sentiment_links"]
 
     assert set(FACTORS)  # Registry contains the complete first research set.
-    assert "oversold_recovery" not in FACTORS
+    assert "oversold_recovery" in FACTORS
+    assert "close_above_prior_high" in FACTORS
     assert factor_table.comment and all(column.comment for column in factor_table.columns)
     assert relation_table.comment and all(column.comment for column in relation_table.columns)
     assert sentiment_link_table.comment and all(

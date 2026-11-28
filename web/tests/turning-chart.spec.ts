@@ -32,8 +32,8 @@ test.beforeEach(async ({ page }) => {
   await page.route("**/api/candles/512100?*", (route) => json(route, rows));
 });
 
-test("行情默认展示阶段顶底与收盘收复昨高，可叠加同日的其他因子", async ({ page }) => {
-  const events = [event(112, 0), event(112, 2), event(150, 3), event(200, 1)];
+test("行情默认展示阶段顶底与超跌后止跌修复，可叠加同日的收盘收复昨高与其他因子", async ({ page }) => {
+  const events = [event(112, 0), event(112, 2), event(150, 6), event(150, 3), event(200, 1)];
   await page.route("**/api/candles/510500/factors?*", (route) => {
     const query = new URL(route.request().url()).searchParams;
     return json(route, {
@@ -52,14 +52,16 @@ test("行情默认展示阶段顶底与收盘收复昨高，可叠加同日的�
   await expect(page.getByLabel("顶底来源")).toHaveCount(0);
   await expect.poll(async () => (await chartState(page)).markers.map((marker) => ({ name: marker.name, coord: marker.coord }))).toEqual([
     { name: "阶段底部确认", coord: [rows[112].date, rows[112].low] },
-    { name: "收盘收复昨高", coord: [rows[150].date, rows[150].low] },
+    { name: "超跌后止跌修复", coord: [rows[150].date, rows[150].low] },
     { name: "阶段顶部确认", coord: [rows[200].date, rows[200].high] },
   ]);
   await page.getByText(/因子标记 · 已选/).click();
   await page.getByRole("checkbox", { name: /放量向上突破/ }).check();
+  await page.getByRole("checkbox", { name: /收盘收复昨高/ }).check();
   await expect.poll(async () => (await chartState(page)).markers.filter((marker) => marker.coord[0] === rows[112].date).map((marker) => marker.name)).toEqual(["阶段底部确认", "放量向上突破"]);
+  await expect.poll(async () => (await chartState(page)).markers.filter((marker) => marker.coord[0] === rows[150].date).map((marker) => marker.name)).toEqual(["超跌后止跌修复", "收盘收复昨高"]);
   await page.getByRole("checkbox", { name: /底部确认/ }).uncheck();
-  await expect.poll(async () => (await chartState(page)).markers.map((marker) => marker.name)).toEqual(["放量向上突破", "收盘收复昨高", "阶段顶部确认"]);
+  await expect.poll(async () => (await chartState(page)).markers.map((marker) => marker.name)).toEqual(["放量向上突破", "超跌后止跌修复", "收盘收复昨高", "阶段顶部确认"]);
   await page.getByLabel("当前 ETF").selectOption("512100");
   await expect(page.getByText(/部分行情日期尚未核验权益/)).toBeVisible();
   await expect.poll(async () => (await chartState(page)).markers.map((marker) => marker.coord[0])).toEqual([rows[140].date]);
@@ -164,4 +166,14 @@ test("因子图层按业务分类分组，并提示缺少指数映射的外部�
   await expect(page.getByRole("group", { name: "相对强弱" })).toBeVisible();
   await page.getByRole("checkbox", { name: /股债高性价比保护/ }).check();
   await expect(page.getByText("该 ETF 尚未映射指数，外部估值及相对强弱标记不可用")).toBeVisible();
+});
+
+test("行情缺少交易日报错时不误导更新权益资料", async ({ page }) => {
+  await page.route("**/api/candles/510500/factors?*", (route) =>
+    json(route, { detail: "行情数据未通过校验：行情缺少交易日（首日 2025-05-06，共 1 日未核验停牌），拒绝回测" }, 422),
+  );
+  await page.goto(url);
+  await expect(page.getByRole("status")).toContainText("行情数据未通过校验");
+  await expect(page.getByRole("link", { name: "到行情任务核验并补全行情", exact: true })).toHaveAttribute("href", /page=data.*manage=jobs.*code=510500.*task=etf/);
+  await expect(page.getByRole("link", { name: "到行情任务批量更新权益资料", exact: true })).toHaveCount(0);
 });

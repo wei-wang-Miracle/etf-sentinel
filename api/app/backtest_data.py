@@ -144,6 +144,13 @@ def fetch_actions(code):
             raise ValueError("权益来源暂不可用或结构变化，已有权益保留") from None
 
 
+def first_trading_session():
+    """返回交易所日历依赖覆盖的首个交易日字符串。"""
+    import exchange_calendars as calendars
+
+    return str(calendars.get_calendar("XSHG").first_session.date())
+
+
 def trading_days(start, end):
     """返回上海证券交易日历及依赖版本；不猜测未知年份节假日。"""
     import exchange_calendars as calendars
@@ -207,6 +214,30 @@ def _transition_split_multiplier(splits, previous_date, current_date):
     return multiplier
 
 
+def expected_transition_factors(previous_close, dividend, split_multiplier):
+    """返回相邻交易日间所有合法除权除息口径的理论复权倍率候选。
+
+    当同一过渡窗口既发生份额折算又发生现金分红时，市场与数据源既可能先派息再折算，
+    也可能先折算再按折算后份额派息（如同日拆分与分红的 ETF）；无分红或无折算时仅返回唯一候选。
+    """
+    candidates = []
+    if dividend < previous_close:
+        candidates.append(
+            previous_close / (previous_close - dividend) * split_multiplier
+        )
+    if dividend > 0 and split_multiplier != 1:
+        post_split_previous = previous_close / split_multiplier
+        if dividend < post_split_previous:
+            candidates.append(
+                post_split_previous
+                / (post_split_previous - dividend)
+                * split_multiplier
+            )
+    if not candidates:
+        raise ValueError("权益金额超过前收盘价")
+    return candidates
+
+
 def front_adjusted_ohlc_rows(rows):
     """转换为图表用前复权 OHLC，并保持区间末日为真实原始价格。
 
@@ -263,8 +294,21 @@ def indicator_ohlc_rows(rows, actions):
     return result
 
 
-def validate_market(rows, actions, allow_splits=False):
-    """阻止缺日、无效价格、未知权益跳变和不支持的份额折算进入回测。
+def validate_market(
+    rows,
+    actions,
+    allow_splits=False,
+    verified_suspensions=(),
+    ignore_pre_calendar_boundary=False,
+):
+    """阻止缺日、无效价格、未知权益跳变和不支持的份额折算进入回测或因子计算。
+
+    Args:
+        rows: 按交易日升序排列的行情字典列表。
+        actions: 已核验分红与份额折算事件。
+        allow_splits: 是否允许区间内包含已核验份额折算（仅用于复权因子指标）。
+        verified_suspensions: 经跨源核验确认无交易的停牌日字符串集合，允许在日历校验中放行。
+        ignore_pre_calendar_boundary: 是否保留早于日历库覆盖首日的源边界行而不报越界错误。
 
     Raises:
         ValueError: 任一数据质量检查失败；不自动补价或推断现金分红。
@@ -272,9 +316,25 @@ def validate_market(rows, actions, allow_splits=False):
     if not rows:
         raise ValueError("暂无日行情")
     days = [r["trade_date"] for r in rows]
-    expected, _ = trading_days(days[0], days[-1])
-    if days != expected:
-        raise ValueError("行情缺少交易日、日期重复或包含非交易日，拒绝回测")
+    if len(days) != len(set(days)) or days != sorted(days):
+        raise ValueError("行情日期重复或未按升序排列")
+    cal_days = (
+        [day for day in days if day >= first_trading_session()]
+        if ignore_pre_calendar_boundary
+        else days
+    )
+    if cal_days:
+        expected, _ = trading_days(cal_days[0], cal_days[-1])
+        expected_set = set(expected)
+        day_set = set(cal_days)
+        if not day_set <= expected_set:
+            raise ValueError("行情包含非交易日，拒绝回测")
+        missing = expected_set - day_set
+        unverified_missing = sorted(missing - set(verified_suspensions))
+        if unverified_missing:
+            raise ValueError(
+                f"行情缺少交易日（首日 {unverified_missing[0]}，共 {len(unverified_missing)} 日未核验停牌），拒绝回测"
+            )
     if not allow_splits and any(
         days[0] <= event["effective_date"] <= days[-1] for event in actions["splits"]
     ):
@@ -308,15 +368,16 @@ def validate_market(rows, actions, allow_splits=False):
                 Decimal(previous["adjusted_close"]) / previous_close
             )
             dividend = dividends.get(row["trade_date"], Decimal(0))
-            if dividend >= previous_close:
-                raise ValueError("权益金额超过前收盘价")
             split_multiplier = _transition_split_multiplier(
                 actions["splits"], previous["trade_date"], row["trade_date"]
             )
-            expected_factor = (
-                previous_close / (previous_close - dividend) * split_multiplier
+            candidates = expected_transition_factors(
+                previous_close, dividend, split_multiplier
             )
-            if abs(observed / expected_factor - 1) > Decimal("0.0004"):
+            if all(
+                abs(observed / candidate - 1) > Decimal("0.0004")
+                for candidate in candidates
+            ):
                 raise ValueError(
                     f"{row['trade_date']}复权因子与已核实分红不符，拒绝回测"
                 )

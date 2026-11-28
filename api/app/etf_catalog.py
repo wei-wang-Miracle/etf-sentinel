@@ -18,6 +18,24 @@ CATALOG_CACHE_TTL = timedelta(minutes=30)
 
 _cache_lock = threading.Lock()
 _catalog_cache: tuple[datetime, list[dict[str, Any]]] | None = None
+_preview_cache: dict[str, tuple[datetime, dict[str, Any]]] = {}
+
+
+def cache_preview_profile(code: str, profile: dict[str, Any]) -> None:
+    """短期缓存预览到的ETF档案，供随后的确认新增直接复用而不再阻塞外部网络。"""
+    now_at = datetime.now().astimezone()
+    with _cache_lock:
+        _preview_cache[code] = (now_at, dict(profile))
+
+
+def pop_cached_preview_profile(code: str) -> dict[str, Any] | None:
+    """取出仍在有效期内的预览档案缓存，过期或不存在返回空。"""
+    now_at = datetime.now().astimezone()
+    with _cache_lock:
+        entry = _preview_cache.pop(code, None)
+    if entry is None or now_at - entry[0] >= CATALOG_CACHE_TTL:
+        return None
+    return entry[1]
 
 
 def _text(value: object, field: str, *, required: bool = False) -> str | None:

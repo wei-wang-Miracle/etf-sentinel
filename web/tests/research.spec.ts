@@ -188,4 +188,9 @@ test("无行业映射的ETF仍可观察全市场温度与波指", async ({ page 
   await expect(page.getByText("全市场恐贪分", { exact: true })).toBeVisible();
   await expect(page.getByText("50ETF期权波动率", { exact: true })).toBeVisible();
   await expect(page.getByText(/子因子自 2025-11-28 起本地累积/)).toBeVisible();
+
+  await page.getByRole("button", { name: "股债回报差", exact: true }).click();
+  await expect(page.getByRole("img", { name: "全市场恐贪分数与股债回报差双轴历史图" })).toBeVisible();
+  await page.getByRole("button", { name: "创新高占比", exact: true }).click();
+  await expect(page.getByRole("img", { name: "全市场恐贪分数与创新高占比双轴历史图" })).toBeVisible();
 });

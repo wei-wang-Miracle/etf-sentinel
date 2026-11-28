@@ -95,3 +95,15 @@ def test_rejects_invalid_detail_correlation(corr):
             {"data": {"index_corr": [{"code": "000905.SH", "corr": corr}]}},
             "000905.SH",
         )
+
+
+def test_instrument_create_accepts_csi_and_other_valid_index_suffixes():
+    from app.main import InstrumentCreate
+
+    parsed = InstrumentCreate(
+        code="159531",
+        confirm_index_link=True,
+        tracking_index_code="932000.CSI",
+        mapping_evidence="中证2000指数基金合同核验",
+    )
+    assert parsed.tracking_index_code == "932000.CSI"

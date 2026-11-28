@@ -825,3 +825,34 @@ class StrategyComparisonFactor(Base):
     comparison_id: Mapped[int] = mapped_column(ForeignKey("strategy_comparisons.comparison_id"), primary_key=True, comment="所属策略比较记录")
     strategy_id: Mapped[str] = mapped_column(String(64), primary_key=True, comment="本轨道运行的代码目录策略身份")
     factor_id: Mapped[str] = mapped_column(ForeignKey("research_factors.factor_id"), primary_key=True, comment="本轨道实际使用的因子身份")
+
+
+class InstrumentVerifiedSuspension(Base):
+    """跨源核验确认无交易的 ETF 真实停牌日，用于因子图等场景合规放行缺口。"""
+
+    __tablename__ = "instrument_verified_suspensions"
+    __table_args__: ClassVar[dict] = {
+        "comment": "跨源核验确认无交易的ETF真实停牌日（含份额折算停牌）；仅供日历连续性放行，不补造行情"
+    }
+    instrument_code: Mapped[str] = mapped_column(
+        String(6),
+        ForeignKey("instruments.instrument_code"),
+        primary_key=True,
+        comment="ETF证券代码，关联instruments.instrument_code",
+    )
+    trade_date: Mapped[Date] = mapped_column(
+        primary_key=True,
+        comment="跨源核验确认无交易的交易所交易日期（Asia/Shanghai交易日），非采集日期",
+    )
+    sources: Mapped[list] = mapped_column(
+        JSON,
+        comment="共同确认当日无交易的数据源名称列表（至少两个独立源），如[\"eastmoney\",\"sina\",\"tencent\"]",
+    )
+    calendar_version: Mapped[str] = mapped_column(
+        String(100),
+        comment="执行停牌审计时使用的交易所日历版本标识",
+    )
+    collected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        comment="本条停牌核验写入或来源集合修订的本地时间，带时区",
+    )

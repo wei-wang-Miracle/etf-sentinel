@@ -168,3 +168,77 @@ def test_zero_volume_and_invalid_prices_are_refused_as_unsupported_input():
     rows[1]["adjusted_close"] = None
     with pytest.raises(ValueError, match="缺失"):
         validate_market(rows, {"dividends": [], "splits": []})
+
+
+def test_validate_market_allows_verified_suspensions_and_pre_calendar_boundary():
+    """跨源核验的真实停牌日可放行，未核验缺日仍拒绝并指出首日。"""
+    rows = market()
+    with pytest.raises(ValueError, match="缺少交易日（首日 2026-01-15，共 1 日未核验停牌）".replace("(", "\\(").replace(")", "\\)")):
+        validate_market(rows[::2], {"dividends": [], "splits": []})
+
+    validate_market(
+        rows[::2],
+        {"dividends": [], "splits": []},
+        verified_suspensions=("2026-01-15",),
+    )
+
+    boundary_rows = [
+        {
+            "trade_date": day,
+            "open": "1",
+            "high": "1.1",
+            "low": "0.9",
+            "close": "1",
+            "volume": "100",
+            "adjusted_close": "1",
+        }
+        for day in ("2006-11-27", "2006-11-28", "2006-11-29")
+    ]
+    with pytest.raises(ValueError, match="超出当前日历覆盖"):
+        validate_market(boundary_rows, {"dividends": [], "splits": []})
+    validate_market(
+        boundary_rows,
+        {"dividends": [], "splits": []},
+        ignore_pre_calendar_boundary=True,
+    )
+
+
+def test_validate_market_accepts_same_day_split_with_post_split_dividend_and_blocks_bad_factor():
+    """同日发生折算与分红时，兼容按拆后份额派息，但仍严格拦截不匹配的复权跃迁。"""
+    rows = [
+        {
+            "trade_date": "2024-11-29",
+            "open": "6.071",
+            "high": "6.160",
+            "low": "6.070",
+            "close": "6.159",
+            "volume": "100",
+            "adjusted_close": "6.8820",
+        },
+        {
+            "trade_date": "2024-12-02",
+            "open": "2.461",
+            "high": "2.470",
+            "low": "2.360",
+            "close": "2.374",
+            "volume": "250",
+            "adjusted_close": "6.9987",
+        },
+    ]
+    actions = {
+        "dividends": [
+            {
+                "record_date": "2024-11-29",
+                "ex_date": "2024-12-02",
+                "pay_date": "2024-12-03",
+                "cash_per_share": "0.1292",
+            }
+        ],
+        "splits": [{"effective_date": "2024-11-29", "ratio": "1:2.5000"}],
+    }
+    validate_market(rows, actions, allow_splits=True)
+
+    bad_rows = deepcopy(rows)
+    bad_rows[1]["adjusted_close"] = "7.5000"
+    with pytest.raises(ValueError, match="复权因子与已核实分红不符"):
+        validate_market(bad_rows, actions, allow_splits=True)

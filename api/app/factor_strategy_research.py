@@ -71,8 +71,19 @@ ENTRY_FACTOR_IDS = frozenset(
         "ma20_ma60_bullish",
         "trend_pullback_near_ma20",
         "valuation_low_percentile",
+        "erp_high_percentile",
+        "dividend_yield_high",
+        "above_ma250",
+        "ma120_rising",
+        "adx_trending",
+        "deep_drawdown_60d",
+        "consecutive_down_exhaustion",
+        "gap_up_strong",
+        "relative_strength_20d_positive",
         "sentiment_extreme_fear",
         "sentiment_fear_rebound",
+        "market_fear_extreme",
+        "market_ivix_calm",
     }
 )
 EXIT_FACTOR_IDS = frozenset(
@@ -87,8 +98,14 @@ EXIT_FACTOR_IDS = frozenset(
         "upper_shadow_rejection",
         "atr_volatility_high",
         "volatility_expanding",
+        "adx_choppy",
         "valuation_high_percentile",
+        "erp_low_percentile",
         "sentiment_extreme_greed",
+        "market_greed_extreme",
+        "market_ivix_high",
+        "market_breadth_weak",
+        "market_futures_deep_discount",
     }
 )
 

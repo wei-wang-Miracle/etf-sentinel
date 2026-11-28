@@ -18,6 +18,7 @@ from app.free_market_sources import (
     fetch_sina_history,
     fetch_tencent_history,
     free_backfill_end_date,
+    persist_verified_suspensions,
 )
 
 
@@ -218,6 +219,45 @@ def test_compute_historical_adjusted_close_bridges_anchor_smoothly():
     assert adjusted[0] == Decimal("4.68000000")
 
 
+def test_compute_historical_adjusted_close_matches_observed_post_split_dividend_basis():
+    """同日拆分与分红时，若本地已核验跃迁与拆后派息一致，反推应采用同一口径。"""
+    rows = [
+        {"trade_date": "2024-11-29", "close": "6.159"},
+        {"trade_date": "2024-12-02", "close": "2.374"},
+    ]
+    actions = {
+        "dividends": [{"ex_date": "2024-12-02", "cash_per_share": "0.1292"}],
+        "splits": [{"effective_date": "2024-11-29", "ratio": "1:2.5000"}],
+    }
+    observed_ratio = (Decimal("6.9987") / Decimal("2.374")) / (
+        Decimal("6.8820") / Decimal("6.159")
+    )
+    adjusted = compute_historical_adjusted_close(
+        rows,
+        actions,
+        anchor_date="2024-11-29",
+        anchor_factor=Decimal("6.8820") / Decimal("6.159"),
+        observed_transitions={("2024-11-29", "2024-12-02"): observed_ratio},
+    )
+    assert adjusted[1].quantize(Decimal("0.0001")) == Decimal("6.9987")
+
+    # 传入末端已入库锚点时，新增尾部日期直接衔接最近真实复权因子，不因早年累计四舍五入产生接缝跳变
+    rows_with_tail = [*rows, {"trade_date": "2024-12-03", "close": "2.371"}]
+    adjusted_with_tail = compute_historical_adjusted_close(
+        rows_with_tail,
+        actions,
+        anchor_date="2024-11-29",
+        anchor_factor=Decimal("6.8820") / Decimal("6.159"),
+        known_factors={
+            "2024-11-29": Decimal("6.8820") / Decimal("6.159"),
+            "2024-12-02": Decimal("6.9987") / Decimal("2.374"),
+        },
+    )
+    assert adjusted_with_tail[2] == (
+        Decimal("2.371") * (Decimal("6.9987") / Decimal("2.374"))
+    ).quantize(Decimal("0.00000001"))
+
+
 def test_free_backfill_end_date_respects_market_close():
     """盘中时段不得把未收盘当日K线纳入日线回补，15:30后可截至当日。"""
     tz = ZoneInfo("Asia/Shanghai")
@@ -410,3 +450,71 @@ def test_collect_silently_switches_to_free_source_when_chatbi_fails(monkeypatch)
     assert fake_run.status == "success"
     assert len(added) == 1 and added[0].end == date(2026, 11, 26)
     assert any("静默" not in log["message"] and "切换免费源 eastmoney" in log["message"] for log in fake_run.logs if log.get("kind") == "market")
+
+
+def test_backfill_persists_verified_suspensions_even_without_missing_candles():
+    """无缺失日K可补时，apply=True 仍应将已核验停牌日幂等持久化入库。"""
+    dates = ["2026-01-05", "2026-01-07"]
+    em_rows = _sample_series(dates)
+    sn_rows = _sample_series(dates, include_amount=False)
+    tx_rows = _sample_series(dates, include_amount=False)
+
+    executed = []
+    commits = []
+
+    class FakeDb:
+        def scalars(self, stmt):
+            return [
+                SimpleNamespace(
+                    date=date.fromisoformat(row["trade_date"]),
+                    open=row["open"],
+                    high=row["high"],
+                    low=row["low"],
+                    close=row["close"],
+                    adjusted_close=row["close"],
+                    volume=row["volume"],
+                    amount=row["amount"],
+                )
+                for row in em_rows
+            ]
+
+        def get(self, model, key):
+            return SimpleNamespace(corporate_actions={"dividends": [], "splits": []})
+
+        def execute(self, stmt):
+            executed.append(stmt)
+
+        def commit(self):
+            commits.append(True)
+
+    fake_db = FakeDb()
+    result = backfill_instrument_history(
+        fake_db,
+        "512100",
+        end_date=date(2026, 1, 7),
+        collected_at=datetime(2026, 11, 28, 9, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
+        fetchers={
+            "eastmoney": lambda code, *, end_date=None: em_rows,
+            "sina": lambda code, *, end_date=None: sn_rows,
+            "tencent": lambda code, *, end_date=None: tx_rows,
+        },
+        apply=True,
+    )
+
+    assert result["backfill_candidates"] == 0
+    assert len(executed) == 1
+    assert len(commits) == 1
+    # 单源或不足两源的审计记录不得入库
+    assert (
+        persist_verified_suspensions(
+            fake_db,
+            "512100",
+            {
+                "available_source_count": 1,
+                "calendar_version": "test",
+                "verified_suspensions": [{"trade_date": "2026-01-06", "sources": ["eastmoney"]}],
+            },
+            datetime(2026, 11, 28, 9, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
+        )
+        == 0
+    )

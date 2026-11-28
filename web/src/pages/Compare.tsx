@@ -229,7 +229,7 @@ export default function Compare({ theme }: { theme: string }) {
                   <div><span>50ETF波指</span><strong className="mono">{number(marketOverview.data.regime_factors.volatility?.raw_value, 2)}</strong></div>
                   <div><span>期指升贴水</span><strong className="mono">{number(marketOverview.data.regime_factors.premium?.raw_value, 2)}%</strong></div>
                   <div><span>创新高占比</span><strong className="mono">{number(marketOverview.data.regime_factors.strength?.raw_value, 2)}%</strong></div>
-                  <AppLink href="?page=etfs&detail=overview&tab=sentiment&sentiment_scope=market">查看全市场图表</AppLink>
+                  <AppLink href={journeyUrl("etfs", new URLSearchParams(location.search).get("code") ?? undefined, { detail: "overview", tab: "sentiment", sentiment_scope: "market" })}>查看全市场图表</AppLink>
                 </div>
               )}
               {(dimension === "valuation" || dimension !== "sentiment") && (

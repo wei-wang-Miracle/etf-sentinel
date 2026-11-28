@@ -394,6 +394,7 @@ def research_object(object_type: str, code: str):
     from app.index_valuation_routes import overview
     from app.models import (
         AccountEntrust,
+        EtfCatalogProfile,
         InstrumentIndexLink,
         NationalTeamDaily,
         NationalTeamInstrument,
@@ -497,6 +498,7 @@ def research_object(object_type: str, code: str):
             )
         )
         nation = db.get(NationalTeamInstrument, code)
+        profile = db.get(EtfCatalogProfile, code)
         latest = (
             db.scalar(
                 select(NationalTeamDaily)
@@ -558,6 +560,25 @@ def research_object(object_type: str, code: str):
                     "as_of": latest.trade_date if latest else None,
                 },
                 "sentiment": categories(),
+                "catalog_profile": {
+                    "fund_full_name": profile.fund_full_name,
+                    "category_primary": profile.category_primary,
+                    "category_tag": profile.category_tag,
+                    "tracking_index_code": profile.tracking_index_code,
+                    "tracking_index_name": profile.tracking_index_name,
+                    "index_corr": float(profile.index_corr)
+                    if profile.index_corr is not None
+                    else None,
+                    "setup_date": profile.setup_date,
+                    "management_fee_pct": float(profile.management_fee_pct)
+                    if profile.management_fee_pct is not None
+                    else None,
+                    "custody_fee_pct": float(profile.custody_fee_pct)
+                    if profile.custody_fee_pct is not None
+                    else None,
+                }
+                if profile
+                else None,
                 "factors": {"status": "not_implemented"},
             },
             "eligibility": eligibility,

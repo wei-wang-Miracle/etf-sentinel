@@ -589,6 +589,43 @@ def test_category_factor_pool_only_contains_development_truths():
     }
 
 
+def test_expanded_valuation_technical_and_market_regime_factors_are_searchable():
+    from app.factor_strategy_research import (
+        ENTRY_FACTOR_IDS,
+        EXIT_FACTOR_IDS,
+        expression_is_explainable,
+    )
+
+    new_entry = {
+        "erp_high_percentile",
+        "dividend_yield_high",
+        "above_ma250",
+        "ma120_rising",
+        "adx_trending",
+        "deep_drawdown_60d",
+        "consecutive_down_exhaustion",
+        "gap_up_strong",
+        "relative_strength_20d_positive",
+        "market_fear_extreme",
+        "market_ivix_calm",
+    }
+    new_exit = {
+        "erp_low_percentile",
+        "adx_choppy",
+        "market_greed_extreme",
+        "market_ivix_high",
+        "market_breadth_weak",
+        "market_futures_deep_discount",
+    }
+    assert new_entry <= ENTRY_FACTOR_IDS
+    assert new_exit <= EXIT_FACTOR_IDS
+    assert ENTRY_FACTOR_IDS & EXIT_FACTOR_IDS == set()
+    for factor_id in new_entry:
+        assert expression_is_explainable({"op": "factor", "factor_id": factor_id}, role="entry") is True
+    for factor_id in new_exit:
+        assert expression_is_explainable({"op": "factor", "factor_id": factor_id}, role="exit") is True
+
+
 def test_release_gate_reasons_merge_normal_and_stress_cost_windows():
     from app.factor_strategy_research import release_gate_reasons
 

@@ -51,6 +51,12 @@ FACTORS = {
         "output_type": "state",
         "meaning": "含息收盘价低于MA20达到1.5倍Wilder ATR14。",
     },
+    "oversold_recovery": {
+        "name": "超跌后止跌修复",
+        "category": "反转确认",
+        "output_type": "event",
+        "meaning": "近期超跌后收盘突破昨高，并满足量能、收盘位置和MA20下方条件。",
+    },
     "wilder_rsi_oversold": {
         "name": "Wilder RSI 超卖",
         "category": "超跌状态",
@@ -514,7 +520,7 @@ def factor_truth_rows(
         values[index] / values[index - 1] - 1 if index else 0.0
         for index in range(len(values))
     ]
-    output = []
+    output, oversold = [], []
     for index, row in enumerate(rows):
         day = row["trade_date"]
         value = values[index]
@@ -623,6 +629,14 @@ def factor_truth_rows(
         )
         truth["below_ma20"] = ma20[index] is not None and value < ma20[index]
         truth["close_position_positive"] = position >= RECOVERY_POSITION_MIN
+        truth["oversold_recovery"] = (
+            any(oversold[-3:])
+            and truth["close_above_prior_high"]
+            and truth["below_ma20"]
+            and truth["recovery_volume_band"]
+            and truth["close_position_positive"]
+        )
+        oversold.append(atr_oversold or rsi_oversold)
         price_range = highs[index] - lows[index]
         lower_shadow = min(float(row["open"]) * scale[index], value) - lows[index]
         upper_shadow = highs[index] - max(float(row["open"]) * scale[index], value)

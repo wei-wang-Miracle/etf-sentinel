@@ -23,7 +23,14 @@ from app.backtest_data import (
 from app.backtest_routes import router as backtest_router
 from app.collection import fetch_rows, now, validate_row
 from app.db import Session
-from app.etf_catalog import fetch_catalog, fetch_fund_detail, parse_fund_detail
+from app.etf_catalog import (
+    CATALOG_SOURCE_URL,
+    cache_preview_profile,
+    fetch_catalog,
+    fetch_fund_detail,
+    parse_fund_detail,
+    pop_cached_preview_profile,
+)
 from app.etf_flow_routes import router as etf_flow_router
 from app.index_valuation_routes import router as index_valuation_router
 from app.jobs import (
@@ -43,6 +50,7 @@ from app.models import (
     Instrument,
     InstrumentIndexLink,
     InstrumentSentimentLink,
+    InstrumentVerifiedSuspension,
     Job,
     MarketFearGreedDaily,
     MarketRegimeFactorDaily,
@@ -101,7 +109,7 @@ class InstrumentCreate(BaseModel):
     code: str = Field(pattern=r"^[0-9]{6}$")
     confirm_index_link: bool = False
     tracking_index_code: str | None = Field(
-        default=None, pattern=r"^[0-9]{6}\.(SH|SZ)$"
+        default=None, pattern=r"^[A-Za-z0-9]{4,12}\.(SH|SZ|CSI|SGE|GI|HI)$"
     )
     mapping_evidence: str | None = None
 
@@ -228,6 +236,8 @@ def preview_instrument(code: str):
         raise HTTPException(422, "证券代码必须为六位数字")
     name, count = _verify_instrument_market_data(code)
     profile, warnings = _funddb_preview(code)
+    if profile is not None:
+        cache_preview_profile(code, profile)
     with Session() as db:
         exists = db.get(Instrument, code) is not None
         suggested = profile.get("tracking_index_code") if profile else None
@@ -257,6 +267,7 @@ def create_instrument(body: InstrumentCreate):
     evidence = body.mapping_evidence.strip() if body.mapping_evidence else ""
     if body.confirm_index_link and (body.tracking_index_code is None or not evidence):
         raise HTTPException(422, "确认指数关联时必须提供指数代码和核验依据")
+    cached_profile = pop_cached_preview_profile(code)
 
     with Session() as db:
         if body.confirm_index_link and db.get(ResearchIndex, body.tracking_index_code) is None:
@@ -271,6 +282,24 @@ def create_instrument(body: InstrumentCreate):
         )
         if created is None:
             raise HTTPException(409, "该 ETF 已在标的配置中")
+        if cached_profile is not None:
+            db.add(
+                EtfCatalogProfile(
+                    instrument_code=code,
+                    fund_full_name=cached_profile.get("fund_full_name"),
+                    category_primary=cached_profile.get("category_primary"),
+                    category_tag=cached_profile.get("category_tag"),
+                    tracking_index_code=cached_profile.get("tracking_index_code"),
+                    tracking_index_name=cached_profile.get("tracking_index_name"),
+                    index_corr=cached_profile.get("index_corr"),
+                    setup_date=cached_profile.get("setup_date"),
+                    management_fee_pct=cached_profile.get("management_fee_pct"),
+                    custody_fee_pct=cached_profile.get("custody_fee_pct"),
+                    linked_otc_code=cached_profile.get("linked_otc_code"),
+                    source_url=CATALOG_SOURCE_URL,
+                    collected_at=now(),
+                )
+            )
         if body.confirm_index_link:
             db.add(
                 InstrumentIndexLink(
@@ -428,6 +457,10 @@ def factor_catalog():
     }
 
 
+# 因子图在线校验所需的最长历史预热交易日数，覆盖 ATR14+252日分位（266根）及 MA250/共享60日预热
+_FACTOR_VALIDATION_WARMUP_BARS = 266
+
+
 @app.get("/candles/{code}/factors")
 def candle_factors(code: str, start: date, end: date):
     """读取行情图因子标记，按核验行情与权益做因果计算。"""
@@ -464,11 +497,40 @@ def candle_factors(code: str, start: date, end: date):
             }
             for row in candles
         ]
+        verified_suspensions = {
+            str(item.trade_date)
+            for item in db.scalars(
+                select(InstrumentVerifiedSuspension).where(
+                    InstrumentVerifiedSuspension.instrument_code == code,
+                    InstrumentVerifiedSuspension.trade_date <= cutoff,
+                )
+            )
+            if isinstance(item.sources, list) and len(item.sources) >= 2
+        }
+        start_text = start.isoformat()
+        start_index = next(
+            (idx for idx, row in enumerate(rows) if row["trade_date"] >= start_text),
+            len(rows),
+        )
+        validation_rows = rows[max(0, start_index - _FACTOR_VALIDATION_WARMUP_BARS) :]
         try:
-            validate_market(rows, source.corporate_actions, allow_splits=True)
+            validate_market(
+                validation_rows,
+                source.corporate_actions,
+                allow_splits=True,
+                verified_suspensions=verified_suspensions,
+                ignore_pre_calendar_boundary=True,
+            )
             indicator_rows = indicator_ohlc_rows(rows, source.corporate_actions)
         except ValueError as exc:
-            raise HTTPException(422, f"行情或权益资料未通过校验：{exc}") from None
+            message = str(exc)
+            equity_keywords = ("权益", "复权", "折算")
+            prefix = (
+                "权益资料或复权未通过校验"
+                if any(keyword in message for keyword in equity_keywords)
+                else "行情数据未通过校验"
+            )
+            raise HTTPException(422, f"{prefix}：{message}") from None
         index_codes = list(
             db.scalars(
                 select(InstrumentIndexLink.index_code)
