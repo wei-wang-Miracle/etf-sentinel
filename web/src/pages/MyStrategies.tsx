@@ -3,7 +3,15 @@ import AlgorithmBacktest from "../components/AlgorithmBacktest";
 import AppLink from "../components/AppLink";
 import { api } from "../lib/api";
 import { useResearchQuery } from "../lib/research";
-import { journeyUrl, type JourneyCatalog, type StrategyAssignment } from "../lib/strategyJourney";
+import {
+  evidenceForStrategy,
+  evidenceTierLabel,
+  isStrategyAdoptable,
+  journeyUrl,
+  strategyScopeLabel,
+  type JourneyCatalog,
+  type StrategyAssignment,
+} from "../lib/strategyJourney";
 import { useApiResource } from "../lib/useApiResource";
 import "../styles/strategy-journey.css";
 
@@ -15,10 +23,16 @@ export default function MyStrategies({ theme }: { theme: string }) {
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-  const code = catalog.data?.instruments.some((item) => item.instrument_code === query.code) ? query.code : "";
+  const instrument = catalog.data?.instruments.find((item) => item.instrument_code === query.code);
+  const code = instrument ? query.code : "";
   const isBacktest = query.view === "backtest";
   const isGuide = query.view === "algorithm";
+  const visibleStrategies = catalog.data?.strategies.filter(
+    (item) => !code || item.supported_instruments.includes(code),
+  ) ?? [];
   const selected = catalog.data?.strategies.find((item) => item.id === query.algorithm);
+  const selectedEvidence = evidenceForStrategy(selected, instrument?.research_category);
+  const selectedAdoptable = code ? isStrategyAdoptable(selected, code) : selected?.adoptable !== false;
   const dates = { ...(query.start ? { start: query.start } : {}), ...(query.end ? { end: query.end } : {}) };
 
   async function pause(row: StrategyAssignment) {
@@ -56,11 +70,17 @@ export default function MyStrategies({ theme }: { theme: string }) {
     {catalog.data && (isBacktest ? <AlgorithmBacktest key={`${code}:${query.algorithm}:${query.start}:${query.end}`} catalog={catalog.data} code={code} algorithm={query.algorithm}
       range={{ start: query.start, end: query.end }} theme={theme} onCode={(next) => update({ code: next, start: "", end: "" })} onAdopted={catalog.retry} />
       : isGuide ? selected ? <section className="panel journey-inset algorithm-guide">
-        <h2>{selected.name}</h2><p>{selected.description}</p>
+        <h2>{selected.name}{!selectedAdoptable ? " · 比较观察" : ""}</h2>
+        <p className="muted">
+          {strategyScopeLabel(selected)}
+          {selectedEvidence ? ` · ${evidenceTierLabel(selectedEvidence)}（${selectedEvidence.research_version}）` : ""}
+        </p>
+        <p>{selected.description}</p>
+        {selectedEvidence?.evidence_summary?.note && <p className="notice">{selectedEvidence.evidence_summary.note}</p>}
         <h3>策略使用的因子</h3><dl>{selected.factors.map((factor) => <div key={factor.id}>
           <dt><strong>{factor.name}</strong> · {roles[factor.role]} · {factor.category}</dt><dd>{factor.meaning}</dd>
         </div>)}</dl>
-        <p className="muted">单个因子不等于买卖信号。策略还会检查风险、止损、止盈与持有时间。</p>
+        <p className="muted">单个因子不等于买卖信号。策略还会检查风险、止损、止盈与持有时间。{!selectedAdoptable ? "该策略当前仅用于研究比较观察，暂不开放用于盘前信号。" : ""}</p>
         <button onClick={() => backtest(selected.id)}>回测这套策略</button>
       </section> : <p className="empty">该策略不在当前目录中。</p>
       : <>
@@ -77,12 +97,18 @@ export default function MyStrategies({ theme }: { theme: string }) {
             </div>
           </div>)}
         </section>
-        <div className="algorithm-library" aria-label="策略库">{catalog.data.strategies.map((item) => <section className="panel journey-inset algorithm-card" key={item.id}>
-          <header><h2>{item.name}</h2><button onClick={() => backtest(item.id)} aria-label={`回测${item.name}`}>回测这套策略</button></header>
-          <p>{item.description}</p>
-          <AppLink href={journeyUrl("strategies", code || undefined, { view: "algorithm", algorithm: item.id, ...dates })}>策略说明</AppLink>
-        </section>)}</div>
-        {!catalog.data.strategies.length && <p className="empty">暂无可回测策略。</p>}
+        {code && <p className="muted">当前关注 <span className="mono">{code}</span>（{instrument?.research_category ?? "未分类"}），策略库展示通用策略及该分类绑定策略。</p>}
+        <div className="algorithm-library" aria-label="策略库">{visibleStrategies.map((item) => {
+          const itemEvidence = evidenceForStrategy(item, instrument?.research_category);
+          const itemAdoptable = code ? isStrategyAdoptable(item, code) : item.adoptable !== false;
+          return <section className="panel journey-inset algorithm-card" key={item.id}>
+            <header><h2>{item.name}{!itemAdoptable ? "（比较观察）" : ""}</h2><button onClick={() => backtest(item.id)} aria-label={`回测${item.name}`}>回测这套策略</button></header>
+            <p className="muted">{strategyScopeLabel(item)}{itemEvidence ? ` · ${evidenceTierLabel(itemEvidence)}` : ""}</p>
+            <p>{item.description}</p>
+            <AppLink href={journeyUrl("strategies", code || undefined, { view: "algorithm", algorithm: item.id, ...dates })}>策略说明</AppLink>
+          </section>;
+        })}</div>
+        {!visibleStrategies.length && <p className="empty">暂无可回测策略。</p>}
       </>)}
   </div>;
 }

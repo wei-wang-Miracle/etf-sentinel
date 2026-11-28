@@ -41,8 +41,8 @@ def sample():
             text("TRUNCATE instruments, sentiment_categories, accounts RESTART IDENTITY CASCADE")
         )
         db.merge(Job(id=5, time="08:30", enabled=True))
-        for code in ("510500", "510330"):
-            db.add(Instrument(code=code, name=f"测试ETF {code}"))
+        for code, category in (("510500", "中盘宽基"), ("510330", "大盘宽基")):
+            db.add(Instrument(code=code, name=f"测试ETF {code}", research_category=category))
             db.flush()
             for index, raw_day in enumerate(DAYS):
                 base = Decimal("6.0") + Decimal(index % 24 - 12) * Decimal("0.012")
@@ -87,7 +87,15 @@ def adopt(result, strategy="range_breakout", **kwargs):
 
 def test_catalog_compare_and_verify_without_automatic_adoption():
     catalog = client.get("/strategies/catalog").json()
-    assert {item["id"] for item in catalog["strategies"]} == {"range_breakout", "bottom_confirmation", "hybrid_reversal"}
+    assert {item["id"] for item in catalog["strategies"]} == {
+        "range_breakout",
+        "bottom_confirmation",
+        "hybrid_reversal",
+        "trend_pullback",
+        "volatility_contraction_breakout",
+        "value_sentiment_reversal",
+        "gem_bottom_contraction",
+    }
     assert catalog["assignments"] == []
     factors = client.get("/factors").json()
     assert {item["id"] for item in factors["factors"]} == set(FACTORS)

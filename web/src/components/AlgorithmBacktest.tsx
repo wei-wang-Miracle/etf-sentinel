@@ -1,7 +1,17 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { api, stamp } from "../lib/api";
 import { dateAgo } from "../lib/research";
-import { journeyUrl, type Comparison, type ComparisonTrack, type JourneyCatalog, type StrategyAssignment } from "../lib/strategyJourney";
+import {
+  evidenceForStrategy,
+  evidenceTierLabel,
+  isStrategyAdoptable,
+  journeyUrl,
+  strategyScopeLabel,
+  type Comparison,
+  type ComparisonTrack,
+  type JourneyCatalog,
+  type StrategyAssignment,
+} from "../lib/strategyJourney";
 import { useApiResource } from "../lib/useApiResource";
 import AppLink from "./AppLink";
 import StrategyComparison from "./StrategyComparison";
@@ -22,10 +32,37 @@ export default function AlgorithmBacktest({ catalog, code, algorithm, range, the
   const initialTemplate = available.find((item) => item.id === algorithm);
   const yesterday = dateAgo(1);
   const maxDate = instrument?.default_end ?? yesterday;
-  const [start, setStart] = useState(range.start || instrument?.default_start || "");
+  const initialTemplateStart = code ? initialTemplate?.earliest_start_by_instrument?.[code] : undefined;
+  const defaultStart = range.start || (
+    initialTemplateStart && (!instrument?.default_start || initialTemplateStart > instrument.default_start)
+      ? initialTemplateStart
+      : instrument?.default_start || ""
+  );
+  const [start, setStart] = useState(defaultStart);
   const [end, setEnd] = useState(range.end || instrument?.default_end || "");
-  const [selected, setSelected] = useState(() => initialTemplate ? [initialTemplate.id] : available.map((item) => item.id));
-  const choices = available.filter((item) => selected.includes(item.id));
+  function isWarmupBlocked(item: (typeof available)[number], currentStart: string) {
+    if (!code || !item.earliest_start_by_instrument) return false;
+    const earliest = item.earliest_start_by_instrument[code];
+    if (earliest === null) return true;
+    return !!earliest && !!currentStart && currentStart < earliest;
+  }
+  const [selected, setSelected] = useState(() =>
+    initialTemplate
+      ? [initialTemplate.id]
+      : available.filter((item) => !isWarmupBlocked(item, defaultStart)).map((item) => item.id),
+  );
+  const choices = available.filter((item) => selected.includes(item.id) && !isWarmupBlocked(item, start));
+  const blockedWithStart = available.filter((item) => {
+    const earliest = code ? item.earliest_start_by_instrument?.[code] : undefined;
+    return !!earliest && !!start && start < earliest;
+  });
+  const latestWarmupStart = blockedWithStart.reduce(
+    (latest, item) => {
+      const earliest = code ? item.earliest_start_by_instrument?.[code] ?? "" : "";
+      return earliest > latest ? earliest : latest;
+    },
+    "",
+  );
   const signature = JSON.stringify([code, start, end, choices.map((item) => item.id)]);
   const [current, setCurrent] = useState<{ signature: string; result: Comparison }>();
   const [historicalId, setHistoricalId] = useState<number>();
@@ -96,23 +133,50 @@ export default function AlgorithmBacktest({ catalog, code, algorithm, range, the
         <div className="journey-actions algorithm-range">
           <label>回测 ETF <select aria-label="回测 ETF" value={code} disabled={busy || !!saving} onChange={(event) => onCode(event.target.value)}>
             <option value="">选择 ETF</option>
-            {catalog.instruments.map((item) => <option key={item.instrument_code} value={item.instrument_code}>{item.instrument_code} · {item.instrument_name}</option>)}
+            {catalog.instruments.map((item) => <option key={item.instrument_code} value={item.instrument_code}>{item.instrument_code} · {item.instrument_name}{item.research_category ? `（${item.research_category}）` : ""}</option>)}
           </select></label>
           <label>开始日期 <input type="date" value={start} required max={end || maxDate} disabled={!code || busy || !!saving} onChange={(event) => setStart(event.target.value)} /></label>
           <label>结束日期 <input type="date" value={end} required min={start || undefined} max={maxDate} disabled={!code || busy || !!saving} onChange={(event) => setEnd(event.target.value)} /></label>
         </div>
         {!code ? <p className="muted">先选择 ETF，再比较算法。</p> : !instrument?.default_start ? <p className="notice warning">{instrument?.source_checked_through ? "这只 ETF 在可用权益区间内的日行情不足，暂不能完成预热。" : "这只 ETF 尚无已核验权益资料。请在数据管理更新权益资料后重试。"}</p> : null}
+        {code && instrument?.research_category && <p className="muted">当前分类：<span className="mono">{instrument.research_category}</span> · 仅展示通用策略及该分类研究绑定策略。</p>}
         {instrument?.default_end && instrument.last_date && instrument.default_end < instrument.last_date && <p className="muted">当前可用数据截至 <span className="mono">{instrument.default_end}</span>；之后的行情尚未完成权益核验或不属于完整历史交易日。</p>}
         {start && end && (start > end || end > maxDate) && <p className="notice warning">请检查起止日期，结束日期不能晚于 <span className="mono">{maxDate}</span>。</p>}
+        {!!latestWarmupStart && latestWarmupStart <= maxDate && <p className="notice">
+          当前开始日期 <span className="mono">{start}</span> 早于「{blockedWithStart.map((item) => item.name).join("、")}」的预热要求，系统已自动避开未预热策略；如需全部参与，请
+          <button type="button" onClick={() => {
+            setStart(latestWarmupStart);
+            setSelected((values) => Array.from(new Set([...values, ...blockedWithStart.map((item) => item.id)])));
+          }}>调至 <span className="mono">{latestWarmupStart}</span> 以启用全部</button>
+        </p>}
         {!!available.length && <fieldset className="algorithm-pick" disabled={busy || !!saving}>
           <legend>选择参加比较的算法</legend>
-          {available.map((item) => <div key={item.id} className="algorithm-pick-entry">
-            <label className="algorithm-option">
-              <input type="checkbox" checked={selected.includes(item.id)} onChange={(event) => setSelected((values) => event.target.checked ? [...values, item.id] : values.filter((value) => value !== item.id))} />
-              <span><strong>{item.name}</strong><span className="muted">{item.description}</span></span>
-            </label>
-            <AppLink href={journeyUrl("strategies", code || undefined, { view: "algorithm", algorithm: item.id, from: "backtest", ...(start ? { start } : {}), ...(end ? { end } : {}) })}>算法说明</AppLink>
-          </div>)}
+          {available.map((item) => {
+            const earliest = code ? item.earliest_start_by_instrument?.[code] : undefined;
+            const blocked = isWarmupBlocked(item, start);
+            const adoptable = isStrategyAdoptable(item, code);
+            const evidence = evidenceForStrategy(item, instrument?.research_category);
+            return <div key={item.id} className="algorithm-pick-entry">
+              <label className="algorithm-option">
+                <input type="checkbox" disabled={blocked} checked={!blocked && selected.includes(item.id)} onChange={(event) => setSelected((values) => event.target.checked ? [...values, item.id] : values.filter((value) => value !== item.id))} />
+                <span>
+                  <strong>{item.name}{!adoptable ? "（仅比较观察）" : ""}</strong>
+                  <span className="muted">
+                    {strategyScopeLabel(item)}
+                    {evidence ? ` · ${evidenceTierLabel(evidence)}` : ""}
+                    {blocked ? (earliest === null ? ` · 行情总量不足 ${item.min_warmup_bars ?? 250} 日预热` : ` · 需 ${earliest} 起（${item.min_warmup_bars ?? 250} 日预热）`) : ""}
+                    {" · "}
+                    {item.description}
+                  </span>
+                </span>
+              </label>
+              {blocked && earliest && earliest <= maxDate && <button type="button" onClick={() => {
+                setStart(earliest);
+                setSelected((values) => values.includes(item.id) ? values : [...values, item.id]);
+              }}>调至 {earliest}</button>}
+              <AppLink href={journeyUrl("strategies", code || undefined, { view: "algorithm", algorithm: item.id, from: "backtest", ...(start ? { start } : {}), ...(end ? { end } : {}) })}>算法说明</AppLink>
+            </div>;
+          })}
         </fieldset>}
         {!!available.length && !choices.length && <p className="notice warning">请至少选择一套算法后再运行回测。</p>}
         <div className="journey-section-heading algorithm-run">
@@ -133,6 +197,8 @@ export default function AlgorithmBacktest({ catalog, code, algorithm, range, the
     <div ref={resultRef}>
       {result && <StrategyComparison key={result.id} result={result} theme={theme} renderAdoption={!stale && !historicalId ? (track) => {
         if (track.strategy_id === "hold" || !track.account || track.status !== "success") return <span className="muted">—</span>;
+        const definition = catalog.strategies.find((item) => item.id === track.strategy_id);
+        if (!isStrategyAdoptable(definition, code)) return <span className="muted">仅比较观察</span>;
         if (assignment?.active && assignment.strategy_id === track.strategy_id) return <AppLink href={journeyUrl("etfs", code, { detail: "signals" })}>当前已采用 · 查看信号</AppLink>;
         return <button type="button" disabled={busy || !!saving} aria-label={`采用${track.name}`} onClick={() => setPending(track)}>采用策略</button>;
       } : undefined} />}

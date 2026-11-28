@@ -150,6 +150,7 @@ alembic check
 
 - `research_factors`：因子身份、名称、分类、输出含义及是否可以显示在行情图。
 - `research_strategy_factors`：代码定义的策略身份和可观测因子关系，登记角色、展示顺序。
+- `research_strategy_scopes`：迁移 `0026` 新增，结合 `instruments.research_category` 登记代码策略的研究作用域（`universal` 通用或 `category` 分类绑定）、研究版本号、证据等级（`baseline`、`cross_unit_verified`、`single_unit_candidate`、`holdout_watch`、`rejected`）、采用准入布尔值 `adoptable` 与实证摘要 `evidence_summary`，确保界面仅展示「通用 + 当前 ETF 所属分类绑定策略」并只开放通过研究门禁的分类策略进入盘前信号。
 - `strategy_comparisons` 与 `strategy_comparison_factors`：单次比较的输入、结果、摘要以及成功轨道的因子关系。
 - `instrument_strategy_assignments`：每只 ETF 至多一条当前策略分配，包含当前策略、采用依据和状态。
 - `strategy_signals`：每条分配和执行日唯一，保存该日计划、策略名称和证据、跳过原因。

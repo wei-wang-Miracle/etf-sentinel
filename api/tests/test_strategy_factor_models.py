@@ -22,6 +22,7 @@ def test_factor_and_strategy_tables_replace_algorithm_version_storage():
         "strategy_execution_links",
         "market_fear_greed_daily",
         "market_regime_factor_daily",
+        "research_strategy_scopes",
     } <= tables.keys()
     assert not {
         "saved_strategies",
@@ -40,13 +41,30 @@ def test_factor_and_strategy_tables_replace_algorithm_version_storage():
         "hybrid_reversal",
         "range_breakout_research",
         "left_reversal_research",
+        "trend_pullback",
+        "volatility_contraction_breakout",
+        "value_sentiment_reversal",
+        "gem_bottom_contraction",
     }
+    for sid in (
+        "trend_pullback",
+        "volatility_contraction_breakout",
+        "value_sentiment_reversal",
+        "gem_bottom_contraction",
+    ):
+        assert STRATEGIES[sid].get("adoptable") is False
+        assert not STRATEGIES[sid].get("research_only")
+        with pytest.raises(HTTPException, match="比较观察"):
+            _candidate(sid, "510300")
+        assert _candidate(sid, "510300", allow_unadoptable=True)["factor_template"]["id"] == sid
 
 
 def test_research_factor_directory_has_matching_database_columns_and_comments():
     factor_table = Base.metadata.tables["research_factors"]
     relation_table = Base.metadata.tables["research_strategy_factors"]
     sentiment_link_table = Base.metadata.tables["instrument_sentiment_links"]
+    scope_table = Base.metadata.tables["research_strategy_scopes"]
+    instruments_table = Base.metadata.tables["instruments"]
 
     assert set(FACTORS)  # Registry contains the complete first research set.
     assert "oversold_recovery" in FACTORS
@@ -56,6 +74,8 @@ def test_research_factor_directory_has_matching_database_columns_and_comments():
     assert sentiment_link_table.comment and all(
         column.comment for column in sentiment_link_table.columns
     )
+    assert scope_table.comment and all(column.comment for column in scope_table.columns)
+    assert instruments_table.c.research_category.comment
     assert set(sentiment_link_table.primary_key.columns.keys()) == {
         "instrument_code",
         "category_key",

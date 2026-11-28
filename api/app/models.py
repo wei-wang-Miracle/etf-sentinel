@@ -7,6 +7,7 @@ from typing import ClassVar
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
@@ -49,6 +50,11 @@ class Instrument(Base):
         "collection_start_date",
         default=Date(2020, 1, 1),
         comment="历史采集起始日期，含当日；调早回补，调晚不删除历史",
+    )
+    research_category: Mapped[str] = mapped_column(
+        String(32),
+        default="未分类",
+        comment="研究资产分类（如大盘宽基、中盘宽基、小盘宽基、微盘、创业板、科创板、黄金、通信设备、半导体材料设备或未分类），用于策略分类展示与研究绑定",
     )
 
 
@@ -855,4 +861,47 @@ class InstrumentVerifiedSuspension(Base):
     collected_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         comment="本条停牌核验写入或来源集合修订的本地时间，带时区",
+    )
+
+
+class ResearchStrategyScope(Base):
+    """研究结论支撑的策略作用域、分类绑定与准入状态登记表。"""
+
+    __tablename__ = "research_strategy_scopes"
+    __table_args__: ClassVar[dict] = {
+        "comment": "研究结论支持的策略作用域（通用/分类）、分类绑定及采用准入状态；策略规则仍在代码定义"
+    }
+    strategy_id: Mapped[str] = mapped_column(
+        String(64),
+        primary_key=True,
+        comment="代码目录中已冻结实现的策略稳定身份",
+    )
+    category_name: Mapped[str] = mapped_column(
+        String(32),
+        primary_key=True,
+        comment="绑定的研究资产分类名称；通用策略固定为通用",
+    )
+    scope_type: Mapped[str] = mapped_column(
+        String(16),
+        comment="策略作用域枚举：universal表示通用策略，category表示分类专属策略",
+    )
+    research_version: Mapped[str] = mapped_column(
+        String(64),
+        comment="支撑本条绑定或准入结论的离线研究版本号，如factor-strategy-research-v1.5.0",
+    )
+    evidence_tier: Mapped[str] = mapped_column(
+        String(32),
+        comment="研究证据等级：cross_unit_verified跨独立指数验证、single_unit_candidate单指数专精候选、holdout_watch留出待观察、rejected未达标观察或baseline既有基准",
+    )
+    adoptable: Mapped[bool] = mapped_column(
+        Boolean,
+        comment="研究结论是否已支持开放策略库采用并产生盘前信号；仅达门禁或既有基线策略为True",
+    )
+    evidence_summary: Mapped[dict] = mapped_column(
+        JSON,
+        comment="研究实证摘要JSON：含development开发期与holdout留出期样本数/胜率/利润因子/最大回撤、类内一致率及结论说明",
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        comment="本条研究绑定结论写入或修订的本地时间，带时区",
     )

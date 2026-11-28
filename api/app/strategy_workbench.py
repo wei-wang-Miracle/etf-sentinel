@@ -17,18 +17,30 @@ from app.backtest_data import DATA_VERSION
 from app.backtest_routes import backtest_instruments, digest
 from app.collection import now
 from app.db import Session
+from app.factor_strategy_templates import (
+    FACTOR_TEMPLATES,
+    factor_template_snapshot,
+    is_factor_template,
+    prepare_factor_template,
+)
 from app.models import (
     BacktestRun,
+    BacktestSource,
     Candle,
     Instrument,
     InstrumentStrategyAssignment,
     ResearchFactor,
     ResearchStrategyFactor,
+    ResearchStrategyScope,
     StrategyComparison,
     StrategyComparisonFactor,
 )
 from app.research_factors import STRATEGIES
-from app.strategy_inputs import external_snapshot, market_snapshot
+from app.strategy_inputs import (
+    external_snapshot,
+    factor_external_snapshot,
+    market_snapshot,
+)
 from app.strategy_research import diagnostics
 
 router = APIRouter(prefix="/strategies", tags=["策略研究"])
@@ -66,9 +78,83 @@ class AdoptionRequest(BaseModel):
     replace_active: StrictBool = False
 
 
+def _instrument_history_bounds(db, today):
+    """汇总各ETF的分类与已核验/拆后历史边界，用于计算不同策略的最早可回测起点。"""
+    instruments = {row.code: row for row in db.scalars(select(Instrument))}
+    sources = {row.instrument_code: row for row in db.scalars(select(BacktestSource))}
+    dates_by_code = {code: [] for code in instruments}
+    for code, day in db.execute(select(Candle.code, Candle.date).order_by(Candle.code, Candle.date)):
+        if code in dates_by_code:
+            dates_by_code[code].append(day)
+
+    bounds = {}
+    for code, instrument in instruments.items():
+        source = sources.get(code)
+        dates = dates_by_code.get(code, [])
+        verified = [
+            day
+            for day in dates
+            if source and day < today and day <= source.checked_through_date
+        ]
+        split = (
+            max(
+                (
+                    date.fromisoformat(event["effective_date"])
+                    for event in source.corporate_actions["splits"]
+                    if verified and event["effective_date"] <= str(verified[-1])
+                ),
+                default=None,
+            )
+            if source
+            else None
+        )
+        usable = [day for day in verified if split is None or day > split]
+        bounds[code] = {
+            "category": instrument.research_category or "未分类",
+            "verified": verified,
+            "usable": usable,
+        }
+    return bounds
+
+
+def _earliest_start_for_strategy(strategy_id, bound):
+    """按策略类型返回指定ETF的最早可用起始日期；预热不足返回None。"""
+    verified = bound["verified"]
+    usable = bound["usable"]
+    if is_factor_template(strategy_id):
+        min_warmup = FACTOR_TEMPLATES[strategy_id]["min_warmup_bars"]
+        if len(verified) <= min_warmup or len(usable) <= 1:
+            return None
+        return str(max(verified[min_warmup], usable[1]))
+    if len(usable) <= SHARED_WARMUP_BARS:
+        return None
+    return str(usable[SHARED_WARMUP_BARS])
+
+
+def _resolve_strategy_scope(db, strategy_id, instrument_code):
+    """按数据库作用域表匹配ETF对应的研究绑定结论；分类绑定的优先级高于通用绑定。"""
+    all_scopes = list(db.scalars(select(ResearchStrategyScope)))
+    if not all_scopes:
+        return None
+    instrument = db.get(Instrument, instrument_code)
+    category = (instrument.research_category if instrument else None) or "未分类"
+    strategy_scopes = [item for item in all_scopes if item.strategy_id == strategy_id]
+    for scope in strategy_scopes:
+        if scope.scope_type == "category" and scope.category_name == category:
+            return scope
+    for scope in strategy_scopes:
+        if scope.scope_type == "universal":
+            return scope
+    return False
+
+
 def strategy_catalog(db, instrument_code=None):
     instruments = backtest_instruments(algorithm_warmup=SHARED_WARMUP_BARS)
-    supported_codes = {item["instrument_code"] for item in instruments}
+    bounds = _instrument_history_bounds(db, now().date())
+    for item in instruments:
+        code = item["instrument_code"]
+        item["research_category"] = bounds.get(code, {}).get("category", "未分类")
+    supported_codes = sorted(item["instrument_code"] for item in instruments)
     factors = {row.factor_id: row for row in db.scalars(select(ResearchFactor))}
     relations = list(
         db.scalars(
@@ -77,11 +163,69 @@ def strategy_catalog(db, instrument_code=None):
             )
         )
     )
+    all_scopes = list(db.scalars(select(ResearchStrategyScope)))
+    has_scope_table = bool(all_scopes)
+
     catalog = []
     for strategy_id, definition in STRATEGIES.items():
         if definition.get("research_only"):
             continue
-        supported = sorted(supported_codes)
+        min_warmup = (
+            FACTOR_TEMPLATES[strategy_id]["min_warmup_bars"]
+            if is_factor_template(strategy_id)
+            else SHARED_WARMUP_BARS
+        )
+        scopes_for_strategy = [
+            scope for scope in all_scopes if scope.strategy_id == strategy_id
+        ]
+        if has_scope_table:
+            universal_scope = next(
+                (scope for scope in scopes_for_strategy if scope.scope_type == "universal"),
+                None,
+            )
+            cat_scopes = {
+                scope.category_name: scope
+                for scope in scopes_for_strategy
+                if scope.scope_type == "category"
+            }
+            scope_type = "universal" if universal_scope else "category"
+            bound_categories = sorted(cat_scopes)
+            supported = []
+            adoptable_instruments = []
+            for code in supported_codes:
+                category = bounds.get(code, {}).get("category", "未分类")
+                matched_scope = cat_scopes.get(category) or universal_scope
+                if matched_scope is None:
+                    continue
+                supported.append(code)
+                if matched_scope.adoptable:
+                    adoptable_instruments.append(code)
+            evidence_by_category = {
+                scope.category_name: {
+                    "scope_type": scope.scope_type,
+                    "research_version": scope.research_version,
+                    "evidence_tier": scope.evidence_tier,
+                    "adoptable": scope.adoptable,
+                    "evidence_summary": scope.evidence_summary,
+                }
+                for scope in scopes_for_strategy
+            }
+            adoptable_flag = bool(adoptable_instruments)
+        else:
+            scope_type = "universal"
+            bound_categories = []
+            supported = list(supported_codes)
+            adoptable_flag = definition.get("adoptable", True)
+            adoptable_instruments = list(supported) if adoptable_flag else []
+            evidence_by_category = {}
+
+        earliest_start_by_instrument = {
+            code: _earliest_start_for_strategy(
+                strategy_id,
+                bounds.get(code, {"category": "未分类", "verified": [], "usable": []}),
+            )
+            for code in supported
+        }
         strategy_factors = []
         for relation in relations:
             if relation.strategy_id != strategy_id:
@@ -101,6 +245,13 @@ def strategy_catalog(db, instrument_code=None):
                 "id": strategy_id,
                 "name": definition["name"],
                 "description": definition["description"],
+                "adoptable": adoptable_flag,
+                "scope_type": scope_type,
+                "bound_categories": bound_categories,
+                "adoptable_instruments": adoptable_instruments,
+                "min_warmup_bars": min_warmup,
+                "earliest_start_by_instrument": earliest_start_by_instrument,
+                "evidence_by_category": evidence_by_category,
                 "factors": strategy_factors,
                 "supported_instruments": supported,
             }
@@ -117,13 +268,25 @@ def strategy_catalog(db, instrument_code=None):
     }
 
 
-def _candidate(strategy, code):
+def _candidate(strategy, code, *, allow_unadoptable=False, db=None):
     definition = STRATEGIES.get(strategy)
-    if (
-        not definition
-        or definition.get("research_only")
-        or not supports_template(strategy, "1.0.0", code)
-    ):
+    if not definition or definition.get("research_only"):
+        raise HTTPException(422, "策略不可用或未覆盖这只ETF")
+    scope = _resolve_strategy_scope(db, strategy, code) if db is not None else None
+    if scope is False:
+        raise HTTPException(422, "该策略未绑定到当前ETF所属研究分类，不可比较或采用")
+    can_adopt = scope.adoptable if scope is not None else definition.get("adoptable", True)
+    if not allow_unadoptable and not can_adopt:
+        raise HTTPException(422, "该策略在当前分类尚未达到研究采用门槛，仅用于比较观察")
+    if is_factor_template(strategy):
+        template = factor_template_snapshot(strategy, code)
+        return {
+            "id": strategy,
+            "name": template["name"],
+            "factor_template": template,
+            "allocation": 100,
+        }
+    if not supports_template(strategy, "1.0.0", code):
         raise HTTPException(422, "策略不可用或未覆盖这只ETF")
     template = template_snapshot(strategy, "1.0.0", code)
     return {
@@ -155,27 +318,56 @@ def execute_candidate(candidate, snapshot):
     if begin is None or begin < 1:
         raise ValueError("区间没有完整交易日或缺少前一交易日预热")
     template = candidate.get("template")
-    if template and begin < SHARED_WARMUP_BARS:
+    factor_template = candidate.get("factor_template")
+    active_template = template or factor_template
+    min_warmup = (
+        factor_template["min_warmup_bars"]
+        if factor_template
+        else SHARED_WARMUP_BARS
+    )
+    warmup_rows = market.get("warmup_rows") if factor_template else None
+    warmup_bars = (len(warmup_rows) - len(rows) + begin) if warmup_rows else begin
+    if active_template and warmup_bars < min_warmup:
         raise ValueError(
-            f"回测开始前需要至少{SHARED_WARMUP_BARS}个有效交易日预热，请调晚开始日期"
+            f"回测开始前需要至少{min_warmup}个有效交易日预热，请调晚开始日期"
         )
+    strategy_key = (
+        "factor_strategy"
+        if factor_template
+        else "algorithm_template"
+        if template
+        else "hold"
+    )
+    candidate_external = snapshot["external"]
+    if factor_template and warmup_rows:
+        candidate_external = {
+            **snapshot["external"],
+            "warmup_rows": warmup_rows,
+            "warmup_dividends": market.get("warmup_dividends"),
+        }
     settings = {
         **common,
-        "strategy_key": "algorithm_template" if template else "hold",
+        "strategy_key": strategy_key,
         "parameters": {
-            "template": template,
-            "external": snapshot["external"],
+            "template": active_template,
+            "external": candidate_external,
             "decision_start": rows[begin - 1]["trade_date"],
             "slippage_bps": common["slippage_bps"],
         }
-        if template
+        if active_template
         else {},
     }
-    if template:
+    if active_template:
         from app.algorithm_templates import prepare_template
 
-        decisions = prepare_template(
-            rows, market["actions"]["dividends"], settings["parameters"]
+        decisions = (
+            prepare_factor_template(
+                rows, market["actions"]["dividends"], settings["parameters"]
+            )
+            if factor_template
+            else prepare_template(
+                rows, market["actions"]["dividends"], settings["parameters"]
+            )
         )
         missing = next(
             (
@@ -245,14 +437,27 @@ def compare(body: ComparisonRequest):
             strategy = STRATEGIES.get(strategy_id)
             if not strategy or strategy.get("research_only"):
                 raise HTTPException(422, "策略不可用或仅供离线研究")
-            candidates.append(_candidate(strategy_id, body.instrument_code))
+            candidates.append(
+                _candidate(
+                    strategy_id,
+                    body.instrument_code,
+                    allow_unadoptable=True,
+                    db=db,
+                )
+            )
         candidates.append({"id": "hold", "name": "一直持有", "allocation": 100})
         settings = CommonSettings(**body.model_dump(exclude={"strategies"})).model_dump(
             mode="json"
         )
+        has_factor = any(c.get("factor_template") for c in candidates)
         try:
             market = market_snapshot(
-                db, body.instrument_code, body.end_date, interval_start=body.start_date
+                db,
+                body.instrument_code,
+                body.end_date,
+                interval_start=body.start_date,
+                allow_verified_suspensions=True,
+                include_warmup_rows=has_factor,
             )
         except ValueError as exc:
             market = {"error": str(exc)}
@@ -264,6 +469,18 @@ def compare(body: ComparisonRequest):
         external = external_snapshot(
             db, body.instrument_code, valuation_metrics, body.end_date
         )
+        factor_requirements = {
+            req
+            for c in candidates
+            if c.get("factor_template")
+            for req in c["factor_template"]["external_requirements"]
+        }
+        if factor_requirements:
+            external.update(
+                factor_external_snapshot(
+                    db, body.instrument_code, body.end_date, factor_requirements
+                )
+            )
         snapshot = {
             "settings": settings,
             "candidates": candidates,
@@ -421,6 +638,14 @@ def adopt(body: AdoptionRequest):
         strategy = STRATEGIES.get(body.strategy_id)
         if not strategy or strategy.get("research_only"):
             raise HTTPException(422, "该策略仅供离线研究")
+        scope = _resolve_strategy_scope(db, body.strategy_id, comparison.instrument_code)
+        if scope is False:
+            raise HTTPException(422, "该策略未绑定到当前ETF所属研究分类，不可采用")
+        can_adopt = (
+            scope.adoptable if scope is not None else strategy.get("adoptable", True)
+        )
+        if not can_adopt:
+            raise HTTPException(422, "该策略在当前分类尚未达到研究采用门槛，仅用于比较观察")
         db.execute(
             text("SELECT pg_advisory_xact_lock(:key)"),
             {"key": 800000000 + int(comparison.instrument_code)},

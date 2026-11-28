@@ -14,7 +14,10 @@ from app.models import (
     Candle,
     IndexValuationDaily,
     InstrumentIndexLink,
+    InstrumentVerifiedSuspension,
+    MarketFearGreedDaily,
 )
+from app.shared_etf_snapshot import normalize_split_history
 
 VALUATIONS = {
     "pe_percentile": "pe",
@@ -25,7 +28,15 @@ VALUATIONS = {
 }
 
 
-def market_snapshot(db, code, end, collected_before=None, interval_start=None):
+def market_snapshot(
+    db,
+    code,
+    end,
+    collected_before=None,
+    interval_start=None,
+    allow_verified_suspensions=False,
+    include_warmup_rows=False,
+):
     """读取同事务行情与权益并校验完整日历，保留原始证据。
 
     Args:
@@ -34,6 +45,8 @@ def market_snapshot(db, code, end, collected_before=None, interval_start=None):
         end: 最后纳入的源日期。
         collected_before: 盘前决策允许的最晚本地采集时间；历史研究为空。
         interval_start: 研究或信号区间起点；起点前的折算行情会被排除并重新预热。
+        allow_verified_suspensions: 是否放行经跨源核验的真实停牌交易日。
+        include_warmup_rows: 当起点前存在折算时，是否附带标准化全历史用于因子长周期预热。
 
     Returns:
         可独立复算的行情、权益、来源与日历快照。
@@ -60,7 +73,7 @@ def market_snapshot(db, code, end, collected_before=None, interval_start=None):
     candles = list(db.scalars(statement))
     if not candles:
         raise ValueError("本地ETF行情缺失，请先采集")
-    rows = [
+    all_rows = [
         {
             "trade_date": str(row.date),
             **{
@@ -72,14 +85,50 @@ def market_snapshot(db, code, end, collected_before=None, interval_start=None):
         }
         for row in candles
     ]
-    if interval_start is not None:
-        rows = post_split_rows(rows, source.corporate_actions["splits"], interval_start)
+    rows = (
+        post_split_rows(all_rows, source.corporate_actions["splits"], interval_start)
+        if interval_start is not None
+        else all_rows
+    )
     days, calendar_version = trading_days(rows[0]["trade_date"], str(end))
     if not days or days[-1] != rows[-1]["trade_date"]:
         raise ValueError("截止日前完整交易日行情缺失，请补采或明确调整区间")
-    validate_market(rows, source.corporate_actions)
+    verified_suspensions = ()
+    if allow_verified_suspensions:
+        verified_suspensions = sorted(
+            str(item.trade_date)
+            for item in db.scalars(
+                select(InstrumentVerifiedSuspension).where(
+                    InstrumentVerifiedSuspension.instrument_code == code,
+                    InstrumentVerifiedSuspension.trade_date <= end,
+                )
+            )
+            if isinstance(item.sources, list) and len(item.sources) >= 2
+        )
+    validate_market(
+        rows,
+        source.corporate_actions,
+        verified_suspensions=verified_suspensions,
+    )
+    warmup_payload = {}
+    if include_warmup_rows and len(all_rows) > len(rows):
+        validate_market(
+            all_rows,
+            source.corporate_actions,
+            allow_splits=True,
+            verified_suspensions=verified_suspensions,
+            ignore_pre_calendar_boundary=True,
+        )
+        warmup_rows, warmup_actions, _ = normalize_split_history(
+            all_rows, source.corporate_actions
+        )
+        warmup_payload = {
+            "warmup_rows": warmup_rows,
+            "warmup_dividends": warmup_actions["dividends"],
+        }
     return {
         "rows": rows,
+        **warmup_payload,
         "actions": source.corporate_actions,
         "source": {
             "source_url": source.source_url,
@@ -162,3 +211,60 @@ def external_snapshot(db, code, metrics, end, collected_before=None):
             for row, value in zip(records, values, strict=True)
         }
     return result
+
+
+def factor_external_snapshot(db, code, end, requirements, collected_before=None):
+    """为基于因子表达式的比较与采用策略读取严格截至期末及采集时刻的外部上下文。"""
+    payload = {}
+    if "valuation" in requirements:
+        links = list(
+            db.scalars(
+                select(InstrumentIndexLink.index_code).where(
+                    InstrumentIndexLink.instrument_code == code
+                )
+            )
+        )
+        valuation_rows = []
+        if len(links) == 1:
+            query = (
+                select(IndexValuationDaily)
+                .where(
+                    IndexValuationDaily.index_code == links[0],
+                    IndexValuationDaily.trade_date <= end,
+                )
+                .order_by(
+                    IndexValuationDaily.trade_date, IndexValuationDaily.metric_key
+                )
+            )
+            if collected_before:
+                query = query.where(
+                    IndexValuationDaily.collected_at <= collected_before
+                )
+            valuation_rows = [
+                {
+                    "trade_date": str(row.trade_date),
+                    "metric_key": row.metric_key,
+                    "metric_value": str(row.metric_value),
+                    "value_status": row.value_status,
+                }
+                for row in db.scalars(query)
+            ]
+        payload["valuation_rows"] = valuation_rows
+    if "market_fear_greed" in requirements:
+        query = (
+            select(MarketFearGreedDaily)
+            .where(MarketFearGreedDaily.trade_date <= end)
+            .order_by(MarketFearGreedDaily.trade_date)
+        )
+        if collected_before:
+            query = query.where(
+                MarketFearGreedDaily.collected_at <= collected_before
+            )
+        payload["market_rows"] = [
+            {
+                "trade_date": str(row.trade_date),
+                "fear_greed_score": str(row.fear_greed_score),
+            }
+            for row in db.scalars(query)
+        ]
+    return payload

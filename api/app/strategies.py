@@ -119,6 +119,24 @@ def get_strategy(key):
             "prepare": prepare_template,
             "validate": validate_template_parameters,
         }
+    elif key == "factor_strategy" and key not in REGISTRY:
+        from app.factor_strategy_templates import (
+            FACTOR_STRATEGY_VERSION,
+            prepare_factor_template,
+            validate_factor_template_parameters,
+        )
+
+        REGISTRY[key] = {
+            "metadata": {
+                "key": key,
+                "name": "因子表达式策略",
+                "version": FACTOR_STRATEGY_VERSION,
+                "description": "基于已登记原子因子与研究作用域的策略模板，按结论仅观察或开放盘前采用",
+                "parameters": [],
+            },
+            "prepare": prepare_factor_template,
+            "validate": validate_factor_template_parameters,
+        }
     if key not in REGISTRY:
         raise ValueError("策略未注册")
     return REGISTRY[key]
@@ -131,7 +149,7 @@ def strategy_catalog():
 
 def validate_parameters(key, parameters):
     """按注册参数约束校验，拒绝未知字段或越界值。"""
-    if key == "algorithm_template":
+    if key in ("algorithm_template", "factor_strategy"):
         get_strategy(key)["validate"](parameters)
         return
     definitions = get_strategy(key)["metadata"]["parameters"]

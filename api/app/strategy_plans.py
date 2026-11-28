@@ -8,8 +8,13 @@ from app.account_state import latest_holdings
 from app.algorithm_templates import prepare_template
 from app.backtest_routes import digest
 from app.db import Session
+from app.factor_strategy_templates import prepare_factor_template
 from app.models import AccountSyncRun, InstrumentStrategyAssignment, StrategySignal
-from app.strategy_inputs import external_snapshot, market_snapshot
+from app.strategy_inputs import (
+    external_snapshot,
+    factor_external_snapshot,
+    market_snapshot,
+)
 
 
 def make_assignment_plan(db, assignment, at, cutoff, execution):
@@ -31,33 +36,62 @@ def make_assignment_plan(db, assignment, at, cutoff, execution):
     from app.strategy_workbench import _candidate
 
     rule = assignment.settings_snapshot
-    candidate = _candidate(assignment.strategy_id, assignment.instrument_code)
-    template = candidate["template"]
+    candidate = _candidate(assignment.strategy_id, assignment.instrument_code, db=db)
+    factor_template = candidate.get("factor_template")
+    template = factor_template or candidate["template"]
     parameters = {
         "template": template,
         "decision_start": rule["decision_start"],
         "slippage_bps": rule["slippage_bps"],
         "external": {},
     }
-    market = market_snapshot(
-        db,
-        assignment.instrument_code,
-        cutoff,
-        at,
-        interval_start=parameters["decision_start"],
-    )
-    value_metric = template["rule"]["value_metric"]
-    external = external_snapshot(
-        db,
-        assignment.instrument_code,
-        [value_metric] if value_metric != "none" else [],
-        cutoff,
-        at,
-    )
-    parameters["external"] = external
-    prepared = prepare_template(
-        market["rows"], market["actions"]["dividends"], parameters
-    )
+    if factor_template:
+        market = market_snapshot(
+            db,
+            assignment.instrument_code,
+            cutoff,
+            at,
+            interval_start=parameters["decision_start"],
+            allow_verified_suspensions=True,
+            include_warmup_rows=True,
+        )
+        external = factor_external_snapshot(
+            db,
+            assignment.instrument_code,
+            cutoff,
+            factor_template["external_requirements"],
+            collected_before=at,
+        )
+        if market.get("warmup_rows"):
+            external = {
+                **external,
+                "warmup_rows": market["warmup_rows"],
+                "warmup_dividends": market.get("warmup_dividends"),
+            }
+        parameters["external"] = external
+        prepared = prepare_factor_template(
+            market["rows"], market["actions"]["dividends"], parameters
+        )
+    else:
+        market = market_snapshot(
+            db,
+            assignment.instrument_code,
+            cutoff,
+            at,
+            interval_start=parameters["decision_start"],
+        )
+        value_metric = template["rule"]["value_metric"]
+        external = external_snapshot(
+            db,
+            assignment.instrument_code,
+            [value_metric] if value_metric != "none" else [],
+            cutoff,
+            at,
+        )
+        parameters["external"] = external
+        prepared = prepare_template(
+            market["rows"], market["actions"]["dividends"], parameters
+        )
     if str(cutoff) < parameters["decision_start"]:
         raise ValueError("采用起点之后尚无完整决策行情")
     point = prepared[-1]
@@ -177,6 +211,32 @@ def make_assignment_plan(db, assignment, at, cutoff, execution):
         warnings.append("买入必须人工核验可用现金；研究预算并不代表真实账户现金")
     if action == "sell" and executable < requested:
         warnings.append("真实可用份额不足，可能受T+1或冻结限制")
+    indicators = point["indicators"]
+    if "buy" in indicators and "sell" in indicators:
+        conditions = {
+            side: [
+                {"label": key, "satisfied": value, "value": value}
+                for key, value in indicators[side].items()
+            ]
+            for side in ("buy", "sell")
+        }
+    else:
+        conditions = {
+            "buy": [
+                {
+                    "label": indicators.get("entry_expression", "因子入场条件"),
+                    "satisfied": bool(indicators.get("entry_match")),
+                    "value": bool(indicators.get("entry_match")),
+                }
+            ],
+            "sell": [
+                {
+                    "label": indicators.get("exit_expression", "因子退出条件"),
+                    "satisfied": bool(indicators.get("exit_match")),
+                    "value": bool(indicators.get("exit_match")),
+                }
+            ],
+        }
     return {
         "action": action,
         "rule_target": decision.target,
@@ -196,14 +256,8 @@ def make_assignment_plan(db, assignment, at, cutoff, execution):
         "requested_quantity": str(requested),
         "planned_quantity": str(executable),
         "reason": decision.reason,
-        "conditions": {
-            side: [
-                {"label": key, "satisfied": value, "value": value}
-                for key, value in point["indicators"][side].items()
-            ]
-            for side in ("buy", "sell")
-        },
-        "indicators": point["indicators"],
+        "conditions": conditions,
+        "indicators": indicators,
         "funding_check_required": action == "buy",
         "availability_limited": executable < requested,
         "warnings": warnings,
